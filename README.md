@@ -39,7 +39,7 @@ func main() {
     // Create a new Registry Authority client
     client, err := ans.NewClient(
         ans.WithBaseURL("https://api.godaddy.com"),
-        ans.WithJWT("your-jwt-token"),
+        ans.WithAPIKey("your-api-key", "your-api-secret"),
         ans.WithVerbose(true),
     )
     if err != nil {
@@ -58,6 +58,23 @@ func main() {
                 AgentURL:   "https://my-agent.example.com/mcp",
                 Protocol:   "MCP",
                 Transports: []string{"STREAMABLE-HTTP"},
+                Functions: []models.AgentFunction{
+                    {
+                        ID:   "search",
+                        Name: "Web Search",
+                        Tags: []string{"search", "web", "retrieval"},
+                    },
+                    {
+                        ID:   "summarize",
+                        Name: "Text Summarizer",
+                        Tags: []string{"nlp", "summarization", "text"},
+                    },
+                    {
+                        ID:   "translate",
+                        Name: "Language Translator",
+                        Tags: []string{"nlp", "translation", "i18n"},
+                    },
+                },
             },
         },
     }
