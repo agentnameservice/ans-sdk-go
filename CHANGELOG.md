@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/godaddy/ans-sdk-go/compare/v0.1.4...v0.1.5) (2026-03-10)
+
+
+### Documentation
+
+* update README with API key usage and add agent functions ([#10](https://github.com/godaddy/ans-sdk-go/issues/10)) ([1de82f4](https://github.com/godaddy/ans-sdk-go/commit/1de82f4c537e40179f4b5c4dc85ebe78bd0c7144))
+
 ## [0.1.4](https://github.com/godaddy/ans-sdk-go/compare/v0.1.3...v0.1.4) (2026-03-04)
 
 
