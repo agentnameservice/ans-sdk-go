@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/godaddy/ans-sdk-go/compare/v0.1.5...v0.1.6) (2026-03-30)
+
+
+### Miscellaneous
+
+* **deps:** bump actions/setup-go from 6.3.0 to 6.4.0 ([#12](https://github.com/godaddy/ans-sdk-go/issues/12)) ([0b2c2c0](https://github.com/godaddy/ans-sdk-go/commit/0b2c2c0cded43a7517843c28c9bcb33c0398814f))
+
 ## [0.1.5](https://github.com/godaddy/ans-sdk-go/compare/v0.1.4...v0.1.5) (2026-03-10)
 
 
