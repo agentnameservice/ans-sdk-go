@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -1904,6 +1905,34 @@ func TestValidateBadgeURL(t *testing.T) {
 	}
 }
 
+func TestConfigLogger(t *testing.T) {
+	tests := []struct {
+		name      string
+		logger    *slog.Logger
+		wantIsNil bool
+	}{
+		{
+			name:   "custom logger returned",
+			logger: slog.Default(),
+		},
+		{
+			name:   "nil logger returns slog.Default",
+			logger: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			cfg.logger = tt.logger
+			result := configLogger(cfg)
+			if result == nil {
+				t.Error("configLogger() returned nil")
+			}
+		})
+	}
+}
+
 func TestServerVerifier_VerifyWithScitt_NilHeaders(t *testing.T) {
 	host := "test.example.com"
 	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
@@ -2015,6 +2044,104 @@ func TestClientVerifier_VerifyWithScitt_NilHeaders(t *testing.T) {
 
 	cert := createMTLSCertIdentity(host, version, fingerprint)
 	result := verifier.VerifyWithScitt(context.Background(), cert, nil)
+	if !result.IsSuccess() {
+		t.Errorf("expected success (badge fallback), got %v: %v", result.Type, result.Error)
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_PartialHeaders(t *testing.T) {
+	verifier := NewClientVerifier(WithoutURLValidation())
+
+	host := "test.example.com"
+	version := "v1.0.0"
+	cert := createMTLSCertIdentity(host, version, "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+
+	tests := []struct {
+		name    string
+		headers *scitt.Headers
+	}{
+		{name: "only receipt", headers: &scitt.Headers{Receipt: []byte{1, 2, 3}}},
+		{name: "only token", headers: &scitt.Headers{StatusToken: []byte{1, 2, 3}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := verifier.VerifyWithScitt(context.Background(), cert, tt.headers)
+			if result.Type != OutcomeScittError {
+				t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+			}
+		})
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NoKeyLookup(t *testing.T) {
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	host := "test.example.com"
+	version := "v1.0.0"
+	cert := createMTLSCertIdentity(host, version, "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), cert, headers)
+	if result.Type != OutcomeScittError {
+		t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "no key lookup configured") {
+		t.Errorf("expected error about missing key lookup, got: %v", result.Error)
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NoCN(t *testing.T) {
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	// Cert with no CN or DNS SANs — FQDN() returns nil
+	fp, _ := ParseCertFingerprint("SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+	cert := NewCertIdentity(nil, nil, []string{"ans://v1.0.0.test.example.com"}, fp)
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), cert, headers)
+	if result.Type != OutcomeCertError {
+		t.Errorf("Type = %v, want OutcomeCertError", result.Type)
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_EmptyHeaders(t *testing.T) {
+	host := "test.example.com"
+	version := "v1.0.0"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, version, "SHA256:aaa", fingerprint)
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+		WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+		WithoutURLValidation(),
+	)
+
+	cert := createMTLSCertIdentity(host, version, fingerprint)
+	result := verifier.VerifyWithScitt(context.Background(), cert, &scitt.Headers{})
 	if !result.IsSuccess() {
 		t.Errorf("expected success (badge fallback), got %v: %v", result.Type, result.Error)
 	}
@@ -2150,6 +2277,126 @@ func TestVerifyWithScitt_PolicyEnforcement(t *testing.T) {
 				if outcome.DANEOutcome == nil {
 					t.Error("expected DANEOutcome to be populated for DANE-configured path")
 				}
+			}
+		})
+	}
+}
+
+func TestAnsVerifier_VerifyServerWithScitt(t *testing.T) {
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	tests := []struct {
+		name     string
+		fqdn     string
+		headers  *scitt.Headers
+		wantType OutcomeType
+	}{
+		{
+			name:     "nil headers falls back to badge",
+			fqdn:     host,
+			headers:  nil,
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "empty headers falls back to badge",
+			fqdn:     host,
+			headers:  &scitt.Headers{},
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "invalid fqdn returns CertError",
+			fqdn:     "",
+			headers:  nil,
+			wantType: OutcomeCertError,
+		},
+		{
+			name:     "partial headers returns ScittError",
+			fqdn:     host,
+			headers:  &scitt.Headers{Receipt: []byte{1, 2}},
+			wantType: OutcomeScittError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verifier := NewAnsVerifier(
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+			)
+
+			cert := createTestCertIdentity(host, fingerprint)
+			outcome := verifier.VerifyServerWithScitt(context.Background(), tt.fqdn, cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
+			}
+		})
+	}
+}
+
+func TestAnsVerifier_VerifyClientWithScitt(t *testing.T) {
+	host := "test.example.com"
+	version := "v1.0.0"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, version, "SHA256:aaa", fingerprint)
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	tests := []struct {
+		name     string
+		headers  *scitt.Headers
+		wantType OutcomeType
+	}{
+		{
+			name:     "nil headers falls back to badge",
+			headers:  nil,
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "empty headers falls back to badge",
+			headers:  &scitt.Headers{},
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "partial headers (only receipt) returns ScittError",
+			headers:  &scitt.Headers{Receipt: []byte{1, 2}},
+			wantType: OutcomeScittError,
+		},
+		{
+			name:     "partial headers (only token) returns ScittError",
+			headers:  &scitt.Headers{StatusToken: []byte{1, 2}},
+			wantType: OutcomeScittError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verifier := NewAnsVerifier(
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+			)
+
+			cert := createMTLSCertIdentity(host, version, fingerprint)
+			outcome := verifier.VerifyClientWithScitt(context.Background(), cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
 			}
 		})
 	}

@@ -914,6 +914,53 @@ func TestBadgeCache_CleanupLocked_VersionedEntries(t *testing.T) {
 	}
 }
 
+func TestBadgeCache_CleanupLocked_MaxEntriesEviction_VersionedOverflow(t *testing.T) {
+	config := CacheConfig{
+		MaxEntries:     3,
+		DefaultTTL:     5 * time.Minute,
+		StaleRetention: 10 * time.Minute,
+	}
+	cache := NewBadgeCache(config)
+
+	badge := &models.Badge{
+		Status:        models.BadgeStatusActive,
+		SchemaVersion: "V1",
+		Payload: models.BadgePayload{
+			LogID: "test",
+			Producer: models.Producer{
+				KeyID:     "k",
+				Signature: "s",
+				Event: models.AgentEvent{
+					ANSID:   "id",
+					ANSName: "ans://v1.0.0.test.example.com",
+					Agent: models.AgentInfo{
+						Host:    "test.example.com",
+						Name:    "Test",
+						Version: "v1.0.0",
+					},
+					IssuedAt:  time.Now(),
+					Timestamp: time.Now(),
+				},
+			},
+		},
+	}
+
+	// Insert more versioned entries than MaxEntries to trigger byFqdnVer eviction
+	for i := range 5 {
+		fqdn, _ := models.NewFqdn("host" + string(rune('a'+i)) + ".example.com")
+		v := models.NewVersion(uint32(i+1), 0, 0)
+		cache.InsertForVersion(fqdn, v, badge)
+	}
+
+	cache.mu.RLock()
+	total := len(cache.byFqdn) + len(cache.byFqdnVer)
+	cache.mu.RUnlock()
+
+	if total > config.MaxEntries {
+		t.Errorf("cache has %d entries, expected at most %d", total, config.MaxEntries)
+	}
+}
+
 func TestURLValidationError_UnknownType(t *testing.T) {
 	err := &URLValidationError{Type: URLErrorType(99), URL: "http://test.com"}
 	got := err.Error()

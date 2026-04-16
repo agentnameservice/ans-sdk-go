@@ -8,10 +8,15 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Execute runs the root command
-func Execute() {
+// Run builds and executes the root command, returning any error.
+func Run() error {
 	rootCmd := buildRootCmd()
-	if err := rootCmd.Execute(); err != nil {
+	return rootCmd.Execute()
+}
+
+// Execute runs the root command and exits on error.
+func Execute() {
+	if err := Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

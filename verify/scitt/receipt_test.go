@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -610,6 +611,72 @@ func TestVerifyReceiptP1363ToDER(t *testing.T) {
 			}
 			if !tt.wantErr && !valid {
 				t.Error("expected verification success, got failure")
+			}
+		})
+	}
+}
+
+func TestExtractVDP_ErrorPaths(t *testing.T) {
+	dm, _ := newDecMode()
+
+	tests := []struct {
+		name        string
+		unprotected cbor.RawMessage
+		wantErr     string
+	}{
+		{
+			name: "invalid CBOR in unprotected header",
+			unprotected: func() cbor.RawMessage {
+				return cbor.RawMessage{0xFF, 0xFF, 0xFF}
+			}(),
+			wantErr: "failed to decode unprotected header map",
+		},
+		{
+			name: "missing VDP key 396",
+			unprotected: func() cbor.RawMessage {
+				m := map[int64]int{99: 1}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "missing VDP",
+		},
+		{
+			name: "VDP not an array",
+			unprotected: func() cbor.RawMessage {
+				m := map[int64]interface{}{396: "not-an-array"}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "failed to decode VDP array",
+		},
+		{
+			name: "VDP array is empty",
+			unprotected: func() cbor.RawMessage {
+				m := map[int64]interface{}{396: []interface{}{}}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "VDP array is empty",
+		},
+		{
+			name: "proof element is not an array",
+			unprotected: func() cbor.RawMessage {
+				m := map[int64]interface{}{396: []interface{}{"not-a-proof"}}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "failed to decode inclusion proof",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, err := extractVDP(dm, tt.unprotected)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
 			}
 		})
 	}

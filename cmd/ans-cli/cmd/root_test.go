@@ -59,3 +59,44 @@ func TestInitConfig(_ *testing.T) {
 	// initConfig should not panic
 	initConfig()
 }
+
+func TestRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{
+			name:    "no args shows help without error",
+			args:    []string{},
+			wantErr: false,
+		},
+		{
+			name:    "unknown command returns error",
+			args:    []string{"nonexistent-command"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Run() builds a fresh root command each call, so
+			// we call it directly — but we can't inject args into Run().
+			// Instead test via the extracted buildRootCmd + Execute pattern.
+			cmd := buildRootCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRun_Success(t *testing.T) {
+	// Run() itself should succeed for the default (help) case
+	err := Run()
+	if err != nil {
+		t.Errorf("Run() unexpected error: %v", err)
+	}
+}

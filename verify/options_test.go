@@ -118,10 +118,46 @@ func TestWithScittKeyLookup(t *testing.T) {
 }
 
 func TestWithClockSkewTolerance(t *testing.T) {
-	cfg := defaultConfig()
-	WithClockSkewTolerance(5 * time.Minute)(cfg)
-	if cfg.clockSkewTolerance != 5*time.Minute {
-		t.Errorf("expected 5m, got %v", cfg.clockSkewTolerance)
+	tests := []struct {
+		name string
+		d    time.Duration
+		want time.Duration
+	}{
+		{
+			name: "normal value",
+			d:    5 * time.Minute,
+			want: 5 * time.Minute,
+		},
+		{
+			name: "negative clamped to zero",
+			d:    -1 * time.Second,
+			want: 0,
+		},
+		{
+			name: "exceeds max clamped to 10 minutes",
+			d:    15 * time.Minute,
+			want: 10 * time.Minute,
+		},
+		{
+			name: "zero stays zero",
+			d:    0,
+			want: 0,
+		},
+		{
+			name: "exactly 10 minutes allowed",
+			d:    10 * time.Minute,
+			want: 10 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			WithClockSkewTolerance(tt.d)(cfg)
+			if cfg.clockSkewTolerance != tt.want {
+				t.Errorf("expected %v, got %v", tt.want, cfg.clockSkewTolerance)
+			}
+		})
 	}
 }
 

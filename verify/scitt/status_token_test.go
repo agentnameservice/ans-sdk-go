@@ -1027,3 +1027,199 @@ func TestCertificateRenewalWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeStatusPayload_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantErr string
+	}{
+		{
+			name:    "empty payload",
+			data:    []byte{},
+			wantErr: "payload is empty",
+		},
+		{
+			name: "non-map CBOR (integer)",
+			data: func() []byte {
+				d, _ := cbor.Marshal(42)
+				return d
+			}(),
+			wantErr: "failed to decode payload",
+		},
+		{
+			name: "non-map CBOR (array)",
+			data: func() []byte {
+				d, _ := cbor.Marshal([]int{1, 2, 3})
+				return d
+			}(),
+			wantErr: "failed to decode payload",
+		},
+		{
+			name: "missing agent_id",
+			data: func() []byte {
+				m := map[interface{}]interface{}{
+					int64(2): "ACTIVE",
+					int64(4): time.Now().Add(time.Hour).Unix(),
+				}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "agent_id",
+		},
+		{
+			name: "missing status",
+			data: func() []byte {
+				m := map[interface{}]interface{}{
+					int64(1): "agent-1",
+					int64(4): time.Now().Add(time.Hour).Unix(),
+				}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "status",
+		},
+		{
+			name: "missing exp",
+			data: func() []byte {
+				m := map[interface{}]interface{}{
+					int64(1): "agent-1",
+					int64(2): "ACTIVE",
+				}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "exp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodeStatusPayload(tt.data)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !containsString(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDecodeStringField_InvalidCBOR(t *testing.T) {
+	dm, _ := newDecMode()
+
+	tests := []struct {
+		name string
+		raw  cbor.RawMessage
+		want string
+	}{
+		{
+			name: "integer instead of string",
+			raw: func() cbor.RawMessage {
+				d, _ := cbor.Marshal(42)
+				return d
+			}(),
+			want: "",
+		},
+		{
+			name: "array instead of string",
+			raw: func() cbor.RawMessage {
+				d, _ := cbor.Marshal([]int{1, 2})
+				return d
+			}(),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeStringField(dm, tt.raw)
+			if got != tt.want {
+				t.Errorf("decodeStringField() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeInt64Field_InvalidCBOR(t *testing.T) {
+	dm, _ := newDecMode()
+
+	tests := []struct {
+		name string
+		raw  cbor.RawMessage
+		want int64
+	}{
+		{
+			name: "string instead of int",
+			raw: func() cbor.RawMessage {
+				d, _ := cbor.Marshal("not-a-number")
+				return d
+			}(),
+			want: 0,
+		},
+		{
+			name: "array instead of int",
+			raw: func() cbor.RawMessage {
+				d, _ := cbor.Marshal([]string{"a"})
+				return d
+			}(),
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeInt64Field(dm, tt.raw)
+			if got != tt.want {
+				t.Errorf("decodeInt64Field() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewPayloadFieldGetter_StringKeyFallback(t *testing.T) {
+	// Build a payload map with only string keys (no integer keys)
+	rawMap := make(map[interface{}]cbor.RawMessage)
+	agentIDBytes, _ := cbor.Marshal("agent-from-string-key")
+	rawMap["agent_id"] = agentIDBytes
+	statusBytes, _ := cbor.Marshal("ACTIVE")
+	rawMap["status"] = statusBytes
+
+	get := newPayloadFieldGetter(rawMap)
+
+	tests := []struct {
+		name   string
+		intKey uint64
+		strKey string
+		want   bool
+	}{
+		{
+			name:   "string key found for agent_id",
+			intKey: 1,
+			strKey: "agent_id",
+			want:   true,
+		},
+		{
+			name:   "string key found for status",
+			intKey: 2,
+			strKey: "status",
+			want:   true,
+		},
+		{
+			name:   "key not found at all",
+			intKey: 99,
+			strKey: "nonexistent",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := get(tt.intKey, tt.strKey)
+			if ok != tt.want {
+				t.Errorf("get(%d, %q) found = %v, want %v", tt.intKey, tt.strKey, ok, tt.want)
+			}
+		})
+	}
+}

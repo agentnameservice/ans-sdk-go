@@ -5,8 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -229,6 +232,14 @@ func TestParsePrivateKeyPEM(t *testing.T) {
 	ecPEM, _ := PrivateKeyToPEM(ecKey, nil)
 	ecEncPEM, _ := PrivateKeyToPEM(ecKey, []byte("password"))
 
+	// Build a PKCS8-encoded EC key PEM (not EC-specific format)
+	// This exercises the x509.ParsePKCS8PrivateKey path in ParsePrivateKeyPEM
+	ecPKCS8DER, _ := x509.MarshalPKCS8PrivateKey(ecKey)
+	ecPKCS8PEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: ecPKCS8DER,
+	})
+
 	tests := []struct {
 		name     string
 		pemData  []byte
@@ -267,6 +278,13 @@ func TestParsePrivateKeyPEM(t *testing.T) {
 			name:     "EC key with correct password",
 			pemData:  ecEncPEM,
 			password: []byte("password"),
+			wantType: "*ecdsa.PrivateKey",
+			wantErr:  false,
+		},
+		{
+			name:     "PKCS8 EC key (exercises PKCS8 parse path)",
+			pemData:  ecPKCS8PEM,
+			password: nil,
 			wantType: "*ecdsa.PrivateKey",
 			wantErr:  false,
 		},
@@ -877,6 +895,103 @@ func TestKeyPair_WritePrivateKeyTo(t *testing.T) {
 			}
 			if !bytes.Equal(buf.Bytes(), kp.PrivateKeyPEM) {
 				t.Error("WritePrivateKeyTo() wrote different bytes than PrivateKeyPEM")
+			}
+		})
+	}
+}
+
+func TestParsePrivateKeyPEM_UnknownFormat(t *testing.T) {
+	// A valid PEM block that doesn't decode as RSA, PKCS8, or EC
+	unknownPEM := []byte("-----BEGIN UNKNOWN KEY-----\nAQIDBAUGBwgJCgsMDQ4PEA==\n-----END UNKNOWN KEY-----\n")
+
+	tests := []struct {
+		name    string
+		pemData []byte
+		wantErr string
+	}{
+		{
+			name:    "unknown key format",
+			pemData: unknownPEM,
+			wantErr: "unknown format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParsePrivateKeyPEM(tt.pemData, nil)
+			if err == nil {
+				t.Fatal("ParsePrivateKeyPEM() expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSavePrivateKeyPEM_WriteToReadOnlyDir(t *testing.T) {
+	rsaKey, err := GenerateRSAKeyPair(2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		pathFn func() string
+	}{
+		{
+			name: "write to read-only directory",
+			pathFn: func() string {
+				dir := t.TempDir()
+				readOnly := filepath.Join(dir, "readonly")
+				if err := os.MkdirAll(readOnly, 0555); err != nil {
+					t.Fatalf("failed to create read-only dir: %v", err)
+				}
+				return filepath.Join(readOnly, "key.pem")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := tt.pathFn()
+			err := SavePrivateKeyPEM(rsaKey, path, nil)
+			if err == nil {
+				t.Error("SavePrivateKeyPEM() expected error for read-only directory")
+			}
+		})
+	}
+}
+
+func TestSavePublicKeyPEM_WriteToReadOnlyDir(t *testing.T) {
+	rsaKey, err := GenerateRSAKeyPair(2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		pathFn func() string
+	}{
+		{
+			name: "write to read-only directory",
+			pathFn: func() string {
+				dir := t.TempDir()
+				readOnly := filepath.Join(dir, "readonly")
+				if err := os.MkdirAll(readOnly, 0555); err != nil {
+					t.Fatalf("failed to create read-only dir: %v", err)
+				}
+				return filepath.Join(readOnly, "key.pub")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := tt.pathFn()
+			err := SavePublicKeyPEM(&rsaKey.PublicKey, path)
+			if err == nil {
+				t.Error("SavePublicKeyPEM() expected error for read-only directory")
 			}
 		})
 	}

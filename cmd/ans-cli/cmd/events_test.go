@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -666,6 +667,57 @@ func TestRunRegisterWithParams(t *testing.T) {
 				tt.transports, tt.functions)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runRegisterWithParams() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunBadgeWithParams_JSONOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		audit      bool
+		checkpoint bool
+	}{
+		{
+			name:       "JSON with audit and checkpoint success",
+			audit:      true,
+			checkpoint: true,
+		},
+		{
+			name:       "JSON no extras",
+			audit:      false,
+			checkpoint: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/v1/agents/agent-123" && r.Method == http.MethodGet && r.URL.RawQuery == "":
+					json.NewEncoder(w).Encode(models.TransparencyLog{
+						Status:        "ACTIVE",
+						SchemaVersion: "V1",
+						Payload:       map[string]any{"logId": "test"},
+					})
+				case strings.Contains(r.URL.Path, "/audit"):
+					json.NewEncoder(w).Encode(models.TransparencyLogAudit{Records: []models.TransparencyLog{}})
+				case strings.Contains(r.URL.Path, "/checkpoint"):
+					json.NewEncoder(w).Encode(models.CheckpointResponse{LogSize: 100})
+				default:
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(map[string]any{})
+				}
+			}))
+			defer server.Close()
+
+			setupViperForTest(t, server.URL)
+			viper.Set("json", true)
+
+			err := runBadgeWithParams("agent-123", tt.audit, tt.checkpoint, server.URL)
+			if err != nil {
+				t.Errorf("runBadgeWithParams() error = %v", err)
 			}
 		})
 	}

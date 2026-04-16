@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -636,4 +637,138 @@ func mustMarshalValue(t *testing.T, v interface{}) []byte {
 		t.Fatalf("mustMarshalValue failed: %v", err)
 	}
 	return data
+}
+
+func TestParseCoseSign1_AdditionalErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantErr string
+	}{
+		{
+			name: "non-array CBOR (map)",
+			data: func() []byte {
+				d, _ := cbor.Marshal(map[string]string{"key": "val"})
+				return d
+			}(),
+			wantErr: "COSE_Sign1 array",
+		},
+		{
+			name: "non-array CBOR (integer)",
+			data: func() []byte {
+				d, _ := cbor.Marshal(42)
+				return d
+			}(),
+			wantErr: "COSE_Sign1 array",
+		},
+		{
+			name: "wrong array length (3 elements)",
+			data: func() []byte {
+				d, _ := cbor.Marshal([]interface{}{[]byte{}, []byte{}, []byte{}})
+				return d
+			}(),
+			wantErr: "expected 4 elements",
+		},
+		{
+			name: "wrong array length (5 elements)",
+			data: func() []byte {
+				d, _ := cbor.Marshal([]interface{}{[]byte{}, []byte{}, []byte{}, []byte{}, []byte{}})
+				return d
+			}(),
+			wantErr: "expected 4 elements",
+		},
+		{
+			name: "protected header not valid CBOR map",
+			data: func() []byte {
+				// Element 0 = protectedBytes that isn't a valid CBOR map
+				d, _ := cbor.Marshal([]interface{}{
+					[]byte{0xFF, 0xFF}, // invalid CBOR as protected header bytes
+					map[int]int{},      // unprotected
+					[]byte("payload"),  // payload
+					[]byte("sig"),      // signature
+				})
+				return d
+			}(),
+			wantErr: "protected header",
+		},
+		{
+			name: "empty payload",
+			data: func() []byte {
+				// Build valid protected header with kid
+				protectedMap := map[int64]interface{}{
+					1: int64(-7),          // alg: ES256
+					4: []byte{1, 2, 3, 4}, // kid (4 bytes)
+				}
+				protectedBytes, _ := cbor.Marshal(protectedMap)
+				d, _ := cbor.Marshal([]interface{}{
+					protectedBytes,
+					map[int]int{},
+					[]byte{},      // empty payload
+					[]byte("sig"), // signature
+				})
+				return d
+			}(),
+			wantErr: "payload",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseCoseSign1(tt.data)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildSigStructure_Success(t *testing.T) {
+	protectedMap := map[int64]interface{}{1: int64(-7)}
+	protectedBytes, _ := cbor.Marshal(protectedMap)
+	payload := []byte("test-payload")
+
+	tests := []struct {
+		name string
+	}{
+		{name: "valid sig structure"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := BuildSigStructure(protectedBytes, payload)
+			if err != nil {
+				t.Fatalf("BuildSigStructure() error = %v", err)
+			}
+			if len(result) == 0 {
+				t.Error("BuildSigStructure() returned empty bytes")
+			}
+		})
+	}
+}
+
+func TestComputeSigStructureDigest_Success(t *testing.T) {
+	protectedMap := map[int64]interface{}{1: int64(-7)}
+	protectedBytes, _ := cbor.Marshal(protectedMap)
+	payload := []byte("test-payload")
+
+	tests := []struct {
+		name string
+	}{
+		{name: "valid digest computation"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			digest, err := ComputeSigStructureDigest(protectedBytes, payload)
+			if err != nil {
+				t.Fatalf("ComputeSigStructureDigest() error = %v", err)
+			}
+			if digest == [sha256.Size]byte{} {
+				t.Error("ComputeSigStructureDigest() returned zero digest")
+			}
+		})
+	}
 }
