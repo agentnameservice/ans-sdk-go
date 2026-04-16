@@ -3,10 +3,12 @@ package verify
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/godaddy/ans-sdk-go/verify/scitt"
 )
 
 func createTestBadge(host, version, serverFP, identityFP string) *models.Badge {
@@ -1897,6 +1899,257 @@ func TestValidateBadgeURL(t *testing.T) {
 				}
 			} else if result != nil {
 				t.Errorf("validateBadgeURL() expected nil, got %v", result)
+			}
+		})
+	}
+}
+
+func TestServerVerifier_VerifyWithScitt_NilHeaders(t *testing.T) {
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+		WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+		WithoutURLValidation(),
+	)
+
+	cert := createTestCertIdentity(host, fingerprint)
+	fqdn, _ := models.NewFqdn(host)
+
+	tests := []struct {
+		name    string
+		headers *scitt.Headers
+	}{
+		{name: "nil headers", headers: nil},
+		{name: "empty headers", headers: &scitt.Headers{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+			if !result.IsSuccess() {
+				t.Errorf("expected success (badge fallback), got %v", result.Type)
+			}
+			if result.Tier != TierBadgeOnly {
+				t.Errorf("Tier = %v, want TierBadgeOnly", result.Tier)
+			}
+		})
+	}
+}
+
+func TestServerVerifier_VerifyWithScitt_PartialHeaders(t *testing.T) {
+	verifier := NewServerVerifier(WithoutURLValidation())
+	fqdn, _ := models.NewFqdn("test.example.com")
+	cert := createTestCertIdentity("test.example.com", "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+
+	tests := []struct {
+		name    string
+		headers *scitt.Headers
+	}{
+		{name: "only receipt", headers: &scitt.Headers{Receipt: []byte{1, 2, 3}}},
+		{name: "only token", headers: &scitt.Headers{StatusToken: []byte{1, 2, 3}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+			if result.Type != OutcomeScittError {
+				t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+			}
+		})
+	}
+}
+
+func TestServerVerifier_VerifyWithScitt_NoKeyLookup(t *testing.T) {
+	// No WithScittKeyLookup — should return ScittError (not silent badge fallback)
+	verifier := NewServerVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	cert := createTestCertIdentity("test.example.com", "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+	fqdn, _ := models.NewFqdn("test.example.com")
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), fqdn, cert, headers)
+	if result.Type != OutcomeScittError {
+		t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error for missing key lookup")
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NilHeaders(t *testing.T) {
+	host := "test.example.com"
+	version := "v1.0.0"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, version, "SHA256:aaa", fingerprint)
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+		WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+		WithoutURLValidation(),
+	)
+
+	cert := createMTLSCertIdentity(host, version, fingerprint)
+	result := verifier.VerifyWithScitt(context.Background(), cert, nil)
+	if !result.IsSuccess() {
+		t.Errorf("expected success (badge fallback), got %v: %v", result.Type, result.Error)
+	}
+}
+
+func TestVerifyWithScitt_PolicyEnforcement(t *testing.T) {
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	// emptyKeyStore is a valid KeyLookup with no keys — receipt parsing will fail
+	// before key lookup is even attempted when given garbage COSE bytes.
+	emptyKeyStore, err := scitt.NewKeyStore(nil)
+	if err != nil {
+		t.Fatalf("NewKeyStore(nil) error: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		headers      *scitt.Headers
+		keyLookup    scitt.KeyLookup
+		daneResolver DANEResolver
+		wantType     OutcomeType
+		wantTier     VerificationTier
+	}{
+		{
+			name: "10.1: SCITT configured, both headers present, receipt parse fails",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0xDE, 0xAD, 0xBE, 0xEF},
+				StatusToken: []byte{0xCA, 0xFE, 0xBA, 0xBE},
+			},
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name: "10.2: SCITT configured, invalid receipt bytes, no fallback to badge",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0x01, 0x02, 0x03},
+				StatusToken: []byte{0x04, 0x05, 0x06},
+			},
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name: "10.3: SCITT configured, malformed COSE receipt, returns SCITT error",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0xFF, 0xFF, 0xFF, 0xFF},
+				StatusToken: []byte{0xAA, 0xBB, 0xCC, 0xDD},
+			},
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name:      "10.4: SCITT configured, headers missing, falls through to badge",
+			headers:   nil,
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeVerified,
+			wantTier:  TierBadgeOnly,
+		},
+		{
+			name: "10.5: SCITT not configured (no key lookup), headers present",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0x01, 0x02, 0x03},
+				StatusToken: []byte{0x04, 0x05, 0x06},
+			},
+			keyLookup: nil,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name:      "10.6: SCITT configured + DANE configured, headers absent, badge+DANE path",
+			headers:   nil,
+			keyLookup: emptyKeyStore,
+			daneResolver: func() DANEResolver {
+				fp, _ := ParseCertFingerprint(fingerprint)
+				return NewMockDANEResolver().
+					WithTLSA(host, 443, TLSALookupResult{
+						Found:       true,
+						DNSSECValid: true,
+						Records: []TLSARecord{
+							{Usage: 3, CertHash: fp.ToHex()},
+						},
+					})
+			}(),
+			wantType: OutcomeVerified,
+			wantTier: TierBadgeOnly,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []Option{
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+			}
+			if tt.keyLookup != nil {
+				opts = append(opts, WithScittKeyLookup(tt.keyLookup))
+			}
+			if tt.daneResolver != nil {
+				opts = append(opts, WithDANEResolver(tt.daneResolver))
+			}
+
+			verifier := NewServerVerifier(opts...)
+			cert := createTestCertIdentity(host, fingerprint)
+			fqdn, _ := models.NewFqdn(host)
+
+			outcome := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
+			}
+			if tt.wantType == OutcomeVerified && outcome.Tier != tt.wantTier {
+				t.Errorf("Tier = %v, want %v", outcome.Tier, tt.wantTier)
+			}
+			if tt.wantType == OutcomeScittError && outcome.Error == nil {
+				t.Error("expected non-nil error for ScittError outcome")
+			}
+			// 10.5: verify error message mentions missing key lookup
+			if tt.name == "10.5: SCITT not configured (no key lookup), headers present" {
+				if outcome.Error == nil || !strings.Contains(outcome.Error.Error(), "no key lookup configured") {
+					t.Errorf("expected error about missing key lookup, got: %v", outcome.Error)
+				}
+			}
+			// 10.6: verify DANE outcome is populated
+			if tt.name == "10.6: SCITT configured + DANE configured, headers absent, badge+DANE path" {
+				if outcome.DANEOutcome == nil {
+					t.Error("expected DANEOutcome to be populated for DANE-configured path")
+				}
 			}
 		})
 	}

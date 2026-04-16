@@ -1,6 +1,8 @@
 package verify
 
 import (
+	"fmt"
+
 	"github.com/godaddy/ans-sdk-go/models"
 )
 
@@ -32,12 +34,42 @@ const (
 	OutcomeURLValidationError
 	// OutcomeDANERejection indicates DANE/TLSA verification rejected the certificate.
 	OutcomeDANERejection
+	// OutcomeScittError indicates a SCITT verification error.
+	OutcomeScittError
 )
+
+// VerificationTier represents the level of SCITT verification achieved.
+type VerificationTier int
+
+const (
+	// TierBadgeOnly indicates only badge-based verification was performed.
+	TierBadgeOnly VerificationTier = iota
+	// TierStatusTokenVerified indicates the status token was cryptographically verified.
+	TierStatusTokenVerified
+	// TierFullScitt indicates both receipt and status token were cryptographically verified.
+	TierFullScitt
+)
+
+// String returns a human-readable representation of the verification tier.
+func (t VerificationTier) String() string {
+	switch t {
+	case TierBadgeOnly:
+		return "BadgeOnly"
+	case TierStatusTokenVerified:
+		return "StatusTokenVerified"
+	case TierFullScitt:
+		return "FullScitt"
+	default:
+		return fmt.Sprintf("VerificationTier(%d)", int(t))
+	}
+}
 
 // VerificationOutcome represents the result of a verification operation.
 type VerificationOutcome struct {
 	// Type is the outcome type.
 	Type OutcomeType
+	// Tier indicates the SCITT verification level achieved (defaults to TierBadgeOnly).
+	Tier VerificationTier
 	// Badge is the badge if verification partially completed (may be nil).
 	Badge *models.Badge
 	// MatchedFingerprint is the fingerprint that matched (for successful verification).
@@ -164,6 +196,24 @@ func NewCertErrorOutcome(err error) *VerificationOutcome {
 	}
 }
 
+// NewScittVerifiedOutcome creates a SCITT-verified outcome with the given tier.
+func NewScittVerifiedOutcome(badge *models.Badge, fingerprint CertFingerprint, tier VerificationTier) *VerificationOutcome {
+	return &VerificationOutcome{
+		Type:               OutcomeVerified,
+		Tier:               tier,
+		Badge:              badge,
+		MatchedFingerprint: &fingerprint,
+	}
+}
+
+// NewScittErrorOutcome creates a SCITT error outcome.
+func NewScittErrorOutcome(err error) *VerificationOutcome {
+	return &VerificationOutcome{
+		Type:  OutcomeScittError,
+		Error: err,
+	}
+}
+
 // IsSuccess returns true if verification was successful or fail-open was applied.
 func (o *VerificationOutcome) IsSuccess() bool {
 	return o.Type == OutcomeVerified || o.Type == OutcomeFailOpen
@@ -219,7 +269,7 @@ func (o *VerificationOutcome) ToError() error {
 		}
 	case OutcomeDANERejection:
 		return o.Error
-	case OutcomeDNSError, OutcomeTlogError, OutcomeCertError, OutcomeURLValidationError:
+	case OutcomeDNSError, OutcomeTlogError, OutcomeCertError, OutcomeURLValidationError, OutcomeScittError:
 		return o.Error
 	default:
 		return o.Error
