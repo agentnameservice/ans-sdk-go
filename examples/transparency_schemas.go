@@ -104,6 +104,15 @@ func printV1Attestations(att *models.AttestationsV1) {
 			"type", att.ServerCert.Type,
 			"fingerprint", att.ServerCert.Fingerprint)
 	}
+	if len(att.MetadataHashes) > 0 {
+		slog.Info("metadata hashes", "count", len(att.MetadataHashes))
+	}
+	if len(att.ValidIdentityCerts) > 0 {
+		slog.Info("valid identity certs", "count", len(att.ValidIdentityCerts))
+	}
+	if len(att.ValidServerCerts) > 0 {
+		slog.Info("valid server certs", "count", len(att.ValidServerCerts))
+	}
 }
 
 func printV0Details(v0Payload *models.TransparencyLogV0) {

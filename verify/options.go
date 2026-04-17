@@ -69,6 +69,11 @@ func WithCacheConfig(cfg CacheConfig) Option {
 }
 
 // WithFailurePolicy sets the failure policy for DNS/TLog errors.
+//
+// NOTE: This policy does NOT apply to SCITT verification failures — a malformed
+// or signature-invalid SCITT artifact is always terminal, regardless of FailOpen
+// settings, to prevent forgery acceptance. Only DNS and TLog infrastructure
+// failures are subject to this policy.
 func WithFailurePolicy(policy FailurePolicy) Option {
 	return func(c *verifierConfig) {
 		c.failurePolicy = policy

@@ -245,6 +245,7 @@ func decodeStatusPayload(data []byte) (*StatusTokenPayload, error) {
 		return nil, &TokenError{
 			Type:    TokenErrPayloadEmpty,
 			Message: fmt.Sprintf("failed to decode payload: %v", err),
+			Cause:   err,
 		}
 	}
 

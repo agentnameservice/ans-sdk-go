@@ -21,8 +21,14 @@ const (
 
 // VerifiedReceipt holds the verified fields extracted from a SCITT receipt.
 type VerifiedReceipt struct {
-	TreeSize   uint64
-	LeafIndex  uint64
+	TreeSize  uint64
+	LeafIndex uint64
+	// RootHash is the Merkle tree root computed from walking the inclusion path.
+	// IMPORTANT: This value is NOT verified against any trusted tree head.
+	// Callers requiring tree-head attestation MUST compare this hash to a root
+	// obtained out-of-band (e.g., from a witness or monitor). The ECDSA signature
+	// over the leaf is authoritative for leaf-level trust; the walked root alone
+	// does not prove inclusion in any particular published tree.
 	RootHash   [32]byte
 	EventBytes []byte
 	KeyID      [4]byte

@@ -151,6 +151,11 @@ func TestSignatureErrorMessages(t *testing.T) {
 			contains: "invalid public key",
 		},
 		{
+			name:     "untrusted key domain",
+			err:      &SignatureError{Type: SigErrUntrustedKeyDomain, Message: "key restricted to .com", Kid: kid},
+			contains: "untrusted key domain",
+		},
+		{
 			name:     "unknown type",
 			err:      &SignatureError{Type: SignatureErrorType(99), Message: "unexpected", Kid: kid},
 			contains: "signature error",
@@ -287,6 +292,70 @@ func TestTokenErrorMessages(t *testing.T) {
 			got := tt.err.Error()
 			if !strings.Contains(got, tt.contains) {
 				t.Errorf("Error() = %q, want containing %q", got, tt.contains)
+			}
+		})
+	}
+}
+
+func TestMerkleErrorUnwrap(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("hash length mismatch")
+	tests := []struct {
+		name      string
+		err       *MerkleError
+		wantCause error
+	}{
+		{
+			name:      "with cause",
+			err:       &MerkleError{Type: MerkleErrInvalidProof, Message: "bad proof", Cause: cause},
+			wantCause: cause,
+		},
+		{
+			name:      "nil cause",
+			err:       &MerkleError{Type: MerkleErrRootMismatch, Message: "mismatch"},
+			wantCause: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.err.Unwrap()
+			if !errorEqual(got, tt.wantCause) {
+				t.Errorf("Unwrap() = %v, want %v", got, tt.wantCause)
+			}
+		})
+	}
+}
+
+func TestTokenErrorUnwrap(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("cbor decode failed")
+	tests := []struct {
+		name      string
+		err       *TokenError
+		wantCause error
+	}{
+		{
+			name:      "with cause",
+			err:       &TokenError{Type: TokenErrPayloadInvalid, Message: "bad payload", Cause: cause},
+			wantCause: cause,
+		},
+		{
+			name:      "nil cause",
+			err:       &TokenError{Type: TokenErrExpired, Message: "expired"},
+			wantCause: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.err.Unwrap()
+			if !errorEqual(got, tt.wantCause) {
+				t.Errorf("Unwrap() = %v, want %v", got, tt.wantCause)
 			}
 		})
 	}
@@ -435,6 +504,8 @@ func TestErrorsWorkWithErrorsIs(t *testing.T) {
 		{name: "CoseError wraps cause", err: &CoseError{Type: CoseErrCborDecode, Message: "decode", Cause: inner}},
 		{name: "SignatureError wraps cause", err: &SignatureError{Type: SigErrInvalidKeyFormat, Message: "bad", Cause: inner}},
 		{name: "TransportError wraps cause", err: &TransportError{Type: TransportErrHTTPError, Message: "fail", Cause: inner}},
+		{name: "MerkleError wraps cause", err: &MerkleError{Type: MerkleErrInvalidProof, Message: "bad", Cause: inner}},
+		{name: "TokenError wraps cause", err: &TokenError{Type: TokenErrPayloadInvalid, Message: "bad", Cause: inner}},
 	}
 
 	for _, tt := range tests {

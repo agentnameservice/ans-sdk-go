@@ -339,6 +339,239 @@ func TestKeyStoreGet(t *testing.T) {
 	}
 }
 
+func TestKeyStoreIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	name, kidHex, spkiB64, _ := mustGenerateTestKey(t)
+
+	nonEmptyStore, err := NewKeyStore([]string{
+		fmt.Sprintf("%s+%s+%s", name, kidHex, spkiB64),
+	})
+	if err != nil {
+		t.Fatalf("failed to create non-empty store: %v", err)
+	}
+
+	emptyStore, err := NewKeyStore([]string{})
+	if err != nil {
+		t.Fatalf("failed to create empty store: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		store *KeyStore
+		want  bool
+	}{
+		{
+			name:  "empty store returns true",
+			store: emptyStore,
+			want:  true,
+		},
+		{
+			name:  "non-empty store returns false",
+			store: nonEmptyStore,
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.store.IsEmpty(); got != tt.want {
+				t.Errorf("IsEmpty() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKeyStoreMergeFrom(t *testing.T) {
+	t.Parallel()
+
+	name1, kid1Hex, spki1B64, _ := mustGenerateTestKey(t)
+	name2, kid2Hex, spki2B64, _ := mustGenerateTestKey(t)
+	name3, kid3Hex, spki3B64, _ := mustGenerateTestKey(t)
+
+	key1Str := fmt.Sprintf("%s+%s+%s", name1, kid1Hex, spki1B64)
+	key2Str := fmt.Sprintf("%s+%s+%s", name2, kid2Hex, spki2B64)
+	key3Str := fmt.Sprintf("%s+%s+%s", name3, kid3Hex, spki3B64)
+
+	// Build a collision string: same kid as key1 but different name.
+	collisionStr := fmt.Sprintf("different-name+%s+%s", kid1Hex, spki1B64)
+
+	// Build a same-kid-same-name duplicate string.
+	dupStr := fmt.Sprintf("%s+%s+%s", name1, kid1Hex, spki1B64)
+
+	tests := []struct {
+		name                   string
+		initialKeys            []string
+		mergeKeys              []string
+		wantAdded              int
+		wantSkipped            int
+		wantSkippedUnparseable int
+		wantSkippedDuplicate   int
+		wantCollisions         int
+		wantTotalLen           int
+	}{
+		{
+			name:                   "merge into empty store with no keys",
+			initialKeys:            []string{},
+			mergeKeys:              []string{},
+			wantAdded:              0,
+			wantSkipped:            0,
+			wantSkippedUnparseable: 0,
+			wantSkippedDuplicate:   0,
+			wantCollisions:         0,
+			wantTotalLen:           0,
+		},
+		{
+			name:                   "merge new keys into empty store",
+			initialKeys:            []string{},
+			mergeKeys:              []string{key1Str, key2Str},
+			wantAdded:              2,
+			wantSkipped:            0,
+			wantSkippedUnparseable: 0,
+			wantSkippedDuplicate:   0,
+			wantCollisions:         0,
+			wantTotalLen:           2,
+		},
+		{
+			name:                   "merge new key into non-empty store",
+			initialKeys:            []string{key1Str},
+			mergeKeys:              []string{key2Str},
+			wantAdded:              1,
+			wantSkipped:            0,
+			wantSkippedUnparseable: 0,
+			wantSkippedDuplicate:   0,
+			wantCollisions:         0,
+			wantTotalLen:           2,
+		},
+		{
+			name:                   "merge duplicate kid same name - skipped no collision",
+			initialKeys:            []string{key1Str},
+			mergeKeys:              []string{dupStr},
+			wantAdded:              0,
+			wantSkipped:            1,
+			wantSkippedUnparseable: 0,
+			wantSkippedDuplicate:   1,
+			wantCollisions:         0,
+			wantTotalLen:           1,
+		},
+		{
+			name:                   "merge duplicate kid different name - collision",
+			initialKeys:            []string{key1Str},
+			mergeKeys:              []string{collisionStr},
+			wantAdded:              0,
+			wantSkipped:            1,
+			wantSkippedUnparseable: 0,
+			wantSkippedDuplicate:   1,
+			wantCollisions:         1,
+			wantTotalLen:           1,
+		},
+		{
+			name:                   "merge with invalid key string - skipped",
+			initialKeys:            []string{key1Str},
+			mergeKeys:              []string{"bad-input"},
+			wantAdded:              0,
+			wantSkipped:            1,
+			wantSkippedUnparseable: 1,
+			wantSkippedDuplicate:   0,
+			wantCollisions:         0,
+			wantTotalLen:           1,
+		},
+		{
+			name:                   "merge mix of valid new and invalid keys",
+			initialKeys:            []string{key1Str},
+			mergeKeys:              []string{key2Str, "bad-input", key3Str},
+			wantAdded:              2,
+			wantSkipped:            1,
+			wantSkippedUnparseable: 1,
+			wantSkippedDuplicate:   0,
+			wantCollisions:         0,
+			wantTotalLen:           3,
+		},
+		{
+			name:                   "merge mix of valid new and collision and invalid",
+			initialKeys:            []string{key1Str},
+			mergeKeys:              []string{key2Str, collisionStr, "bad-input"},
+			wantAdded:              1,
+			wantSkipped:            2,
+			wantSkippedUnparseable: 1,
+			wantSkippedDuplicate:   1,
+			wantCollisions:         1,
+			wantTotalLen:           2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			original, err := NewKeyStore(tt.initialKeys)
+			if err != nil {
+				t.Fatalf("failed to create initial store: %v", err)
+			}
+			originalLen := original.Len()
+
+			merged, result := original.MergeFrom(tt.mergeKeys)
+
+			if result.Added != tt.wantAdded {
+				t.Errorf("Added = %d, want %d", result.Added, tt.wantAdded)
+			}
+			if result.Skipped != tt.wantSkipped {
+				t.Errorf("Skipped = %d, want %d", result.Skipped, tt.wantSkipped)
+			}
+			if result.SkippedUnparseable != tt.wantSkippedUnparseable {
+				t.Errorf("SkippedUnparseable = %d, want %d", result.SkippedUnparseable, tt.wantSkippedUnparseable)
+			}
+			if result.SkippedDuplicate != tt.wantSkippedDuplicate {
+				t.Errorf("SkippedDuplicate = %d, want %d", result.SkippedDuplicate, tt.wantSkippedDuplicate)
+			}
+			if len(result.Collisions) != tt.wantCollisions {
+				t.Errorf("Collisions count = %d, want %d", len(result.Collisions), tt.wantCollisions)
+			}
+			if merged.Len() != tt.wantTotalLen {
+				t.Errorf("merged Len() = %d, want %d", merged.Len(), tt.wantTotalLen)
+			}
+			// Original store must be unchanged (immutability).
+			if original.Len() != originalLen {
+				t.Errorf("original Len() changed from %d to %d", originalLen, original.Len())
+			}
+		})
+	}
+}
+
+func TestKeyStoreMergeFromPreservesOriginalKeys(t *testing.T) {
+	t.Parallel()
+
+	_, kid1Hex, spki1B64, expectedKey1 := mustGenerateTestKey(t)
+	_, kid2Hex, spki2B64, _ := mustGenerateTestKey(t)
+
+	key1Str := fmt.Sprintf("original-key+%s+%s", kid1Hex, spki1B64)
+	key2Str := fmt.Sprintf("new-key+%s+%s", kid2Hex, spki2B64)
+
+	kid1Bytes, _ := hex.DecodeString(kid1Hex)
+	var kid1 [4]byte
+	copy(kid1[:], kid1Bytes)
+
+	original, err := NewKeyStore([]string{key1Str})
+	if err != nil {
+		t.Fatalf("failed to create original store: %v", err)
+	}
+
+	merged, _ := original.MergeFrom([]string{key2Str})
+
+	// Verify original key is accessible in merged store with correct data.
+	got, err := merged.Get(kid1)
+	if err != nil {
+		t.Fatalf("failed to get original key from merged store: %v", err)
+	}
+	if got.Name != "original-key" {
+		t.Errorf("Name = %q, want %q", got.Name, "original-key")
+	}
+	if !got.Key.Equal(expectedKey1) {
+		t.Error("original key in merged store does not match expected key")
+	}
+}
+
 func TestKeyStoreImplementsKeyLookup(t *testing.T) {
 	t.Parallel()
 	var _ KeyLookup = (*KeyStore)(nil)

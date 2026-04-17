@@ -263,20 +263,6 @@ func TestScittOutcomeConstructors(t *testing.T) {
 		isSuccess bool
 	}{
 		{
-			name:      "scitt verified full",
-			outcome:   NewScittVerifiedOutcome(nil, CertFingerprintFromBytes([32]byte{1}), TierFullScitt),
-			wantType:  OutcomeVerified,
-			wantTier:  TierFullScitt,
-			isSuccess: true,
-		},
-		{
-			name:      "scitt verified status token only",
-			outcome:   NewScittVerifiedOutcome(nil, CertFingerprintFromBytes([32]byte{2}), TierStatusTokenVerified),
-			wantType:  OutcomeVerified,
-			wantTier:  TierStatusTokenVerified,
-			isSuccess: true,
-		},
-		{
 			name:      "scitt error",
 			outcome:   NewScittErrorOutcome(errors.New("scitt failed")),
 			wantType:  OutcomeScittError,
@@ -309,6 +295,41 @@ func TestScittErrorToError(t *testing.T) {
 	got := outcome.ToError()
 	if !errors.Is(got, err) {
 		t.Errorf("ToError() = %v, want %v", got, err)
+	}
+}
+
+func TestVerificationTier_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tier VerificationTier
+		want string
+	}{
+		{
+			name: "badge only",
+			tier: TierBadgeOnly,
+			want: "BadgeOnly",
+		},
+		{
+			name: "full scitt",
+			tier: TierFullScitt,
+			want: "FullScitt",
+		},
+		{
+			name: "unknown tier",
+			tier: VerificationTier(99),
+			want: "VerificationTier(99)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.tier.String(); got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

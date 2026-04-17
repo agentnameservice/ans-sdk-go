@@ -44,8 +44,6 @@ type VerificationTier int
 const (
 	// TierBadgeOnly indicates only badge-based verification was performed.
 	TierBadgeOnly VerificationTier = iota
-	// TierStatusTokenVerified indicates the status token was cryptographically verified.
-	TierStatusTokenVerified
 	// TierFullScitt indicates both receipt and status token were cryptographically verified.
 	TierFullScitt
 )
@@ -55,8 +53,6 @@ func (t VerificationTier) String() string {
 	switch t {
 	case TierBadgeOnly:
 		return "BadgeOnly"
-	case TierStatusTokenVerified:
-		return "StatusTokenVerified"
 	case TierFullScitt:
 		return "FullScitt"
 	default:
@@ -193,16 +189,6 @@ func NewCertErrorOutcome(err error) *VerificationOutcome {
 	return &VerificationOutcome{
 		Type:  OutcomeCertError,
 		Error: err,
-	}
-}
-
-// NewScittVerifiedOutcome creates a SCITT-verified outcome with the given tier.
-func NewScittVerifiedOutcome(badge *models.Badge, fingerprint CertFingerprint, tier VerificationTier) *VerificationOutcome {
-	return &VerificationOutcome{
-		Type:               OutcomeVerified,
-		Tier:               tier,
-		Badge:              badge,
-		MatchedFingerprint: &fingerprint,
 	}
 }
 

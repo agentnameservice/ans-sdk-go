@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -24,41 +25,115 @@ const (
 
 // HTTPClient is an HTTP-based implementation of Client.
 type HTTPClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL         string
+	httpClient      *http.Client
+	headers         http.Header
+	allowInsecure   bool
+	timeoutOverride *time.Duration
+	explicitHTTP    *http.Client
 }
 
-// NewHTTPClient creates a new HTTPClient with default settings.
-func NewHTTPClient(baseURL string) *HTTPClient {
-	return &HTTPClient{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+// HTTPClientOption configures an HTTPClient.
+type HTTPClientOption func(*HTTPClient)
+
+// NewHTTPClient creates a new HTTPClient. baseURL must use the https scheme
+// unless WithAllowInsecureTransport is supplied. Returns an error if baseURL
+// is malformed or uses a non-https scheme without the insecure opt-in.
+func NewHTTPClient(baseURL string, opts ...HTTPClientOption) (*HTTPClient, error) {
+	c := &HTTPClient{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		headers: make(http.Header),
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid baseURL: %w", err)
+	}
+	if u.Scheme != "https" && !c.allowInsecure {
+		return nil, fmt.Errorf("baseURL must use https scheme (got %q); use WithAllowInsecureTransport for non-https endpoints", u.Scheme)
+	}
+
+	switch {
+	case c.explicitHTTP != nil:
+		c.httpClient = c.explicitHTTP
+		if c.httpClient.Timeout == 0 {
+			c.httpClient.Timeout = defaultTimeout
+		}
+		if c.timeoutOverride != nil {
+			c.httpClient.Timeout = *c.timeoutOverride
+		}
+	default:
+		timeout := defaultTimeout
+		if c.timeoutOverride != nil {
+			timeout = *c.timeoutOverride
+		}
+		c.httpClient = &http.Client{Timeout: timeout}
+	}
+
+	return c, nil
+}
+
+// WithHTTPClient returns an option that supplies a custom *http.Client.
+// If the client has zero Timeout, defaultTimeout (30s) is applied.
+func WithHTTPClient(client *http.Client) HTTPClientOption {
+	return func(c *HTTPClient) {
+		c.explicitHTTP = client
 	}
 }
 
-// NewHTTPClientWithHTTPClient creates a new HTTPClient with a custom http.Client.
-func NewHTTPClientWithHTTPClient(baseURL string, client *http.Client) *HTTPClient {
-	return &HTTPClient{
-		baseURL:    baseURL,
-		httpClient: client,
+// WithTimeout returns an option that overrides the request timeout.
+// Takes precedence over any timeout set on a WithHTTPClient client.
+func WithTimeout(d time.Duration) HTTPClientOption {
+	return func(c *HTTPClient) {
+		d := d
+		c.timeoutOverride = &d
+	}
+}
+
+// WithAllowInsecureTransport returns an option that permits a non-https baseURL.
+// Use only for tests or loopback development — production must use https.
+func WithAllowInsecureTransport() HTTPClientOption {
+	return func(c *HTTPClient) {
+		c.allowInsecure = true
+	}
+}
+
+// WithHeader returns an option that sets a single header (overwrites existing values for that name).
+func WithHeader(name, value string) HTTPClientOption {
+	return func(c *HTTPClient) {
+		c.headers.Set(name, value)
+	}
+}
+
+// WithHeaders returns an option that merges the given headers (appends values).
+func WithHeaders(headers http.Header) HTTPClientOption {
+	return func(c *HTTPClient) {
+		for name, values := range headers {
+			for _, v := range values {
+				c.headers.Add(name, v)
+			}
+		}
 	}
 }
 
 // FetchReceipt retrieves the SCITT receipt for the given agent.
 func (c *HTTPClient) FetchReceipt(ctx context.Context, agentID string) ([]byte, error) {
-	u := fmt.Sprintf("%s/v1/receipts/%s", c.baseURL, url.PathEscape(agentID))
+	u := fmt.Sprintf("%s/v1/agents/%s/receipt", c.baseURL, url.PathEscape(agentID))
 	return c.fetchBytes(ctx, u)
 }
 
 // FetchStatusToken retrieves the status token for the given agent.
 func (c *HTTPClient) FetchStatusToken(ctx context.Context, agentID string) ([]byte, error) {
-	u := fmt.Sprintf("%s/v1/status/%s", c.baseURL, url.PathEscape(agentID))
+	u := fmt.Sprintf("%s/v1/agents/%s/status-token", c.baseURL, url.PathEscape(agentID))
 	return c.fetchBytes(ctx, u)
 }
 
 // FetchRootKeys retrieves the SCITT root signing keys.
 func (c *HTTPClient) FetchRootKeys(ctx context.Context) ([]string, error) {
-	u := fmt.Sprintf("%s/v1/root-keys", c.baseURL)
+	u := fmt.Sprintf("%s/root-keys", c.baseURL)
 
 	body, err := c.fetchBytes(ctx, u)
 	if err != nil {
@@ -84,6 +159,12 @@ func (c *HTTPClient) fetchBytes(ctx context.Context, url string) ([]byte, error)
 			Type:    TransportErrHTTPError,
 			Message: "failed to create request",
 			Cause:   err,
+		}
+	}
+
+	for name, values := range c.headers {
+		for _, v := range values {
+			req.Header.Add(name, v)
 		}
 	}
 

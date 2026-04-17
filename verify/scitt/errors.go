@@ -80,6 +80,8 @@ const (
 	SigErrKeyHashMismatch
 	// SigErrInvalidPublicKey indicates the public key is invalid.
 	SigErrInvalidPublicKey
+	// SigErrUntrustedKeyDomain indicates a domain-restricted key was used outside its trust boundary.
+	SigErrUntrustedKeyDomain
 )
 
 // SignatureError represents an ECDSA verification or key management failure.
@@ -106,6 +108,8 @@ func (e *SignatureError) Error() string {
 		return fmt.Sprintf("key hash mismatch [kid=%s]: %s", kidHex, e.Message)
 	case SigErrInvalidPublicKey:
 		return fmt.Sprintf("invalid public key [kid=%s]: %s", kidHex, e.Message)
+	case SigErrUntrustedKeyDomain:
+		return fmt.Sprintf("untrusted key domain [kid=%s]: %s", kidHex, e.Message)
 	default:
 		return fmt.Sprintf("signature error [kid=%s]: %s", kidHex, e.Message)
 	}
@@ -130,6 +134,7 @@ const (
 type MerkleError struct {
 	Type    MerkleErrorType
 	Message string
+	Cause   error
 }
 
 // Error implements the error interface.
@@ -142,6 +147,11 @@ func (e *MerkleError) Error() string {
 	default:
 		return fmt.Sprintf("Merkle error: %s", e.Message)
 	}
+}
+
+// Unwrap returns the underlying cause.
+func (e *MerkleError) Unwrap() error {
+	return e.Cause
 }
 
 // TokenErrorType represents the type of status token error.
@@ -167,6 +177,7 @@ type TokenError struct {
 	Status  AgentStatus
 	Exp     int64
 	Now     int64
+	Cause   error
 }
 
 // Error implements the error interface.
@@ -185,6 +196,11 @@ func (e *TokenError) Error() string {
 	default:
 		return fmt.Sprintf("token error: %s", e.Message)
 	}
+}
+
+// Unwrap returns the underlying cause.
+func (e *TokenError) Unwrap() error {
+	return e.Cause
 }
 
 // TransportErrorType represents the type of HTTP transport error.

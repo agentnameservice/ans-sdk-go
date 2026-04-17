@@ -336,6 +336,26 @@ func TestPrintV1Payload(t *testing.T) {
 							DNSRecordsProvisioned: map[string]string{
 								"_ans-badge": "v=ans-badge1",
 							},
+							MetadataHashes: map[string]string{
+								"sha256": "deadbeef1234",
+							},
+							ValidIdentityCerts: []models.CertificateV1Extended{
+								{
+									CertificateV1: models.CertificateV1{
+										Fingerprint: "SHA256:idcert1",
+										Type:        models.CertTypeX509OVClient,
+									},
+									NotAfter: &expiresAt,
+								},
+							},
+							ValidServerCerts: []models.CertificateV1Extended{
+								{
+									CertificateV1: models.CertificateV1{
+										Fingerprint: "SHA256:srvcert1",
+										Type:        models.CertTypeX509DVServer,
+									},
+								},
+							},
 						},
 					},
 				},
@@ -346,6 +366,9 @@ func TestPrintV1Payload(t *testing.T) {
 				"Agent Info", "example.com", "v1.0.0", "Test Agent", "provider-123",
 				"Attestations", "ACME-DNS-01", "Identity Certificate", "Server Certificate",
 				"DNS Records", "Signature Info", "key-123",
+				"Metadata Hashes", "deadbeef1234",
+				"Valid Identity Certs", "SHA256:idcert1", "Not After",
+				"Valid Server Certs", "SHA256:srvcert1",
 			},
 		},
 	}

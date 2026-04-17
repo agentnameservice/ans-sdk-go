@@ -92,11 +92,3 @@ func TestRun(t *testing.T) {
 		})
 	}
 }
-
-func TestRun_Success(t *testing.T) {
-	// Run() itself should succeed for the default (help) case
-	err := Run()
-	if err != nil {
-		t.Errorf("Run() unexpected error: %v", err)
-	}
-}

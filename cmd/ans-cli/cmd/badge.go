@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/godaddy/ans-sdk-go/ans"
@@ -13,7 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultBadgeAuditLimit = 10
+const (
+	defaultBadgeAuditLimit   = 10
+	maxMetadataHashesDisplay = 20
+)
 
 func buildBadgeCmd() *cobra.Command {
 	var (
@@ -87,11 +91,14 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 
 func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail, checkpoint bool) {
 	result := map[string]any{"transparencyLog": logEntry}
+	var warnings []string
 
 	if auditTrail {
 		params := &models.AgentAuditParams{Limit: defaultBadgeAuditLimit, Offset: 0}
 		if audit, auditErr := c.GetAgentTransparencyLogAudit(ctx, agentID, params); auditErr != nil {
-			fmt.Fprintf(os.Stdout, "Warning: failed to retrieve audit trail: %v\n", auditErr)
+			warning := fmt.Sprintf("failed to retrieve audit trail: %v", auditErr)
+			fmt.Fprintln(os.Stderr, "Warning: "+warning)
+			warnings = append(warnings, warning)
 		} else {
 			result["audit"] = audit
 		}
@@ -99,10 +106,16 @@ func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID str
 
 	if checkpoint {
 		if checkpointData, checkpointErr := c.GetCheckpoint(ctx); checkpointErr != nil {
-			fmt.Fprintf(os.Stdout, "Warning: failed to retrieve checkpoint: %v\n", checkpointErr)
+			warning := fmt.Sprintf("failed to retrieve checkpoint: %v", checkpointErr)
+			fmt.Fprintln(os.Stderr, "Warning: "+warning)
+			warnings = append(warnings, warning)
 		} else {
 			result["checkpoint"] = checkpointData
 		}
+	}
+
+	if len(warnings) > 0 {
+		result["warnings"] = warnings
 	}
 
 	jsonData, _ := json.MarshalIndent(result, "", "  ")
@@ -324,8 +337,49 @@ func printV1Attestations(att *models.AttestationsV1) {
 
 	if len(att.DNSRecordsProvisioned) > 0 {
 		fmt.Fprintln(os.Stdout, "  DNS Records Provisioned:")
-		for key, value := range att.DNSRecordsProvisioned {
-			fmt.Fprintf(os.Stdout, "    %s: %s\n", key, value)
+		keys := make([]string, 0, len(att.DNSRecordsProvisioned))
+		for k := range att.DNSRecordsProvisioned {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(os.Stdout, "    %s: %s\n", k, att.DNSRecordsProvisioned[k])
+		}
+	}
+
+	if len(att.MetadataHashes) > 0 {
+		fmt.Fprintln(os.Stdout, "  Metadata Hashes:")
+		keys := make([]string, 0, len(att.MetadataHashes))
+		for k := range att.MetadataHashes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for i, k := range keys {
+			if i >= maxMetadataHashesDisplay {
+				fmt.Fprintf(os.Stdout, "    ... and %d more\n", len(keys)-maxMetadataHashesDisplay)
+				break
+			}
+			fmt.Fprintf(os.Stdout, "    %s: %s\n", k, att.MetadataHashes[k])
+		}
+	}
+
+	if len(att.ValidIdentityCerts) > 0 {
+		fmt.Fprintf(os.Stdout, "  Valid Identity Certs: %d\n", len(att.ValidIdentityCerts))
+		for _, cert := range att.ValidIdentityCerts {
+			fmt.Fprintf(os.Stdout, "    %s (%s)\n", cert.Fingerprint, cert.Type)
+			if cert.NotAfter != nil {
+				fmt.Fprintf(os.Stdout, "      Not After: %s\n", cert.NotAfter.Format("2006-01-02 15:04:05 MST"))
+			}
+		}
+	}
+
+	if len(att.ValidServerCerts) > 0 {
+		fmt.Fprintf(os.Stdout, "  Valid Server Certs:   %d\n", len(att.ValidServerCerts))
+		for _, cert := range att.ValidServerCerts {
+			fmt.Fprintf(os.Stdout, "    %s (%s)\n", cert.Fingerprint, cert.Type)
+			if cert.NotAfter != nil {
+				fmt.Fprintf(os.Stdout, "      Not After: %s\n", cert.NotAfter.Format("2006-01-02 15:04:05 MST"))
+			}
 		}
 	}
 }
@@ -363,8 +417,13 @@ func printV0Attestations(att *models.AttestationsV0) {
 
 	if len(att.DNSRecordsProvisioned) > 0 {
 		fmt.Fprintln(os.Stdout, "  DNS Records Provisioned:")
-		for key, value := range att.DNSRecordsProvisioned {
-			fmt.Fprintf(os.Stdout, "    %s: %s\n", key, value)
+		keys := make([]string, 0, len(att.DNSRecordsProvisioned))
+		for k := range att.DNSRecordsProvisioned {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(os.Stdout, "    %s: %s\n", k, att.DNSRecordsProvisioned[k])
 		}
 	}
 }
@@ -440,8 +499,13 @@ func printAttestationsFromPayload(att map[string]any) {
 
 	if dnsRecords, dnsOk := att["dnsRecordsProvisioned"].(map[string]any); dnsOk && len(dnsRecords) > 0 {
 		fmt.Fprintln(os.Stdout, "  DNS Records Provisioned:")
-		for key, value := range dnsRecords {
-			fmt.Fprintf(os.Stdout, "    %s: %v\n", key, value)
+		keys := make([]string, 0, len(dnsRecords))
+		for k := range dnsRecords {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(os.Stdout, "    %s: %v\n", k, dnsRecords[k])
 		}
 	}
 }

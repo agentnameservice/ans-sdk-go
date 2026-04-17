@@ -168,3 +168,62 @@ func (s *KeyStore) Get(kid [4]byte) (*TrustedKey, error) {
 func (s *KeyStore) Len() int {
 	return len(s.keys)
 }
+
+// IsEmpty returns true if the store contains no keys.
+func (s *KeyStore) IsEmpty() bool {
+	return len(s.keys) == 0
+}
+
+// MergeResult reports the outcome of a MergeFrom operation.
+//
+// SkippedUnparseable counts input strings that failed to parse as C2SP keys.
+// A non-zero value indicates a potentially malformed key server response and
+// warrants operator attention.
+//
+// SkippedDuplicate counts well-formed keys that collided with an existing kid
+// in the store. This is benign during a re-scan of the same key set.
+//
+// Skipped is the sum of both counters, retained for backward compatibility.
+type MergeResult struct {
+	Added              int
+	Skipped            int      // sum of SkippedUnparseable + SkippedDuplicate
+	SkippedUnparseable int      // strings that failed ParseC2SPKey
+	SkippedDuplicate   int      // well-formed keys whose kid already existed
+	Collisions         []string // kid hex strings that collided with a different name
+}
+
+// MergeFrom returns a new KeyStore containing all keys from s plus any
+// successfully parsed keys from keyStrings. Existing keys (same kid) are
+// preserved; duplicates and unparseable strings are skipped. The original
+// store is never modified.
+func (s *KeyStore) MergeFrom(keyStrings []string) (*KeyStore, MergeResult) {
+	merged := make(map[[4]byte]TrustedKey, len(s.keys)+len(keyStrings))
+	for kid, tk := range s.keys {
+		merged[kid] = tk
+	}
+
+	var result MergeResult
+
+	for _, ks := range keyStrings {
+		tk, err := ParseC2SPKey(ks)
+		if err != nil {
+			result.SkippedUnparseable++
+			result.Skipped++
+			continue
+		}
+
+		if existing, exists := merged[tk.Kid]; exists {
+			if existing.Name != tk.Name {
+				result.Collisions = append(result.Collisions, fmt.Sprintf("%x", tk.Kid))
+			}
+			result.SkippedDuplicate++
+			result.Skipped++
+			continue
+		}
+
+		merged[tk.Kid] = *tk
+		result.Added++
+	}
+
+	return &KeyStore{keys: merged}, result
+}

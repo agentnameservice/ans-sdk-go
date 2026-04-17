@@ -3,7 +3,6 @@ package verify
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
@@ -83,11 +82,6 @@ func (f CertFingerprint) Matches(other string) bool {
 // Equal returns true if the fingerprints are equal.
 func (f CertFingerprint) Equal(other CertFingerprint) bool {
 	return f.bytes == other.bytes
-}
-
-// ConstantTimeEqual returns true if the fingerprints are equal using constant-time comparison.
-func (f CertFingerprint) ConstantTimeEqual(other CertFingerprint) bool {
-	return subtle.ConstantTimeCompare(f.bytes[:], other.bytes[:]) == 1
 }
 
 // IsZero returns true if the fingerprint has not been set.

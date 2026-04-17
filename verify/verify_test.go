@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/godaddy/ans-sdk-go/models"
 	"github.com/godaddy/ans-sdk-go/verify/scitt"
 )
@@ -2277,6 +2278,132 @@ func TestVerifyWithScitt_PolicyEnforcement(t *testing.T) {
 				if outcome.DANEOutcome == nil {
 					t.Error("expected DANEOutcome to be populated for DANE-configured path")
 				}
+			}
+		})
+	}
+}
+
+// transportErrorKeyLookup implements scitt.KeyLookup and always returns a TransportError.
+type transportErrorKeyLookup struct {
+	errType scitt.TransportErrorType
+}
+
+func (t *transportErrorKeyLookup) Get(_ [4]byte) (*scitt.TrustedKey, error) {
+	return nil, &scitt.TransportError{
+		Type:    t.errType,
+		Message: "simulated transport error",
+	}
+}
+
+// buildMinimalCoseSign1 builds a minimal valid COSE_Sign1 structure for testing.
+// The signature is fake (zeros) — only structure needs to be valid for parsing.
+func buildMinimalCoseSign1(t *testing.T, kid [4]byte, payload []byte, withVDP bool) []byte {
+	t.Helper()
+
+	hdr := map[int64]interface{}{
+		1:   int64(-7), // alg = ES256
+		4:   kid[:],    // kid
+		395: int64(1),  // vds (required for receipt)
+	}
+	protectedBytes, err := cbor.Marshal(hdr)
+	if err != nil {
+		t.Fatalf("failed to encode protected header: %v", err)
+	}
+
+	var unprotected cbor.RawMessage
+	if withVDP {
+		vdpMap := map[int64]interface{}{
+			396: []interface{}{
+				[]interface{}{uint64(1), uint64(0)}, // treeSize=1, leafIndex=0
+			},
+		}
+		unprotected, err = cbor.Marshal(vdpMap)
+	} else {
+		unprotected, err = cbor.Marshal(map[int64]interface{}{})
+	}
+	if err != nil {
+		t.Fatalf("failed to encode unprotected header: %v", err)
+	}
+
+	sig := make([]byte, 64) // zero-filled fake signature
+
+	protEncoded, _ := cbor.Marshal(protectedBytes)
+	payloadEncoded, _ := cbor.Marshal(payload)
+	sigEncoded, _ := cbor.Marshal(sig)
+
+	arr := []cbor.RawMessage{protEncoded, unprotected, payloadEncoded, sigEncoded}
+	arrayBytes, err := cbor.Marshal(arr)
+	if err != nil {
+		t.Fatalf("failed to marshal COSE array: %v", err)
+	}
+
+	tag := cbor.RawTag{Number: 18, Content: arrayBytes}
+	tagged, err := tag.MarshalCBOR()
+	if err != nil {
+		t.Fatalf("failed to marshal tag: %v", err)
+	}
+	return tagged
+}
+
+func TestVerifyWithScitt_TransportErrorFallback(t *testing.T) {
+	t.Parallel()
+
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	kid := [4]byte{0x01, 0x02, 0x03, 0x04}
+	receipt := buildMinimalCoseSign1(t, kid, []byte("test-payload"), true)
+	token := buildMinimalCoseSign1(t, kid, []byte("token-payload"), false)
+
+	tests := []struct {
+		name     string
+		headers  *scitt.Headers
+		lookup   scitt.KeyLookup
+		wantType OutcomeType
+		wantTier VerificationTier
+	}{
+		{
+			name: "receipt transport error falls back to badge",
+			headers: &scitt.Headers{
+				Receipt:     receipt,
+				StatusToken: token,
+			},
+			lookup:   &transportErrorKeyLookup{errType: scitt.TransportErrHTTPError},
+			wantType: OutcomeVerified,
+			wantTier: TierBadgeOnly,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := []Option{
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+				WithScittKeyLookup(tt.lookup),
+			}
+
+			verifier := NewServerVerifier(opts...)
+			cert := createTestCertIdentity(host, fingerprint)
+			fqdn, _ := models.NewFqdn(host)
+
+			outcome := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
+			}
+			if tt.wantType == OutcomeVerified && outcome.Tier != tt.wantTier {
+				t.Errorf("Tier = %v, want %v", outcome.Tier, tt.wantTier)
 			}
 		})
 	}

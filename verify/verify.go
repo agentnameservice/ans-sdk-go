@@ -11,10 +11,25 @@ import (
 	"github.com/godaddy/ans-sdk-go/verify/scitt"
 )
 
+// certRole distinguishes how a certificate should be matched against a SCITT status token.
+// ServerVerifier passes roleServer (only server cert arrays are consulted); ClientVerifier
+// passes roleIdentity (only identity cert arrays are consulted). This prevents a
+// compromised identity-cert key from impersonating a server (or vice versa).
+type certRole int
+
+const (
+	roleServer certRole = iota
+	roleIdentity
+)
+
 // applyFailurePolicy applies the configured failure policy when DNS or TLog errors occur.
 // For FailClosed, returns the original error outcome.
 // For FailOpenWithCache, checks stale cache entries.
 // For FailOpen, returns a pass-through outcome.
+//
+// NOTE: This policy does NOT apply to SCITT verification failures — a malformed
+// or signature-invalid SCITT artifact is always terminal to prevent forgery
+// acceptance under FailOpen.
 func applyFailurePolicy(config *verifierConfig, fqdn models.Fqdn, version *models.Version, errorOutcome *VerificationOutcome) *VerificationOutcome {
 	switch config.failurePolicy {
 	case FailClosed:
@@ -190,7 +205,7 @@ func (v *ServerVerifier) VerifyWithScitt(ctx context.Context, fqdn models.Fqdn, 
 		return NewScittErrorOutcome(errors.New("both X-SCITT-Receipt and X-ANS-Status-Token headers are required"))
 	}
 
-	return verifyWithHeaders(ctx, v.config, fqdn, cert, headers, log,
+	return verifyWithHeaders(ctx, v.config, fqdn, cert, headers, log, roleServer,
 		func() *VerificationOutcome { return v.Verify(ctx, fqdn, cert) })
 }
 
@@ -363,7 +378,12 @@ func (v *ClientVerifier) VerifyWithScitt(ctx context.Context, cert *CertIdentity
 		return NewCertErrorOutcome(err)
 	}
 
-	return verifyWithHeaders(ctx, v.config, fqdn, cert, headers, log,
+	// Parity with badge path: client cert must carry an ans:// URI SAN.
+	if cert.AnsName() == nil {
+		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
+	}
+
+	return verifyWithHeaders(ctx, v.config, fqdn, cert, headers, log, roleIdentity,
 		func() *VerificationOutcome { return v.Verify(ctx, cert) })
 }
 
@@ -503,6 +523,8 @@ func configLogger(config *verifierConfig) *slog.Logger {
 }
 
 // verifyWithHeaders is the shared SCITT verification logic for both server and client verifiers.
+// The role parameter selects which cert array of the status token to match against:
+// roleServer restricts to ValidServerCerts; roleIdentity restricts to ValidIdentityCerts.
 func verifyWithHeaders(
 	ctx context.Context,
 	config *verifierConfig,
@@ -510,6 +532,7 @@ func verifyWithHeaders(
 	cert *CertIdentity,
 	headers *scitt.Headers,
 	log *slog.Logger,
+	role certRole,
 	badgeFallback func() *VerificationOutcome,
 ) *VerificationOutcome {
 	keys := config.scittKeyLookup
@@ -559,10 +582,29 @@ func verifyWithHeaders(
 		return NewScittErrorOutcome(fmt.Errorf("agent status %s does not allow connections", token.Payload.Status))
 	}
 
-	// Match certificate fingerprint against token's cert arrays (constant-time)
+	// Match certificate fingerprint against the role-appropriate cert array (constant-time).
 	fp := cert.Fingerprint.Bytes()
-	if !scitt.MatchesServerCert(&token.Payload, fp) && !scitt.MatchesIdentityCert(&token.Payload, fp) {
+	var matched bool
+	switch role {
+	case roleServer:
+		matched = scitt.MatchesServerCert(&token.Payload, fp)
+	case roleIdentity:
+		matched = scitt.MatchesIdentityCert(&token.Payload, fp)
+	}
+	if !matched {
 		return NewScittErrorOutcome(errors.New("certificate fingerprint does not match any cert in status token"))
+	}
+
+	// Bind token's AnsName host to the requested FQDN. A missing AnsName is
+	// tolerated (older tokens); a mismatched one is a hard failure.
+	if token.Payload.AnsName != "" {
+		ansName, err := ParseAnsName(token.Payload.AnsName)
+		if err != nil {
+			return NewScittErrorOutcome(fmt.Errorf("invalid AnsName in status token: %w", err))
+		}
+		if !strings.EqualFold(ansName.Host, fqdn.String()) {
+			return NewScittErrorOutcome(fmt.Errorf("status token AnsName host %q does not match requested fqdn %q", ansName.Host, fqdn.String()))
+		}
 	}
 
 	log.InfoContext(ctx, "VerifyWithScitt: verification succeeded",
@@ -580,5 +622,11 @@ func verifyWithHeaders(
 	if token.Payload.Status == scitt.StatusDeprecated {
 		outcome.Warnings = append(outcome.Warnings, "agent status is DEPRECATED")
 	}
+
+	// Optional DANE/TLSA check (mirrors badge path). May reject even after SCITT passes.
+	if rejection := verifyDANE(ctx, config, fqdn, cert, outcome); rejection != nil {
+		return rejection
+	}
+
 	return outcome
 }
