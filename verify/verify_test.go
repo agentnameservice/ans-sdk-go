@@ -2313,8 +2313,9 @@ func buildMinimalCoseSign1(t *testing.T, kid [4]byte, payload []byte, withVDP bo
 	var unprotected cbor.RawMessage
 	if withVDP {
 		vdpMap := map[int64]interface{}{
-			396: []interface{}{
-				[]interface{}{uint64(1), uint64(0)}, // treeSize=1, leafIndex=0
+			396: map[int64]interface{}{
+				int64(-1): uint64(1), // tree_size
+				int64(-2): uint64(0), // leaf_index
 			},
 		}
 		unprotected, err = cbor.Marshal(vdpMap)

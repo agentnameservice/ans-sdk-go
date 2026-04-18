@@ -106,19 +106,20 @@ func buildProtectedHeader(t *testing.T, kid [4]byte, vds *int64, iss *string, ia
 func buildUnprotectedWithVDP(t *testing.T, treeSize, leafIndex uint64, hashPath [][32]byte) cbor.RawMessage {
 	t.Helper()
 
-	// Build the inclusion proof array: [treeSize, leafIndex, hash1, hash2, ...]
-	proofElements := make([]interface{}, 0, 2+len(hashPath))
-	proofElements = append(proofElements, treeSize, leafIndex)
-	for _, h := range hashPath {
-		proofElements = append(proofElements, h[:])
+	vdp := map[int64]interface{}{
+		int64(-1): treeSize,
+		int64(-2): leafIndex,
+	}
+	if len(hashPath) > 0 {
+		path := make([]interface{}, len(hashPath))
+		for i, h := range hashPath {
+			path[i] = h[:]
+		}
+		vdp[int64(-3)] = path
 	}
 
-	// VDP structure: key 396 -> [[proofElements]]
-	// The outermost is the VDP map value (array of proof types), each proof type is an array of proofs
-	vdp := []interface{}{proofElements}
-
 	unprotected := map[int64]interface{}{
-		396: vdp,
+		int64(396): vdp,
 	}
 
 	encoded, err := cbor.Marshal(unprotected)
@@ -641,31 +642,33 @@ func TestExtractVDP_ErrorPaths(t *testing.T) {
 			wantErr: "missing VDP",
 		},
 		{
-			name: "VDP not an array",
+			name: "VDP not a map",
 			unprotected: func() cbor.RawMessage {
-				m := map[int64]interface{}{396: "not-an-array"}
+				m := map[int64]interface{}{396: "not-a-map"}
 				d, _ := cbor.Marshal(m)
 				return d
 			}(),
-			wantErr: "failed to decode VDP array",
+			wantErr: "VDP (key 396) must be a CBOR map",
 		},
 		{
-			name: "VDP array is empty",
+			name: "VDP map missing tree_size",
 			unprotected: func() cbor.RawMessage {
-				m := map[int64]interface{}{396: []interface{}{}}
+				vdp := map[int64]interface{}{-2: uint64(0)}
+				m := map[int64]interface{}{396: vdp}
 				d, _ := cbor.Marshal(m)
 				return d
 			}(),
-			wantErr: "VDP array is empty",
+			wantErr: "missing tree_size (key -1)",
 		},
 		{
-			name: "proof element is not an array",
+			name: "VDP map missing leaf_index",
 			unprotected: func() cbor.RawMessage {
-				m := map[int64]interface{}{396: []interface{}{"not-a-proof"}}
+				vdp := map[int64]interface{}{-1: uint64(1)}
+				m := map[int64]interface{}{396: vdp}
 				d, _ := cbor.Marshal(m)
 				return d
 			}(),
-			wantErr: "failed to decode inclusion proof",
+			wantErr: "missing leaf_index (key -2)",
 		},
 	}
 

@@ -12,11 +12,12 @@ const vdsRFC9162 int64 = 1
 // vdpCBORKey is the CBOR map key for Verifiable Data Proofs in the unprotected header.
 const vdpCBORKey int64 = 396
 
-// Inclusion proof structure constants.
+// VDP map keys (negative integers per SCITT COSE profile).
 const (
-	minProofElements = 2  // minimum elements in an inclusion proof (treeSize + leafIndex)
-	hashLen          = 32 // SHA-256 hash length in bytes
-	vdpProofStartIdx = 2  // index where hash path elements begin in the proof array
+	vdpKeyTreeSize      int64 = -1
+	vdpKeyLeafIndex     int64 = -2
+	vdpKeyInclusionPath int64 = -3
+	hashLen                   = 32 // SHA-256 hash length in bytes
 )
 
 // VerifiedReceipt holds the verified fields extracted from a SCITT receipt.
@@ -138,9 +139,12 @@ func verifyInclusionProof(parsed *ParsedCoseSign1) (uint64, uint64, [32]byte, er
 	return treeSize, leafIndex, rootHash, nil
 }
 
-// extractVDP decodes the Verifiable Data Proofs from the unprotected header.
-// VDP is stored at key 396 as an array of inclusion proofs.
-// Each proof is: [treeSize, leafIndex, hashNode1, hashNode2, ...]
+// extractVDP decodes the Verifiable Data Proof from the unprotected header.
+// VDP is a CBOR map at key 396 with negative-integer keys:
+//
+//	-1: tree_size (uint64)
+//	-2: leaf_index (uint64)
+//	-3: inclusion_path (array of 32-byte bstr)
 func extractVDP(dm cbor.DecMode, unprotected cbor.RawMessage) (uint64, uint64, [][32]byte, error) {
 	var unprotectedMap map[int64]cbor.RawMessage
 	if err := dm.Unmarshal(unprotected, &unprotectedMap); err != nil {
@@ -159,72 +163,75 @@ func extractVDP(dm cbor.DecMode, unprotected cbor.RawMessage) (uint64, uint64, [
 		}
 	}
 
-	// VDP is an array of proofs; we use the first one.
-	var proofs []cbor.RawMessage
-	if err := dm.Unmarshal(vdpRaw, &proofs); err != nil {
+	var vdpMap map[int64]cbor.RawMessage
+	if err := dm.Unmarshal(vdpRaw, &vdpMap); err != nil {
 		return 0, 0, nil, &CoseError{
 			Type:    CoseErrInvalidUnprotectedHeader,
-			Message: "failed to decode VDP array",
+			Message: "VDP (key 396) must be a CBOR map",
 			Cause:   err,
 		}
 	}
 
-	if len(proofs) == 0 {
+	treeSizeRaw, ok := vdpMap[vdpKeyTreeSize]
+	if !ok {
 		return 0, 0, nil, &CoseError{
 			Type:    CoseErrInvalidUnprotectedHeader,
-			Message: "VDP array is empty",
+			Message: "missing tree_size (key -1) in VDP map",
 		}
 	}
-
-	// Decode the first proof: [treeSize, leafIndex, hash1, hash2, ...]
-	var proofElements []cbor.RawMessage
-	if err := dm.Unmarshal(proofs[0], &proofElements); err != nil {
-		return 0, 0, nil, &CoseError{
-			Type:    CoseErrInvalidUnprotectedHeader,
-			Message: "failed to decode inclusion proof array",
-			Cause:   err,
-		}
-	}
-
-	if len(proofElements) < minProofElements {
-		return 0, 0, nil, &CoseError{
-			Type:    CoseErrInvalidUnprotectedHeader,
-			Message: fmt.Sprintf("inclusion proof needs at least %d elements, got %d", minProofElements, len(proofElements)),
-		}
-	}
-
 	var treeSize uint64
-	if err := dm.Unmarshal(proofElements[0], &treeSize); err != nil {
+	if err := dm.Unmarshal(treeSizeRaw, &treeSize); err != nil {
 		return 0, 0, nil, &CoseError{
 			Type:    CoseErrInvalidUnprotectedHeader,
-			Message: "failed to decode tree size",
+			Message: "tree_size (key -1) must be an unsigned integer",
 			Cause:   err,
 		}
 	}
 
+	leafIndexRaw, ok := vdpMap[vdpKeyLeafIndex]
+	if !ok {
+		return 0, 0, nil, &CoseError{
+			Type:    CoseErrInvalidUnprotectedHeader,
+			Message: "missing leaf_index (key -2) in VDP map",
+		}
+	}
 	var leafIndex uint64
-	if err := dm.Unmarshal(proofElements[1], &leafIndex); err != nil {
+	if err := dm.Unmarshal(leafIndexRaw, &leafIndex); err != nil {
 		return 0, 0, nil, &CoseError{
 			Type:    CoseErrInvalidUnprotectedHeader,
-			Message: "failed to decode leaf index",
+			Message: "leaf_index (key -2) must be an unsigned integer",
 			Cause:   err,
 		}
 	}
 
-	hashPath := make([][32]byte, 0, len(proofElements)-vdpProofStartIdx)
-	for i := vdpProofStartIdx; i < len(proofElements); i++ {
+	pathRaw, ok := vdpMap[vdpKeyInclusionPath]
+	if !ok {
+		return treeSize, leafIndex, nil, nil
+	}
+
+	var rawHashes []cbor.RawMessage
+	if err := dm.Unmarshal(pathRaw, &rawHashes); err != nil {
+		return 0, 0, nil, &CoseError{
+			Type:    CoseErrInvalidUnprotectedHeader,
+			Message: "inclusion_path (key -3) must be a CBOR array",
+			Cause:   err,
+		}
+	}
+
+	hashPath := make([][32]byte, 0, len(rawHashes))
+	for i, raw := range rawHashes {
 		var hashBytes []byte
-		if err := dm.Unmarshal(proofElements[i], &hashBytes); err != nil {
+		if err := dm.Unmarshal(raw, &hashBytes); err != nil {
 			return 0, 0, nil, &CoseError{
 				Type:    CoseErrInvalidUnprotectedHeader,
-				Message: fmt.Sprintf("failed to decode hash path element %d", i-vdpProofStartIdx),
+				Message: fmt.Sprintf("failed to decode inclusion_path element %d", i),
 				Cause:   err,
 			}
 		}
 		if len(hashBytes) != hashLen {
 			return 0, 0, nil, &CoseError{
 				Type:    CoseErrInvalidUnprotectedHeader,
-				Message: fmt.Sprintf("hash path element %d is %d bytes, expected %d", i-vdpProofStartIdx, len(hashBytes), hashLen),
+				Message: fmt.Sprintf("inclusion_path element %d is %d bytes, expected %d", i, len(hashBytes), hashLen),
 			}
 		}
 		var h [32]byte

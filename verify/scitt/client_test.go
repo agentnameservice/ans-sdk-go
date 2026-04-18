@@ -2,7 +2,6 @@ package scitt
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -101,12 +100,9 @@ func TestHTTPClient(t *testing.T) {
 			name:         "FetchRootKeys 200 returns string slice",
 			method:       "rootkeys",
 			serverStatus: http.StatusOK,
-			serverBody: func() []byte {
-				b, _ := json.Marshal([]string{"key-1", "key-2", "key-3"})
-				return b
-			}(),
-			wantKeys: []string{"key-1", "key-2", "key-3"},
-			wantPath: "/root-keys",
+			serverBody:   []byte("key-1\nkey-2\nkey-3\n"),
+			wantKeys:     []string{"key-1", "key-2", "key-3"},
+			wantPath:     "/root-keys",
 		},
 		{
 			name:           "FetchRootKeys 404 returns error",
@@ -117,10 +113,10 @@ func TestHTTPClient(t *testing.T) {
 			wantStatusCode: 404,
 		},
 		{
-			name:         "FetchRootKeys invalid JSON returns error",
+			name:         "FetchRootKeys empty body returns error",
 			method:       "rootkeys",
 			serverStatus: http.StatusOK,
-			serverBody:   []byte("not-json"),
+			serverBody:   []byte("   \n  \n  "),
 			wantErr:      true,
 			wantErrType:  TransportErrHTTPError,
 		},

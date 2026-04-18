@@ -4,8 +4,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/subtle"
 	"encoding/asn1"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -24,6 +26,12 @@ const (
 	payloadKeyIdentityCerts  = 6
 	payloadKeyServerCerts    = 7
 	payloadKeyMetadataHashes = 8
+)
+
+// CBOR cert entry key constants (used within valid_identity_certs / valid_server_certs arrays).
+const (
+	certEntryKeyFingerprint = 1
+	certEntryKeyCertType    = 2
 )
 
 // VerifiedStatusToken holds the decoded payload and key ID of a verified status token.
@@ -278,6 +286,9 @@ func decodeStatusPayload(data []byte) (*StatusTokenPayload, error) {
 }
 
 // decodeCertArray decodes a CBOR array of cert entries.
+// Cert entries may use integer keys (1=fingerprint, 2=cert_type) or string keys
+// ("fingerprint", "cert_type"). Fingerprints may be raw 32-byte values or
+// "SHA256:<hex>" strings.
 func decodeCertArray(dm cbor.DecMode, raw cbor.RawMessage) ([]CertEntry, error) {
 	var arr []cbor.RawMessage
 	if err := dm.Unmarshal(raw, &arr); err != nil {
@@ -292,28 +303,59 @@ func decodeCertArray(dm cbor.DecMode, raw cbor.RawMessage) ([]CertEntry, error) 
 
 	entries := make([]CertEntry, 0, len(arr))
 	for _, item := range arr {
-		var certMap map[string]cbor.RawMessage
+		var certMap map[interface{}]cbor.RawMessage
 		if err := dm.Unmarshal(item, &certMap); err != nil {
 			continue
 		}
+		get := newPayloadFieldGetter(certMap)
+
 		var entry CertEntry
-		if fpRaw, ok := certMap["fingerprint"]; ok {
-			var fp []byte
-			if err := dm.Unmarshal(fpRaw, &fp); err == nil && len(fp) == 32 {
-				copy(entry.Fingerprint[:], fp)
-			}
+		if fpRaw, ok := get(certEntryKeyFingerprint, "fingerprint"); ok {
+			entry.Fingerprint = decodeFingerprintField(dm, fpRaw)
 		}
-		if ctRaw, ok := certMap["cert_type"]; ok {
-			var ct string
-			if err := dm.Unmarshal(ctRaw, &ct); err == nil {
-				entry.CertType = CertType(ct)
-			}
+		if ctRaw, ok := get(certEntryKeyCertType, "cert_type"); ok {
+			entry.CertType = CertType(decodeStringField(dm, ctRaw))
 		}
 		if entry.Fingerprint != ([32]byte{}) {
 			entries = append(entries, entry)
 		}
 	}
 	return entries, nil
+}
+
+// decodeFingerprintField decodes a fingerprint from either raw 32-byte CBOR bytes
+// or a "SHA256:<hex>" CBOR text string.
+func decodeFingerprintField(dm cbor.DecMode, raw cbor.RawMessage) [32]byte {
+	var fp []byte
+	if err := dm.Unmarshal(raw, &fp); err == nil && len(fp) == 32 {
+		var out [32]byte
+		copy(out[:], fp)
+		return out
+	}
+
+	var s string
+	if err := dm.Unmarshal(raw, &s); err == nil {
+		if parsed, ok := parseHexFingerprint(s); ok {
+			return parsed
+		}
+	}
+	return [32]byte{}
+}
+
+// parseHexFingerprint parses "SHA256:<hex>" or bare hex into a 32-byte fingerprint.
+func parseHexFingerprint(s string) ([32]byte, bool) {
+	hexStr := s
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "sha256:") {
+		hexStr = s[7:]
+	}
+	decoded, err := hex.DecodeString(hexStr)
+	if err != nil || len(decoded) != 32 {
+		return [32]byte{}, false
+	}
+	var out [32]byte
+	copy(out[:], decoded)
+	return out, true
 }
 
 // MatchesServerCert checks if any server cert in the payload matches the given fingerprint.

@@ -2,7 +2,6 @@ package scitt
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,7 +130,7 @@ func (c *HTTPClient) FetchStatusToken(ctx context.Context, agentID string) ([]by
 	return c.fetchBytes(ctx, u)
 }
 
-// FetchRootKeys retrieves the SCITT root signing keys.
+// FetchRootKeys retrieves the SCITT root signing keys (newline-delimited C2SP key strings).
 func (c *HTTPClient) FetchRootKeys(ctx context.Context) ([]string, error) {
 	u := fmt.Sprintf("%s/root-keys", c.baseURL)
 
@@ -141,14 +140,18 @@ func (c *HTTPClient) FetchRootKeys(ctx context.Context) ([]string, error) {
 	}
 
 	var keys []string
-	if err := json.Unmarshal(body, &keys); err != nil {
-		return nil, &TransportError{
-			Type:    TransportErrHTTPError,
-			Message: "failed to decode root keys response",
-			Cause:   err,
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			keys = append(keys, line)
 		}
 	}
-
+	if len(keys) == 0 {
+		return nil, &TransportError{
+			Type:    TransportErrHTTPError,
+			Message: "no valid keys found in root keys response",
+		}
+	}
 	return keys, nil
 }
 
