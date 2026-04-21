@@ -1014,6 +1014,7 @@ func TestHeaderSupplier_CurrentHeaders_ExpiryFiltering(t *testing.T) {
 		clockTime   time.Time
 		wantToken   bool
 		wantWarnLog bool
+		nilLogger   bool
 	}{
 		{
 			name:        "token not expired — returned",
@@ -1050,6 +1051,14 @@ func TestHeaderSupplier_CurrentHeaders_ExpiryFiltering(t *testing.T) {
 			wantToken:   true,
 			wantWarnLog: false,
 		},
+		{
+			name:        "expired token with nil logger — no panic",
+			tokenExp:    int64Ptr(nowUnix - 60),
+			clockTime:   fixedNow,
+			wantToken:   false,
+			wantWarnLog: false,
+			nilLogger:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1057,14 +1066,18 @@ func TestHeaderSupplier_CurrentHeaders_ExpiryFiltering(t *testing.T) {
 			t.Parallel()
 
 			var logBuf bytes.Buffer
-			logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+			opts := []HeaderSupplierOption{
+				WithSupplierClock(func() time.Time { return tt.clockTime }),
+			}
+			if !tt.nilLogger {
+				logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+				opts = append(opts, WithSupplierLogger(logger))
+			}
 
 			store, _ := NewKeyStore([]string{})
 			rks := NewRefreshableKeyStore(store, nil)
-			s := NewHeaderSupplier("agent-1", NewMockClient(), rks,
-				WithSupplierClock(func() time.Time { return tt.clockTime }),
-				WithSupplierLogger(logger),
-			)
+			s := NewHeaderSupplier("agent-1", NewMockClient(), rks, opts...)
 
 			s.mu.Lock()
 			s.initialized = true

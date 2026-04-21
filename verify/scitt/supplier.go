@@ -165,8 +165,10 @@ func (s *HeaderSupplier) CurrentHeaders() *OutgoingHeaders {
 
 	if token != nil && tokenExp != nil && s.clock().Unix() >= *tokenExp {
 		token = nil
-		s.logger.Warn("suppressed expired status token from outgoing headers",
-			slog.Int64("exp", *tokenExp))
+		if s.logger != nil {
+			s.logger.Warn("suppressed expired status token from outgoing headers",
+				slog.Int64("exp", *tokenExp))
+		}
 	}
 
 	return &OutgoingHeaders{
