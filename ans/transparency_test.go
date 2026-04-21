@@ -1225,3 +1225,104 @@ func TestTransparencyClient_ParameterValidation(t *testing.T) {
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
+
+func TestDoRequestWithSchemaVersion_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantErr string
+	}{
+		{
+			name: "invalid JSON response",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("not-json"))
+			},
+			wantErr: "failed to parse response",
+		},
+		{
+			name: "schema version from header when missing in body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Schema-Version", "V1")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"status": "ACTIVE",
+					"payload": map[string]any{
+						"ansId":   "agent-1",
+						"ansName": "ans://v1.0.0.host.com",
+					},
+				})
+			},
+		},
+		{
+			name: "response with empty payload",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"status":        "ACTIVE",
+					"schemaVersion": "V1",
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(tt.handler)
+			defer server.Close()
+
+			client, err := NewTransparencyClient(WithBaseURL(server.URL))
+			if err != nil {
+				t.Fatalf("NewTransparencyClient() error = %v", err)
+			}
+
+			ctx := context.Background()
+			result, err := client.GetAgentTransparencyLog(ctx, "test-agent")
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Fatal("result is nil")
+				}
+			}
+		})
+	}
+}
+
+func TestDoRequestWithSchemaVersion_HTTPClientFailure(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "connection refused"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Use a server that's been shut down to simulate connection failure
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			serverURL := server.URL
+			server.Close() // Close immediately so connections fail
+
+			client, err := NewTransparencyClient(WithBaseURL(serverURL))
+			if err != nil {
+				t.Fatalf("NewTransparencyClient() error = %v", err)
+			}
+
+			ctx := context.Background()
+			_, err = client.GetAgentTransparencyLog(ctx, "test-agent")
+			if err == nil {
+				t.Fatal("expected error for connection failure")
+			}
+		})
+	}
+}

@@ -3,10 +3,14 @@ package verify
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/godaddy/ans-sdk-go/verify/scitt"
 )
 
 func createTestBadge(host, version, serverFP, identityFP string) *models.Badge {
@@ -1897,6 +1901,630 @@ func TestValidateBadgeURL(t *testing.T) {
 				}
 			} else if result != nil {
 				t.Errorf("validateBadgeURL() expected nil, got %v", result)
+			}
+		})
+	}
+}
+
+func TestConfigLogger(t *testing.T) {
+	tests := []struct {
+		name      string
+		logger    *slog.Logger
+		wantIsNil bool
+	}{
+		{
+			name:   "custom logger returned",
+			logger: slog.Default(),
+		},
+		{
+			name:   "nil logger returns slog.Default",
+			logger: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			cfg.logger = tt.logger
+			result := configLogger(cfg)
+			if result == nil {
+				t.Error("configLogger() returned nil")
+			}
+		})
+	}
+}
+
+func TestServerVerifier_VerifyWithScitt_NilHeaders(t *testing.T) {
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+		WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+		WithoutURLValidation(),
+	)
+
+	cert := createTestCertIdentity(host, fingerprint)
+	fqdn, _ := models.NewFqdn(host)
+
+	tests := []struct {
+		name    string
+		headers *scitt.Headers
+	}{
+		{name: "nil headers", headers: nil},
+		{name: "empty headers", headers: &scitt.Headers{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+			if !result.IsSuccess() {
+				t.Errorf("expected success (badge fallback), got %v", result.Type)
+			}
+			if result.Tier != TierBadgeOnly {
+				t.Errorf("Tier = %v, want TierBadgeOnly", result.Tier)
+			}
+		})
+	}
+}
+
+func TestServerVerifier_VerifyWithScitt_PartialHeaders(t *testing.T) {
+	verifier := NewServerVerifier(WithoutURLValidation())
+	fqdn, _ := models.NewFqdn("test.example.com")
+	cert := createTestCertIdentity("test.example.com", "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+
+	tests := []struct {
+		name    string
+		headers *scitt.Headers
+	}{
+		{name: "only receipt", headers: &scitt.Headers{Receipt: []byte{1, 2, 3}}},
+		{name: "only token", headers: &scitt.Headers{StatusToken: []byte{1, 2, 3}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+			if result.Type != OutcomeScittError {
+				t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+			}
+		})
+	}
+}
+
+func TestServerVerifier_VerifyWithScitt_NoKeyLookup(t *testing.T) {
+	// No WithScittKeyLookup — should return ScittError (not silent badge fallback)
+	verifier := NewServerVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	cert := createTestCertIdentity("test.example.com", "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+	fqdn, _ := models.NewFqdn("test.example.com")
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), fqdn, cert, headers)
+	if result.Type != OutcomeScittError {
+		t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error for missing key lookup")
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NilHeaders(t *testing.T) {
+	host := "test.example.com"
+	version := "v1.0.0"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, version, "SHA256:aaa", fingerprint)
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+		WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+		WithoutURLValidation(),
+	)
+
+	cert := createMTLSCertIdentity(host, version, fingerprint)
+	result := verifier.VerifyWithScitt(context.Background(), cert, nil)
+	if !result.IsSuccess() {
+		t.Errorf("expected success (badge fallback), got %v: %v", result.Type, result.Error)
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_PartialHeaders(t *testing.T) {
+	verifier := NewClientVerifier(WithoutURLValidation())
+
+	host := "test.example.com"
+	version := "v1.0.0"
+	cert := createMTLSCertIdentity(host, version, "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+
+	tests := []struct {
+		name    string
+		headers *scitt.Headers
+	}{
+		{name: "only receipt", headers: &scitt.Headers{Receipt: []byte{1, 2, 3}}},
+		{name: "only token", headers: &scitt.Headers{StatusToken: []byte{1, 2, 3}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := verifier.VerifyWithScitt(context.Background(), cert, tt.headers)
+			if result.Type != OutcomeScittError {
+				t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+			}
+		})
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NoKeyLookup(t *testing.T) {
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	host := "test.example.com"
+	version := "v1.0.0"
+	cert := createMTLSCertIdentity(host, version, "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), cert, headers)
+	if result.Type != OutcomeScittError {
+		t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "no key lookup configured") {
+		t.Errorf("expected error about missing key lookup, got: %v", result.Error)
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NoCN(t *testing.T) {
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	// Cert with no CN or DNS SANs — FQDN() returns nil
+	fp, _ := ParseCertFingerprint("SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+	cert := NewCertIdentity(nil, nil, []string{"ans://v1.0.0.test.example.com"}, fp)
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), cert, headers)
+	if result.Type != OutcomeCertError {
+		t.Errorf("Type = %v, want OutcomeCertError", result.Type)
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_EmptyHeaders(t *testing.T) {
+	host := "test.example.com"
+	version := "v1.0.0"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, version, "SHA256:aaa", fingerprint)
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+		WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+		WithoutURLValidation(),
+	)
+
+	cert := createMTLSCertIdentity(host, version, fingerprint)
+	result := verifier.VerifyWithScitt(context.Background(), cert, &scitt.Headers{})
+	if !result.IsSuccess() {
+		t.Errorf("expected success (badge fallback), got %v: %v", result.Type, result.Error)
+	}
+}
+
+func TestVerifyWithScitt_PolicyEnforcement(t *testing.T) {
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	// emptyKeyStore is a valid KeyLookup with no keys — receipt parsing will fail
+	// before key lookup is even attempted when given garbage COSE bytes.
+	emptyKeyStore, err := scitt.NewKeyStore(nil)
+	if err != nil {
+		t.Fatalf("NewKeyStore(nil) error: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		headers      *scitt.Headers
+		keyLookup    scitt.KeyLookup
+		daneResolver DANEResolver
+		wantType     OutcomeType
+		wantTier     VerificationTier
+	}{
+		{
+			name: "10.1: SCITT configured, both headers present, receipt parse fails",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0xDE, 0xAD, 0xBE, 0xEF},
+				StatusToken: []byte{0xCA, 0xFE, 0xBA, 0xBE},
+			},
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name: "10.2: SCITT configured, invalid receipt bytes, no fallback to badge",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0x01, 0x02, 0x03},
+				StatusToken: []byte{0x04, 0x05, 0x06},
+			},
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name: "10.3: SCITT configured, malformed COSE receipt, returns SCITT error",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0xFF, 0xFF, 0xFF, 0xFF},
+				StatusToken: []byte{0xAA, 0xBB, 0xCC, 0xDD},
+			},
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name:      "10.4: SCITT configured, headers missing, falls through to badge",
+			headers:   nil,
+			keyLookup: emptyKeyStore,
+			wantType:  OutcomeVerified,
+			wantTier:  TierBadgeOnly,
+		},
+		{
+			name: "10.5: SCITT not configured (no key lookup), headers present",
+			headers: &scitt.Headers{
+				Receipt:     []byte{0x01, 0x02, 0x03},
+				StatusToken: []byte{0x04, 0x05, 0x06},
+			},
+			keyLookup: nil,
+			wantType:  OutcomeScittError,
+		},
+		{
+			name:      "10.6: SCITT configured + DANE configured, headers absent, badge+DANE path",
+			headers:   nil,
+			keyLookup: emptyKeyStore,
+			daneResolver: func() DANEResolver {
+				fp, _ := ParseCertFingerprint(fingerprint)
+				return NewMockDANEResolver().
+					WithTLSA(host, 443, TLSALookupResult{
+						Found:       true,
+						DNSSECValid: true,
+						Records: []TLSARecord{
+							{Usage: 3, CertHash: fp.ToHex()},
+						},
+					})
+			}(),
+			wantType: OutcomeVerified,
+			wantTier: TierBadgeOnly,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []Option{
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+			}
+			if tt.keyLookup != nil {
+				opts = append(opts, WithScittKeyLookup(tt.keyLookup))
+			}
+			if tt.daneResolver != nil {
+				opts = append(opts, WithDANEResolver(tt.daneResolver))
+			}
+
+			verifier := NewServerVerifier(opts...)
+			cert := createTestCertIdentity(host, fingerprint)
+			fqdn, _ := models.NewFqdn(host)
+
+			outcome := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
+			}
+			if tt.wantType == OutcomeVerified && outcome.Tier != tt.wantTier {
+				t.Errorf("Tier = %v, want %v", outcome.Tier, tt.wantTier)
+			}
+			if tt.wantType == OutcomeScittError && outcome.Error == nil {
+				t.Error("expected non-nil error for ScittError outcome")
+			}
+			// 10.5: verify error message mentions missing key lookup
+			if tt.name == "10.5: SCITT not configured (no key lookup), headers present" {
+				if outcome.Error == nil || !strings.Contains(outcome.Error.Error(), "no key lookup configured") {
+					t.Errorf("expected error about missing key lookup, got: %v", outcome.Error)
+				}
+			}
+			// 10.6: verify DANE outcome is populated
+			if tt.name == "10.6: SCITT configured + DANE configured, headers absent, badge+DANE path" {
+				if outcome.DANEOutcome == nil {
+					t.Error("expected DANEOutcome to be populated for DANE-configured path")
+				}
+			}
+		})
+	}
+}
+
+// transportErrorKeyLookup implements scitt.KeyLookup and always returns a TransportError.
+type transportErrorKeyLookup struct {
+	errType scitt.TransportErrorType
+}
+
+func (t *transportErrorKeyLookup) Get(_ [4]byte) (*scitt.TrustedKey, error) {
+	return nil, &scitt.TransportError{
+		Type:    t.errType,
+		Message: "simulated transport error",
+	}
+}
+
+// buildMinimalCoseSign1 builds a minimal valid COSE_Sign1 structure for testing.
+// The signature is fake (zeros) — only structure needs to be valid for parsing.
+func buildMinimalCoseSign1(t *testing.T, kid [4]byte, payload []byte, withVDP bool) []byte {
+	t.Helper()
+
+	hdr := map[int64]interface{}{
+		1:   int64(-7), // alg = ES256
+		4:   kid[:],    // kid
+		395: int64(1),  // vds (required for receipt)
+	}
+	protectedBytes, err := cbor.Marshal(hdr)
+	if err != nil {
+		t.Fatalf("failed to encode protected header: %v", err)
+	}
+
+	var unprotected cbor.RawMessage
+	if withVDP {
+		vdpMap := map[int64]interface{}{
+			396: map[int64]interface{}{
+				int64(-1): uint64(1), // tree_size
+				int64(-2): uint64(0), // leaf_index
+			},
+		}
+		unprotected, err = cbor.Marshal(vdpMap)
+	} else {
+		unprotected, err = cbor.Marshal(map[int64]interface{}{})
+	}
+	if err != nil {
+		t.Fatalf("failed to encode unprotected header: %v", err)
+	}
+
+	sig := make([]byte, 64) // zero-filled fake signature
+
+	protEncoded, _ := cbor.Marshal(protectedBytes)
+	payloadEncoded, _ := cbor.Marshal(payload)
+	sigEncoded, _ := cbor.Marshal(sig)
+
+	arr := []cbor.RawMessage{protEncoded, unprotected, payloadEncoded, sigEncoded}
+	arrayBytes, err := cbor.Marshal(arr)
+	if err != nil {
+		t.Fatalf("failed to marshal COSE array: %v", err)
+	}
+
+	tag := cbor.RawTag{Number: 18, Content: arrayBytes}
+	tagged, err := tag.MarshalCBOR()
+	if err != nil {
+		t.Fatalf("failed to marshal tag: %v", err)
+	}
+	return tagged
+}
+
+func TestVerifyWithScitt_TransportErrorFallback(t *testing.T) {
+	t.Parallel()
+
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	kid := [4]byte{0x01, 0x02, 0x03, 0x04}
+	receipt := buildMinimalCoseSign1(t, kid, []byte("test-payload"), true)
+	token := buildMinimalCoseSign1(t, kid, []byte("token-payload"), false)
+
+	tests := []struct {
+		name     string
+		headers  *scitt.Headers
+		lookup   scitt.KeyLookup
+		wantType OutcomeType
+		wantTier VerificationTier
+	}{
+		{
+			name: "receipt transport error falls back to badge",
+			headers: &scitt.Headers{
+				Receipt:     receipt,
+				StatusToken: token,
+			},
+			lookup:   &transportErrorKeyLookup{errType: scitt.TransportErrHTTPError},
+			wantType: OutcomeVerified,
+			wantTier: TierBadgeOnly,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := []Option{
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+				WithScittKeyLookup(tt.lookup),
+			}
+
+			verifier := NewServerVerifier(opts...)
+			cert := createTestCertIdentity(host, fingerprint)
+			fqdn, _ := models.NewFqdn(host)
+
+			outcome := verifier.VerifyWithScitt(context.Background(), fqdn, cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
+			}
+			if tt.wantType == OutcomeVerified && outcome.Tier != tt.wantTier {
+				t.Errorf("Tier = %v, want %v", outcome.Tier, tt.wantTier)
+			}
+		})
+	}
+}
+
+func TestAnsVerifier_VerifyServerWithScitt(t *testing.T) {
+	host := "test.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	tests := []struct {
+		name     string
+		fqdn     string
+		headers  *scitt.Headers
+		wantType OutcomeType
+	}{
+		{
+			name:     "nil headers falls back to badge",
+			fqdn:     host,
+			headers:  nil,
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "empty headers falls back to badge",
+			fqdn:     host,
+			headers:  &scitt.Headers{},
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "invalid fqdn returns CertError",
+			fqdn:     "",
+			headers:  nil,
+			wantType: OutcomeCertError,
+		},
+		{
+			name:     "partial headers returns ScittError",
+			fqdn:     host,
+			headers:  &scitt.Headers{Receipt: []byte{1, 2}},
+			wantType: OutcomeScittError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verifier := NewAnsVerifier(
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+			)
+
+			cert := createTestCertIdentity(host, fingerprint)
+			outcome := verifier.VerifyServerWithScitt(context.Background(), tt.fqdn, cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
+			}
+		})
+	}
+}
+
+func TestAnsVerifier_VerifyClientWithScitt(t *testing.T) {
+	host := "test.example.com"
+	version := "v1.0.0"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, version, "SHA256:aaa", fingerprint)
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	tests := []struct {
+		name     string
+		headers  *scitt.Headers
+		wantType OutcomeType
+	}{
+		{
+			name:     "nil headers falls back to badge",
+			headers:  nil,
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "empty headers falls back to badge",
+			headers:  &scitt.Headers{},
+			wantType: OutcomeVerified,
+		},
+		{
+			name:     "partial headers (only receipt) returns ScittError",
+			headers:  &scitt.Headers{Receipt: []byte{1, 2}},
+			wantType: OutcomeScittError,
+		},
+		{
+			name:     "partial headers (only token) returns ScittError",
+			headers:  &scitt.Headers{StatusToken: []byte{1, 2}},
+			wantType: OutcomeScittError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verifier := NewAnsVerifier(
+				WithDNSResolver(NewMockDNSResolver().WithRecords(host, []AnsBadgeRecord{dnsRecord})),
+				WithTlogClient(NewMockTransparencyLogClient().WithBadge(badgeURL, badge)),
+				WithoutURLValidation(),
+			)
+
+			cert := createMTLSCertIdentity(host, version, fingerprint)
+			outcome := verifier.VerifyClientWithScitt(context.Background(), cert, tt.headers)
+
+			if outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v (error: %v)", outcome.Type, tt.wantType, outcome.Error)
 			}
 		})
 	}

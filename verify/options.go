@@ -1,5 +1,12 @@
 package verify
 
+import (
+	"log/slog"
+	"time"
+
+	"github.com/godaddy/ans-sdk-go/verify/scitt"
+)
+
 // Option configures a verifier.
 type Option func(*verifierConfig)
 
@@ -12,7 +19,13 @@ type verifierConfig struct {
 	failurePolicyConfig FailurePolicyConfig
 	urlValidator        *URLValidator
 	daneResolver        DANEResolver
+	scittKeyLookup      scitt.KeyLookup
+	clockSkewTolerance  time.Duration
+	logger              *slog.Logger
 }
+
+// defaultClockSkewTolerance is the default maximum allowed clock skew (120 seconds).
+const defaultClockSkewTolerance = 120 * time.Second
 
 // defaultConfig returns the default verifier configuration.
 func defaultConfig() *verifierConfig {
@@ -23,6 +36,7 @@ func defaultConfig() *verifierConfig {
 		failurePolicy:       FailClosed,
 		failurePolicyConfig: DefaultFailurePolicyConfig(),
 		urlValidator:        NewDefaultURLValidator(),
+		clockSkewTolerance:  defaultClockSkewTolerance,
 	}
 }
 
@@ -55,6 +69,11 @@ func WithCacheConfig(cfg CacheConfig) Option {
 }
 
 // WithFailurePolicy sets the failure policy for DNS/TLog errors.
+//
+// NOTE: This policy does NOT apply to SCITT verification failures — a malformed
+// or signature-invalid SCITT artifact is always terminal, regardless of FailOpen
+// settings, to prevent forgery acceptance. Only DNS and TLog infrastructure
+// failures are subject to this policy.
 func WithFailurePolicy(policy FailurePolicy) Option {
 	return func(c *verifierConfig) {
 		c.failurePolicy = policy
@@ -88,5 +107,37 @@ func WithoutURLValidation() Option {
 func WithDANEResolver(d DANEResolver) Option {
 	return func(c *verifierConfig) {
 		c.daneResolver = d
+	}
+}
+
+// WithScittKeyLookup enables SCITT verification using the given key store.
+// When set, VerifyWithScitt methods can verify SCITT receipts and status tokens.
+func WithScittKeyLookup(kl scitt.KeyLookup) Option {
+	return func(c *verifierConfig) {
+		c.scittKeyLookup = kl
+	}
+}
+
+// WithClockSkewTolerance sets the maximum allowed clock skew for status token expiry checks.
+// Negative values are clamped to 0. Values exceeding 10 minutes are clamped to 10 minutes.
+// Default is 120 seconds.
+func WithClockSkewTolerance(d time.Duration) Option {
+	return func(c *verifierConfig) {
+		if d < 0 {
+			d = 0
+		}
+		const maxSkew = 10 * time.Minute
+		if d > maxSkew {
+			d = maxSkew
+		}
+		c.clockSkewTolerance = d
+	}
+}
+
+// WithLogger sets a structured logger for verification operations.
+// When nil, slog.Default() is used.
+func WithLogger(l *slog.Logger) Option {
+	return func(c *verifierConfig) {
+		c.logger = l
 	}
 }

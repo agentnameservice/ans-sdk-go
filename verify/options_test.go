@@ -1,8 +1,11 @@
 package verify
 
 import (
+	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/godaddy/ans-sdk-go/verify/scitt"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -102,5 +105,81 @@ func TestWithDANEResolver_Option(t *testing.T) {
 	WithDANEResolver(mock)(cfg)
 	if cfg.daneResolver != mock {
 		t.Error("expected DANE resolver to be set")
+	}
+}
+
+func TestWithScittKeyLookup(t *testing.T) {
+	store, _ := scitt.NewKeyStore(nil)
+	cfg := defaultConfig()
+	WithScittKeyLookup(store)(cfg)
+	if cfg.scittKeyLookup != store {
+		t.Error("expected scitt key lookup to be set")
+	}
+}
+
+func TestWithClockSkewTolerance(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want time.Duration
+	}{
+		{
+			name: "normal value",
+			d:    5 * time.Minute,
+			want: 5 * time.Minute,
+		},
+		{
+			name: "negative clamped to zero",
+			d:    -1 * time.Second,
+			want: 0,
+		},
+		{
+			name: "exceeds max clamped to 10 minutes",
+			d:    15 * time.Minute,
+			want: 10 * time.Minute,
+		},
+		{
+			name: "zero stays zero",
+			d:    0,
+			want: 0,
+		},
+		{
+			name: "exactly 10 minutes allowed",
+			d:    10 * time.Minute,
+			want: 10 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			WithClockSkewTolerance(tt.d)(cfg)
+			if cfg.clockSkewTolerance != tt.want {
+				t.Errorf("expected %v, got %v", tt.want, cfg.clockSkewTolerance)
+			}
+		})
+	}
+}
+
+func TestWithLogger(t *testing.T) {
+	logger := slog.Default()
+	cfg := defaultConfig()
+	WithLogger(logger)(cfg)
+	if cfg.logger != logger {
+		t.Error("expected logger to be set")
+	}
+}
+
+func TestDefaultClockSkewTolerance(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.clockSkewTolerance != 120*time.Second {
+		t.Errorf("expected default 120s, got %v", cfg.clockSkewTolerance)
+	}
+}
+
+func TestDefaultScittKeyLookupNil(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.scittKeyLookup != nil {
+		t.Error("expected nil scitt key lookup by default")
 	}
 }

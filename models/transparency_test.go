@@ -1,8 +1,123 @@
 package models
 
 import (
+	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestAttestationsV1_JSONRoundTrip(t *testing.T) {
+	domainVal := "validated"
+	notAfter := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name         string
+		input        AttestationsV1
+		wantKeys     []string
+		dontWantKeys []string
+	}{
+		{
+			name: "full struct with all fields",
+			input: AttestationsV1{
+				DNSRecordsProvisioned: map[string]string{"_ans.example.com": "verified"},
+				DomainValidation:      &domainVal,
+				IdentityCert: &CertificateV1{
+					Fingerprint: "abc123",
+					Type:        CertTypeX509EVClient,
+				},
+				MetadataHashes: map[string]string{"sha256": "deadbeef"},
+				ServerCert: &CertificateV1{
+					Fingerprint: "def456",
+					Type:        CertTypeX509DVServer,
+				},
+				ValidIdentityCerts: []CertificateV1Extended{
+					{
+						CertificateV1: CertificateV1{
+							Fingerprint: "id-cert-1",
+							Type:        CertTypeX509EVClient,
+						},
+						NotAfter: &notAfter,
+					},
+				},
+				ValidServerCerts: []CertificateV1Extended{
+					{
+						CertificateV1: CertificateV1{
+							Fingerprint: "srv-cert-1",
+							Type:        CertTypeX509DVServer,
+						},
+						NotAfter: &notAfter,
+					},
+				},
+			},
+			wantKeys: []string{
+				"dnsRecordsProvisioned", "domainValidation", "identityCert",
+				"metadataHashes", "serverCert", "validIdentityCerts", "validServerCerts",
+				"notAfter",
+			},
+		},
+		{
+			name: "minimal struct with existing fields only",
+			input: AttestationsV1{
+				DomainValidation: &domainVal,
+				IdentityCert: &CertificateV1{
+					Fingerprint: "abc123",
+					Type:        CertTypeX509EVClient,
+				},
+			},
+			wantKeys:     []string{"domainValidation", "identityCert"},
+			dontWantKeys: []string{"metadataHashes", "validIdentityCerts", "validServerCerts", "dnsRecordsProvisioned", "serverCert"},
+		},
+		{
+			name: "CertificateV1Extended with nil NotAfter",
+			input: AttestationsV1{
+				ValidIdentityCerts: []CertificateV1Extended{
+					{
+						CertificateV1: CertificateV1{
+							Fingerprint: "no-expiry",
+							Type:        CertTypeX509OVClient,
+						},
+						NotAfter: nil,
+					},
+				},
+			},
+			wantKeys:     []string{"validIdentityCerts", "fingerprint"},
+			dontWantKeys: []string{"notAfter"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.input)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+
+			jsonStr := string(data)
+
+			for _, key := range tt.wantKeys {
+				if !strings.Contains(jsonStr, key) {
+					t.Errorf("marshaled JSON missing expected key %q, got: %s", key, jsonStr)
+				}
+			}
+			for _, key := range tt.dontWantKeys {
+				if strings.Contains(jsonStr, key) {
+					t.Errorf("marshaled JSON should not contain key %q, got: %s", key, jsonStr)
+				}
+			}
+
+			var got AttestationsV1
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+
+			if !reflect.DeepEqual(tt.input, got) {
+				t.Errorf("round-trip mismatch:\n  input: %+v\n  got:   %+v", tt.input, got)
+			}
+		})
+	}
+}
 
 func TestTransparencyLog_GetV1Payload(t *testing.T) {
 	v1 := &TransparencyLogV1{Producer: ProducerV1{KeyID: "test-key"}}

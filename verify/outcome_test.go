@@ -251,3 +251,94 @@ func containsStr(s, substr string) bool {
 	}
 	return false
 }
+
+func TestScittOutcomeConstructors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		outcome   *VerificationOutcome
+		wantType  OutcomeType
+		wantTier  VerificationTier
+		isSuccess bool
+	}{
+		{
+			name:      "scitt error",
+			outcome:   NewScittErrorOutcome(errors.New("scitt failed")),
+			wantType:  OutcomeScittError,
+			wantTier:  TierBadgeOnly,
+			isSuccess: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.outcome.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", tt.outcome.Type, tt.wantType)
+			}
+			if tt.outcome.Tier != tt.wantTier {
+				t.Errorf("Tier = %v, want %v", tt.outcome.Tier, tt.wantTier)
+			}
+			if tt.outcome.IsSuccess() != tt.isSuccess {
+				t.Errorf("IsSuccess() = %v, want %v", tt.outcome.IsSuccess(), tt.isSuccess)
+			}
+		})
+	}
+}
+
+func TestScittErrorToError(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("scitt verification failed")
+	outcome := NewScittErrorOutcome(err)
+	got := outcome.ToError()
+	if !errors.Is(got, err) {
+		t.Errorf("ToError() = %v, want %v", got, err)
+	}
+}
+
+func TestVerificationTier_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tier VerificationTier
+		want string
+	}{
+		{
+			name: "badge only",
+			tier: TierBadgeOnly,
+			want: "BadgeOnly",
+		},
+		{
+			name: "full scitt",
+			tier: TierFullScitt,
+			want: "FullScitt",
+		},
+		{
+			name: "unknown tier",
+			tier: VerificationTier(99),
+			want: "VerificationTier(99)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.tier.String(); got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVerificationTierDefaultsToZero(t *testing.T) {
+	t.Parallel()
+
+	// Existing constructors should default to TierBadgeOnly (zero value)
+	outcome := NewVerifiedOutcome(nil, CertFingerprint{})
+	if outcome.Tier != TierBadgeOnly {
+		t.Errorf("default Tier = %v, want TierBadgeOnly", outcome.Tier)
+	}
+}

@@ -51,16 +51,26 @@ type AgentV1 struct {
 
 // AttestationsV1 represents the attestations in V1 schema
 type AttestationsV1 struct {
-	DNSRecordsProvisioned map[string]string `json:"dnsRecordsProvisioned,omitempty"`
-	DomainValidation      *string           `json:"domainValidation,omitempty"`
-	IdentityCert          *CertificateV1    `json:"identityCert,omitempty"`
-	ServerCert            *CertificateV1    `json:"serverCert,omitempty"`
+	DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
+	DomainValidation      *string                 `json:"domainValidation,omitempty"`
+	IdentityCert          *CertificateV1          `json:"identityCert,omitempty"`
+	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
+	ServerCert            *CertificateV1          `json:"serverCert,omitempty"`
+	ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
+	ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
 }
 
 // CertificateV1 represents certificate information in V1 schema
 type CertificateV1 struct {
 	Fingerprint string   `json:"fingerprint"`
 	Type        CertType `json:"type"`
+}
+
+// CertificateV1Extended represents certificate information with validity period.
+// Used in multi-cert arrays (ValidIdentityCerts, ValidServerCerts).
+type CertificateV1Extended struct {
+	CertificateV1
+	NotAfter *time.Time `json:"notAfter,omitempty"`
 }
 
 // CertType represents certificate types
