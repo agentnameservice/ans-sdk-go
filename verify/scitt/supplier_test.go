@@ -1,6 +1,7 @@
 package scitt
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/base64"
@@ -477,6 +478,58 @@ func TestHeaderSupplierOptions(t *testing.T) {
 	}
 }
 
+func TestWithSupplierClockSkew_Clamping(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    time.Duration
+		wantSkew time.Duration
+	}{
+		{
+			name:     "negative clamped to zero",
+			input:    -1 * time.Minute,
+			wantSkew: 0,
+		},
+		{
+			name:     "massive clamped to MaxClockSkew",
+			input:    100 * 24 * time.Hour,
+			wantSkew: MaxClockSkew,
+		},
+		{
+			name:     "normal passes through",
+			input:    5 * time.Minute,
+			wantSkew: 5 * time.Minute,
+		},
+		{
+			name:     "exactly MaxClockSkew allowed",
+			input:    MaxClockSkew,
+			wantSkew: MaxClockSkew,
+		},
+		{
+			name:     "zero stays zero",
+			input:    0,
+			wantSkew: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store, _ := NewKeyStore([]string{})
+			rks := NewRefreshableKeyStore(store, nil)
+			s := NewHeaderSupplier("agent-1", NewMockClient(), rks,
+				WithSupplierClockSkew(tt.input),
+			)
+
+			if s.clockSkew != tt.wantSkew {
+				t.Errorf("clockSkew = %v, want %v", s.clockSkew, tt.wantSkew)
+			}
+		})
+	}
+}
+
 func TestOutgoingHeaders_String(t *testing.T) {
 	t.Parallel()
 
@@ -946,6 +999,96 @@ func TestHeaderSupplier_AutoRefreshLoop_FailureWithLogger(t *testing.T) {
 
 	if s.Healthy() {
 		t.Error("expected not healthy after auto-refresh failure")
+	}
+}
+
+func TestHeaderSupplier_CurrentHeaders_ExpiryFiltering(t *testing.T) {
+	t.Parallel()
+
+	fixedNow := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	nowUnix := fixedNow.Unix()
+
+	tests := []struct {
+		name        string
+		tokenExp    *int64
+		clockTime   time.Time
+		wantToken   bool
+		wantWarnLog bool
+	}{
+		{
+			name:        "token not expired — returned",
+			tokenExp:    int64Ptr(nowUnix + 3600),
+			clockTime:   fixedNow,
+			wantToken:   true,
+			wantWarnLog: false,
+		},
+		{
+			name:        "token expired — suppressed",
+			tokenExp:    int64Ptr(nowUnix - 60),
+			clockTime:   fixedNow,
+			wantToken:   false,
+			wantWarnLog: true,
+		},
+		{
+			name:        "tokenExp nil — token returned",
+			tokenExp:    nil,
+			clockTime:   fixedNow,
+			wantToken:   true,
+			wantWarnLog: false,
+		},
+		{
+			name:        "clock exactly at exp boundary — suppressed",
+			tokenExp:    int64Ptr(nowUnix),
+			clockTime:   fixedNow,
+			wantToken:   false,
+			wantWarnLog: true,
+		},
+		{
+			name:        "clock one second before exp — returned",
+			tokenExp:    int64Ptr(nowUnix),
+			clockTime:   fixedNow.Add(-1 * time.Second),
+			wantToken:   true,
+			wantWarnLog: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var logBuf bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+			store, _ := NewKeyStore([]string{})
+			rks := NewRefreshableKeyStore(store, nil)
+			s := NewHeaderSupplier("agent-1", NewMockClient(), rks,
+				WithSupplierClock(func() time.Time { return tt.clockTime }),
+				WithSupplierLogger(logger),
+			)
+
+			s.mu.Lock()
+			s.initialized = true
+			s.receipt = []byte("fake-receipt")
+			s.statusToken = []byte("fake-token")
+			s.tokenExp = tt.tokenExp
+			s.mu.Unlock()
+
+			headers := s.CurrentHeaders()
+
+			if headers.ReceiptBase64 == "" {
+				t.Error("receipt should always be returned")
+			}
+
+			gotToken := headers.StatusTokenBase64 != ""
+			if gotToken != tt.wantToken {
+				t.Errorf("StatusTokenBase64 present = %v, want %v", gotToken, tt.wantToken)
+			}
+
+			gotWarn := strings.Contains(logBuf.String(), "suppressed expired status token")
+			if gotWarn != tt.wantWarnLog {
+				t.Errorf("WARN log present = %v, want %v (log: %q)", gotWarn, tt.wantWarnLog, logBuf.String())
+			}
+		})
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -219,6 +220,12 @@ func TestVerifyStatusTokenAt(t *testing.T) {
 		nil, nil, nil,
 	)
 	missingAgentIDToken := signStatusToken(t, ki.priv, ki.kid, missingAgentIDPayload, nil)
+
+	missingAnsNamePayload := buildStatusPayloadCBOR(t,
+		"agent-123", "", StatusActive, now-60, now+3600,
+		nil, nil, nil,
+	)
+	missingAnsNameToken := signStatusToken(t, ki.priv, ki.kid, missingAnsNamePayload, nil)
 
 	missingStatusPayload := buildStatusPayloadCBOR(t,
 		"agent-123", "example.ans", "", now-60, now+3600,
@@ -441,6 +448,27 @@ func TestVerifyStatusTokenAt(t *testing.T) {
 			},
 		},
 		{
+			name:      "missing ans_name",
+			token:     missingAnsNameToken,
+			keys:      store,
+			clockSkew: 0,
+			now:       now,
+			wantErr:   true,
+			errCheck: func(t *testing.T, err error) {
+				t.Helper()
+				var tokErr *TokenError
+				if !errors.As(err, &tokErr) {
+					t.Fatalf("expected *TokenError, got %T: %v", err, err)
+				}
+				if tokErr.Type != TokenErrMissingField {
+					t.Errorf("error type = %d, want TokenErrMissingField", tokErr.Type)
+				}
+				if tokErr.Message != "ans_name" {
+					t.Errorf("error message = %q, want %q", tokErr.Message, "ans_name")
+				}
+			},
+		},
+		{
 			name:      "wrong signature",
 			token:     wrongSigToken,
 			keys:      store,
@@ -634,6 +662,113 @@ func TestVerifyStatusTokenAt(t *testing.T) {
 			}
 			if tt.resultCheck != nil {
 				tt.resultCheck(t, result)
+			}
+		})
+	}
+}
+
+func TestVerifyStatusTokenAt_ClockSkewClamping(t *testing.T) {
+	t.Parallel()
+
+	ki := generateTestKey(t, "skew-test")
+	store := newTestKeyStore(ki)
+	now := time.Now().Unix()
+
+	// Token expired 30 seconds ago — within 10-minute MaxClockSkew.
+	recentlyExpiredPayload := buildStatusPayloadCBOR(t,
+		"agent-skew", "example.ans", StatusActive, now-3600, now-30,
+		nil, nil, nil,
+	)
+	recentlyExpiredToken := signStatusToken(t, ki.priv, ki.kid, recentlyExpiredPayload, nil)
+
+	// Token expired 15 minutes ago — beyond 10-minute MaxClockSkew.
+	expiredBeyondMaxPayload := buildStatusPayloadCBOR(t,
+		"agent-skew", "example.ans", StatusActive, now-3600, now-900,
+		nil, nil, nil,
+	)
+	expiredBeyondMaxToken := signStatusToken(t, ki.priv, ki.kid, expiredBeyondMaxPayload, nil)
+
+	tests := []struct {
+		name      string
+		token     []byte
+		clockSkew time.Duration
+		wantErr   bool
+		errCheck  func(t *testing.T, err error)
+	}{
+		{
+			name:      "negative skew clamped to zero — recently expired token rejected",
+			token:     recentlyExpiredToken,
+			clockSkew: -5 * time.Minute,
+			wantErr:   true,
+			errCheck: func(t *testing.T, err error) {
+				t.Helper()
+				var tokErr *TokenError
+				if !errors.As(err, &tokErr) {
+					t.Fatalf("expected *TokenError, got %T: %v", err, err)
+				}
+				if tokErr.Type != TokenErrExpired {
+					t.Errorf("error type = %d, want TokenErrExpired", tokErr.Type)
+				}
+			},
+		},
+		{
+			name:      "massive skew clamped to MaxClockSkew — expired beyond max still rejected",
+			token:     expiredBeyondMaxToken,
+			clockSkew: 100 * 24 * time.Hour,
+			wantErr:   true,
+			errCheck: func(t *testing.T, err error) {
+				t.Helper()
+				var tokErr *TokenError
+				if !errors.As(err, &tokErr) {
+					t.Fatalf("expected *TokenError, got %T: %v", err, err)
+				}
+				if tokErr.Type != TokenErrExpired {
+					t.Errorf("error type = %d, want TokenErrExpired", tokErr.Type)
+				}
+			},
+		},
+		{
+			name:      "normal skew within MaxClockSkew — recently expired token accepted",
+			token:     recentlyExpiredToken,
+			clockSkew: 2 * time.Minute,
+			wantErr:   false,
+		},
+		{
+			name:      "math.MaxInt64 skew does not overflow — expired token still rejected",
+			token:     expiredBeyondMaxToken,
+			clockSkew: time.Duration(math.MaxInt64),
+			wantErr:   true,
+			errCheck: func(t *testing.T, err error) {
+				t.Helper()
+				var tokErr *TokenError
+				if !errors.As(err, &tokErr) {
+					t.Fatalf("expected *TokenError, got %T: %v", err, err)
+				}
+				if tokErr.Type != TokenErrExpired {
+					t.Errorf("error type = %d, want TokenErrExpired", tokErr.Type)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := VerifyStatusTokenAt(tt.token, store, tt.clockSkew, now)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errCheck != nil {
+					tt.errCheck(t, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result == nil {
+				t.Fatal("expected non-nil result")
 			}
 		})
 	}
@@ -1090,6 +1225,19 @@ func TestDecodeStatusPayload_ErrorPaths(t *testing.T) {
 				return d
 			}(),
 			wantErr: "exp",
+		},
+		{
+			name: "missing ans_name",
+			data: func() []byte {
+				m := map[interface{}]interface{}{
+					int64(1): "agent-1",
+					int64(2): "ACTIVE",
+					int64(4): time.Now().Add(time.Hour).Unix(),
+				}
+				d, _ := cbor.Marshal(m)
+				return d
+			}(),
+			wantErr: "ans_name",
 		},
 	}
 

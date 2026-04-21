@@ -595,16 +595,14 @@ func verifyWithHeaders(
 		return NewScittErrorOutcome(errors.New("certificate fingerprint does not match any cert in status token"))
 	}
 
-	// Bind token's AnsName host to the requested FQDN. A missing AnsName is
-	// tolerated (older tokens); a mismatched one is a hard failure.
-	if token.Payload.AnsName != "" {
-		ansName, err := ParseAnsName(token.Payload.AnsName)
-		if err != nil {
-			return NewScittErrorOutcome(fmt.Errorf("invalid AnsName in status token: %w", err))
-		}
-		if !strings.EqualFold(ansName.Host, fqdn.String()) {
-			return NewScittErrorOutcome(fmt.Errorf("status token AnsName host %q does not match requested fqdn %q", ansName.Host, fqdn.String()))
-		}
+	// Bind token's AnsName host to the requested FQDN.
+	// AnsName is guaranteed non-empty by decodeStatusPayload validation.
+	ansName, err := ParseAnsName(token.Payload.AnsName)
+	if err != nil {
+		return NewScittErrorOutcome(fmt.Errorf("invalid AnsName in status token: %w", err))
+	}
+	if !strings.EqualFold(ansName.Host, fqdn.String()) {
+		return NewScittErrorOutcome(fmt.Errorf("status token AnsName host %q does not match requested fqdn %q", ansName.Host, fqdn.String()))
 	}
 
 	log.InfoContext(ctx, "VerifyWithScitt: verification succeeded",

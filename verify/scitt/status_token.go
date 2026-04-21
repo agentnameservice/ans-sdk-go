@@ -13,6 +13,10 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+// MaxClockSkew is the maximum clock-skew tolerance for status token expiry
+// checks. Matches the cap in verify/options.go WithClockSkewTolerance.
+const MaxClockSkew = 10 * time.Minute
+
 // MaxCertArrayLen is the maximum number of entries allowed in cert arrays.
 const MaxCertArrayLen = 128
 
@@ -81,6 +85,12 @@ func VerifyStatusTokenAt(tokenBytes []byte, keys KeyLookup, clockSkew time.Durat
 	}
 
 	// Step 6: Check expiry.
+	if clockSkew < 0 {
+		clockSkew = 0
+	}
+	if clockSkew > MaxClockSkew {
+		clockSkew = MaxClockSkew
+	}
 	skewSeconds := int64(clockSkew / time.Second)
 	if now > payload.Exp+skewSeconds {
 		return nil, &TokenError{
@@ -279,6 +289,12 @@ func decodeStatusPayload(data []byte) (*StatusTokenPayload, error) {
 		return nil, &TokenError{
 			Type:    TokenErrMissingField,
 			Message: "exp",
+		}
+	}
+	if payload.AnsName == "" {
+		return nil, &TokenError{
+			Type:    TokenErrMissingField,
+			Message: "ans_name",
 		}
 	}
 

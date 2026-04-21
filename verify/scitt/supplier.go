@@ -92,8 +92,15 @@ func WithInitTimeout(d time.Duration) HeaderSupplierOption {
 }
 
 // WithSupplierClockSkew sets the clock skew tolerance for token verification.
+// Negative values are clamped to 0. Values exceeding MaxClockSkew are clamped.
 func WithSupplierClockSkew(d time.Duration) HeaderSupplierOption {
 	return func(s *HeaderSupplier) {
+		if d < 0 {
+			d = 0
+		}
+		if d > MaxClockSkew {
+			d = MaxClockSkew
+		}
 		s.clockSkew = d
 	}
 }
@@ -143,6 +150,7 @@ func (s *HeaderSupplier) CurrentHeaders() *OutgoingHeaders {
 	initialized := s.initialized
 	receipt := s.receipt
 	token := s.statusToken
+	tokenExp := s.tokenExp
 	s.mu.RUnlock()
 
 	if !initialized {
@@ -151,7 +159,14 @@ func (s *HeaderSupplier) CurrentHeaders() *OutgoingHeaders {
 		s.mu.RLock()
 		receipt = s.receipt
 		token = s.statusToken
+		tokenExp = s.tokenExp
 		s.mu.RUnlock()
+	}
+
+	if token != nil && tokenExp != nil && s.clock().Unix() >= *tokenExp {
+		token = nil
+		s.logger.Warn("suppressed expired status token from outgoing headers",
+			slog.Int64("exp", *tokenExp))
 	}
 
 	return &OutgoingHeaders{
