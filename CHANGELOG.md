@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.7](https://github.com/godaddy/ans-sdk-go/compare/v0.1.6...v0.1.7) (2026-04-21)
+
+
+### Features
+
+* **scitt:** add SCITT verification support ([#17](https://github.com/godaddy/ans-sdk-go/issues/17)) ([6113b0c](https://github.com/godaddy/ans-sdk-go/commit/6113b0cce5f529337cc10d275b9c39d61a872864))
+
+
+### Miscellaneous
+
+* **deps:** bump actions/upload-artifact from 7.0.0 to 7.0.1 ([#15](https://github.com/godaddy/ans-sdk-go/issues/15)) ([1725641](https://github.com/godaddy/ans-sdk-go/commit/17256413318397ca075a5d66f38f10b724a0b241))
+* **deps:** bump googleapis/release-please-action from 4.4.0 to 4.4.1 ([#16](https://github.com/godaddy/ans-sdk-go/issues/16)) ([45f68e0](https://github.com/godaddy/ans-sdk-go/commit/45f68e058f944bc7846d9b5ea2f19aa2ed6cbba9))
+
 ## [0.1.6](https://github.com/godaddy/ans-sdk-go/compare/v0.1.5...v0.1.6) (2026-03-30)
 
 
