@@ -1,0 +1,66 @@
+# GoReleaser config for the ans-cli binary.
+# Library consumers continue to use `go get` / module versions — only the CLI is packaged here.
+# Docs: https://goreleaser.com/customization/
+version: 2
+
+project_name: ans-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ans-cli
+    main: ./cmd/ans-cli
+    binary: ans-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
+archives:
+  - id: ans-cli
+    ids:
+      - ans-cli
+    name_template: "ans-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - src: cmd/ans-cli/README.md
+        dst: README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+# release-please owns the changelog and the GitHub Release body.
+# GoReleaser only attaches binaries + checksums to the existing release.
+changelog:
+  disable: true
+
+release:
+  mode: append
+  github:
+    owner: godaddy
+    name: ans-sdk-go
