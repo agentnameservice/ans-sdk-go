@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +60,61 @@ func TestBuildRootCmd(t *testing.T) {
 func TestInitConfig(_ *testing.T) {
 	// initConfig should not panic
 	initConfig()
+}
+
+func TestRootCmdVersion(t *testing.T) {
+	tests := []struct {
+		name           string
+		version        string
+		commit         string
+		date           string
+		wantSubstrings []string
+	}{
+		{
+			name:           "default ldflag values produce dev version string",
+			version:        "dev",
+			commit:         "none",
+			date:           "unknown",
+			wantSubstrings: []string{"dev", "none", "unknown"},
+		},
+		{
+			name:           "release values produce stamped version string",
+			version:        "0.1.7",
+			commit:         "abc1234",
+			date:           "2026-05-01T00:00:00Z",
+			wantSubstrings: []string{"0.1.7", "abc1234", "2026-05-01T00:00:00Z"},
+		},
+	}
+
+	origVersion, origCommit, origDate := version, commit, date
+	t.Cleanup(func() {
+		version, commit, date = origVersion, origCommit, origDate
+	})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, commit, date = tt.version, tt.commit, tt.date
+
+			cmd := buildRootCmd()
+			if cmd.Version == "" {
+				t.Fatal("rootCmd.Version is empty")
+			}
+
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"--version"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("--version returned error: %v", err)
+			}
+
+			got := out.String()
+			for _, sub := range tt.wantSubstrings {
+				if !strings.Contains(got, sub) {
+					t.Errorf("--version output missing %q\noutput: %s", sub, got)
+				}
+			}
+		})
+	}
 }
 
 func TestRun(t *testing.T) {

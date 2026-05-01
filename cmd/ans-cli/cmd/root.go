@@ -8,6 +8,14 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Build-time variables, populated by GoReleaser ldflags on tagged releases.
+// Defaults are used for `go build` / `go install` and local development.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 // Run builds and executes the root command, returning any error.
 func Run() error {
 	rootCmd := buildRootCmd()
@@ -24,8 +32,9 @@ func Execute() {
 
 func buildRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "ans-cli",
-		Short: "ANS CLI - Agent Name Service Command Line Tool",
+		Use:     "ans-cli",
+		Short:   "ANS CLI - Agent Name Service Command Line Tool",
+		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 		Long: `A command-line tool for interacting with the Agent Name Service (ANS).
 Use this tool to register agents, verify domain ownership, and search for registered agents.`,
 	}
