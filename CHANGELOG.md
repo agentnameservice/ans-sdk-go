@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/godaddy/ans-sdk-go/compare/v0.1.7...v0.1.8) (2026-05-01)
+
+
+### Features
+
+* **goreleaser:** add GoReleaser configuration for ans-cli binary builds ([#20](https://github.com/godaddy/ans-sdk-go/issues/20)) ([6bb6589](https://github.com/godaddy/ans-sdk-go/commit/6bb6589669e25489dac52d1d445cd5fac8b8df7e))
+
 ## [0.1.7](https://github.com/godaddy/ans-sdk-go/compare/v0.1.6...v0.1.7) (2026-04-21)
 
 
