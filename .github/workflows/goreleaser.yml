@@ -1,0 +1,43 @@
+# Builds and uploads ans-cli binaries (linux/darwin/windows) to the GitHub Release.
+# Triggered after release-please publishes a release; GoReleaser attaches assets
+# in append mode so release-please's changelog body is preserved.
+name: Release CLI Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.7). Required for manual runs."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    name: Build & upload ans-cli
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history + tags so `git describe` resolves the version.
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.26.x"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7.2.1
+        with:
+          distribution: goreleaser
+          # Floats to the latest v2.x release on each run. Latest as of 2026-05-01: v2.15.4.
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
