@@ -10,6 +10,9 @@ import (
 
 // Build-time variables, populated by GoReleaser ldflags on tagged releases.
 // Defaults are used for `go build` / `go install` and local development.
+// Globals are required: `-ldflags -X` can only inject into package-level vars.
+//
+//nolint:gochecknoglobals // build-time injected via -ldflags
 var (
 	version = "dev"
 	commit  = "none"
