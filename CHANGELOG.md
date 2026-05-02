@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/godaddy/ans-sdk-go/compare/v0.1.8...v0.1.9) (2026-05-02)
+
+
+### Features
+
+* **release:** combine release PR and GoReleaser for streamlined binary uploads ([#22](https://github.com/godaddy/ans-sdk-go/issues/22)) ([7883edd](https://github.com/godaddy/ans-sdk-go/commit/7883edd33aa88002365ffb12d9a2b62bd35d24d5))
+
 ## [0.1.8](https://github.com/godaddy/ans-sdk-go/compare/v0.1.7...v0.1.8) (2026-05-01)
 
 
