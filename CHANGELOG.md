@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/godaddy/ans-sdk-go/compare/v0.1.9...v0.1.10) (2026-05-06)
+
+
+### Bug Fixes
+
+* **verify-dns:** surface missingRecords/incorrectRecords on 422 ([#25](https://github.com/godaddy/ans-sdk-go/issues/25)) ([d4f2a30](https://github.com/godaddy/ans-sdk-go/commit/d4f2a30462a177949d288d9c2c5e13963fe00f46)), closes [#14](https://github.com/godaddy/ans-sdk-go/issues/14)
+
 ## [0.1.9](https://github.com/godaddy/ans-sdk-go/compare/v0.1.8...v0.1.9) (2026-05-02)
 
 
