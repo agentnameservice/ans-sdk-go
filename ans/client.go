@@ -2,6 +2,8 @@ package ans
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -97,7 +99,11 @@ func (c *Client) VerifyACME(ctx context.Context, agentID string) (*models.AgentS
 	return &result, nil
 }
 
-// VerifyDNS verifies DNS records are configured
+// VerifyDNS verifies DNS records are configured.
+// On HTTP 422, the API returns a structured payload listing missing/incorrect
+// DNS records. VerifyDNS upgrades that response to a *models.DNSVerificationError
+// (which wraps the underlying *ResponseError, so errors.As(err, &respErr) keeps
+// working). Other non-2xx statuses pass through as *models.ResponseError.
 func (c *Client) VerifyDNS(ctx context.Context, agentID string) (*models.AgentStatus, error) {
 	if err := validateRequired("agentID", agentID); err != nil {
 		return nil, err
@@ -106,9 +112,28 @@ func (c *Client) VerifyDNS(ctx context.Context, agentID string) (*models.AgentSt
 	path := fmt.Sprintf("/v1/agents/%s/verify-dns", url.PathEscape(agentID))
 	err := c.doRequest(ctx, http.MethodPost, path, nil, &result)
 	if err != nil {
-		return nil, err
+		return nil, asDNSVerificationError(err)
 	}
 	return &result, nil
+}
+
+// asDNSVerificationError upgrades a 422 *models.ResponseError into a
+// *models.DNSVerificationError when the raw body parses cleanly. All other
+// errors pass through unchanged.
+func asDNSVerificationError(err error) error {
+	var respErr *models.ResponseError
+	if !errors.As(err, &respErr) {
+		return err
+	}
+	if respErr.StatusCode != http.StatusUnprocessableEntity || len(respErr.RawBody) == 0 {
+		return err
+	}
+	var dnsErr models.DNSVerificationError
+	if jsonErr := json.Unmarshal(respErr.RawBody, &dnsErr); jsonErr != nil {
+		return err
+	}
+	dnsErr.ResponseError = respErr
+	return &dnsErr
 }
 
 // SearchAgents searches for agents using safe URL encoding

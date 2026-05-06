@@ -307,6 +307,53 @@ func TestDoRequest_UnmarshalableBody(t *testing.T) {
 	}
 }
 
+func TestHandleErrorResponse_PreservesRawBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    []byte
+		wantRaw []byte
+	}{
+		{
+			name:    "standard APIError JSON",
+			status:  http.StatusBadRequest,
+			body:    []byte(`{"status":"error","code":"BAD","message":"bad request"}`),
+			wantRaw: []byte(`{"status":"error","code":"BAD","message":"bad request"}`),
+		},
+		{
+			name:    "non-standard JSON (verify-dns 422)",
+			status:  http.StatusUnprocessableEntity,
+			body:    []byte(`{"status":"ERROR","missingRecords":[{"name":"a","type":"TXT","value":"x"}],"incorrectRecords":[]}`),
+			wantRaw: []byte(`{"status":"ERROR","missingRecords":[{"name":"a","type":"TXT","value":"x"}],"incorrectRecords":[]}`),
+		},
+		{
+			name:    "non-JSON body",
+			status:  http.StatusBadGateway,
+			body:    []byte(`bad gateway html`),
+			wantRaw: []byte(`bad gateway html`),
+		},
+		{
+			name:    "empty body",
+			status:  http.StatusInternalServerError,
+			body:    []byte{},
+			wantRaw: []byte{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := HandleErrorResponse(tt.status, tt.body)
+			var re *models.ResponseError
+			if !errors.As(err, &re) {
+				t.Fatal("expected error to be *models.ResponseError")
+			}
+			if string(re.RawBody) != string(tt.wantRaw) {
+				t.Errorf("RawBody = %q, want %q", re.RawBody, tt.wantRaw)
+			}
+		})
+	}
+}
+
 func TestDoRequest_InvalidResponseJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

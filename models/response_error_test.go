@@ -117,6 +117,33 @@ func TestResponseError_ErrorsAs(t *testing.T) {
 	}
 }
 
+func TestResponseError_RawBody(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "nil body", body: nil},
+		{name: "empty body", body: []byte{}},
+		{name: "json body", body: []byte(`{"status":"ERROR","missingRecords":[]}`)},
+		{name: "non-utf8 body", body: []byte{0xff, 0xfe, 0xfd}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := NewResponseError(http.StatusUnprocessableEntity, nil)
+			re.RawBody = tt.body
+
+			var got *ResponseError
+			if !errors.As(re, &got) {
+				t.Fatal("errors.As failed")
+			}
+			if string(got.RawBody) != string(tt.body) {
+				t.Errorf("RawBody = %v, want %v", got.RawBody, tt.body)
+			}
+		})
+	}
+}
+
 func TestResponseError_Details(t *testing.T) {
 	details := map[string]any{
 		"field":  "agentHost",

@@ -84,16 +84,22 @@ func setRequestHeaders(req *http.Request, authHeader string) {
 }
 
 // HandleErrorResponse processes error responses from the API.
-// It returns a *models.ResponseError for the given status code.
+// It returns a *models.ResponseError for the given status code, with the verbatim
+// response body preserved on the RawBody field so callers can re-parse non-standard
+// error shapes (e.g., verify-dns 422 with missingRecords/incorrectRecords).
 func HandleErrorResponse(statusCode int, respBody []byte) error {
 	var apiErr models.APIError
+	var re *models.ResponseError
 	if err := json.Unmarshal(respBody, &apiErr); err != nil {
 		// Non-JSON error body — preserve raw body as message
-		return models.NewResponseError(statusCode, &models.APIError{
+		re = models.NewResponseError(statusCode, &models.APIError{
 			Message: string(respBody),
 		})
+	} else {
+		re = models.NewResponseError(statusCode, &apiErr)
 	}
-	return models.NewResponseError(statusCode, &apiErr)
+	re.RawBody = respBody
+	return re
 }
 
 // parseSuccessResponse unmarshals a successful response
