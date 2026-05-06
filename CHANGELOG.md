@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/godaddy/ans-sdk-go/compare/v0.1.10...v0.1.11) (2026-05-06)
+
+
+### Miscellaneous
+
+* **deps:** bump googleapis/release-please-action from 4.4.1 to 5.0.0 ([#19](https://github.com/godaddy/ans-sdk-go/issues/19)) ([9feaed9](https://github.com/godaddy/ans-sdk-go/commit/9feaed9a8c5331f60d7ccef64517f9ec9795bb56))
+
 ## [0.1.10](https://github.com/godaddy/ans-sdk-go/compare/v0.1.9...v0.1.10) (2026-05-06)
 
 
