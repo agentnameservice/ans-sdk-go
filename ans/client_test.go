@@ -690,6 +690,177 @@ func TestClient_VerifyDNS(t *testing.T) {
 	}
 }
 
+func TestClient_VerifyDNS_422_ReturnsDNSVerificationError(t *testing.T) {
+	tests := []struct {
+		name             string
+		body             string
+		contentType      string
+		wantTyped        bool // expect *models.DNSVerificationError
+		wantMissingCount int
+		wantIncorrCount  int
+	}{
+		{
+			name: "missingRecords only",
+			body: `{
+				"status": "ERROR",
+				"missingRecords": [
+					{"name":"_ans.example.com","type":"TXT","value":"v=ans1","required":true},
+					{"name":"example.com","type":"HTTPS","value":"1 . alpn=h2"}
+				],
+				"incorrectRecords": []
+			}`,
+			contentType:      "application/json",
+			wantTyped:        true,
+			wantMissingCount: 2,
+			wantIncorrCount:  0,
+		},
+		{
+			name: "incorrectRecords only",
+			body: `{
+				"status": "ERROR",
+				"missingRecords": [],
+				"incorrectRecords": [
+					{"name":"a.b","type":"TXT","value":"wrong"}
+				]
+			}`,
+			contentType:      "application/json",
+			wantTyped:        true,
+			wantMissingCount: 0,
+			wantIncorrCount:  1,
+		},
+		{
+			name: "both populated",
+			body: `{
+				"status": "ERROR",
+				"missingRecords": [{"name":"a","type":"TXT","value":"x"}],
+				"incorrectRecords": [{"name":"b","type":"TXT","value":"y"}]
+			}`,
+			contentType:      "application/json",
+			wantTyped:        true,
+			wantMissingCount: 1,
+			wantIncorrCount:  1,
+		},
+		{
+			name:             "neither array (degenerate)",
+			body:             `{"status":"ERROR"}`,
+			contentType:      "application/json",
+			wantTyped:        true,
+			wantMissingCount: 0,
+			wantIncorrCount:  0,
+		},
+		{
+			name:        "malformed JSON falls back to *ResponseError",
+			body:        `{not json`,
+			contentType: "application/json",
+			wantTyped:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			client, _ := NewClient(WithBaseURL(server.URL), WithJWT("token"))
+			_, err := client.VerifyDNS(context.Background(), "agent-123")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			// *ResponseError must always be reachable for backwards compat.
+			var respErr *models.ResponseError
+			if !errors.As(err, &respErr) {
+				t.Fatal("errors.As(*ResponseError) failed; backwards compat broken")
+			}
+			if respErr.StatusCode != http.StatusUnprocessableEntity {
+				t.Errorf("StatusCode = %d, want 422", respErr.StatusCode)
+			}
+
+			var dnsErr *models.DNSVerificationError
+			gotTyped := errors.As(err, &dnsErr)
+			if gotTyped != tt.wantTyped {
+				t.Fatalf("errors.As(*DNSVerificationError) = %v, want %v", gotTyped, tt.wantTyped)
+			}
+			if !tt.wantTyped {
+				return
+			}
+			if len(dnsErr.MissingRecords) != tt.wantMissingCount {
+				t.Errorf("MissingRecords len = %d, want %d", len(dnsErr.MissingRecords), tt.wantMissingCount)
+			}
+			if len(dnsErr.IncorrectRecords) != tt.wantIncorrCount {
+				t.Errorf("IncorrectRecords len = %d, want %d", len(dnsErr.IncorrectRecords), tt.wantIncorrCount)
+			}
+		})
+	}
+}
+
+func TestClient_VerifyDNS_NonDNSStatusCodesUnchanged(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{name: "400 stays *ResponseError", status: http.StatusBadRequest},
+		{name: "401 stays *ResponseError", status: http.StatusUnauthorized},
+		{name: "500 stays *ResponseError", status: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_ = json.NewEncoder(w).Encode(&models.APIError{Status: "error", Code: "X", Message: "y"})
+			}))
+			defer server.Close()
+
+			client, _ := NewClient(WithBaseURL(server.URL), WithJWT("token"))
+			_, err := client.VerifyDNS(context.Background(), "agent-123")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			var dnsErr *models.DNSVerificationError
+			if errors.As(err, &dnsErr) {
+				t.Fatalf("non-422 status %d should not produce DNSVerificationError", tt.status)
+			}
+			var respErr *models.ResponseError
+			if !errors.As(err, &respErr) {
+				t.Fatal("expected *ResponseError")
+			}
+			if respErr.StatusCode != tt.status {
+				t.Errorf("StatusCode = %d, want %d", respErr.StatusCode, tt.status)
+			}
+		})
+	}
+}
+
+func TestAsDNSVerificationError_NonResponseErrorPassesThrough(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "nil", err: nil},
+		{name: "plain error", err: errors.New("network down")},
+		{name: "validation error", err: errors.New("agentID is required")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := asDNSVerificationError(tt.err)
+			// Identity comparison is intentional: we are asserting the function
+			// returned the *same* error reference unchanged, not just an
+			// equivalent error in the chain.
+			//nolint:errorlint // identity check, not chain comparison
+			if got != tt.err {
+				t.Errorf("asDNSVerificationError = %v, want unchanged input %v", got, tt.err)
+			}
+		})
+	}
+}
+
 func TestClient_GetIdentityCertificates(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

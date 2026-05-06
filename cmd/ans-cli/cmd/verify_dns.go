@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"text/tabwriter"
 
 	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/godaddy/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +46,15 @@ func runVerifyDNS(_ *cobra.Command, args []string) error {
 	ctx := context.Background()
 	result, err := c.VerifyDNS(ctx, agentID)
 	if err != nil {
+		var dnsErr *models.DNSVerificationError
+		if errors.As(err, &dnsErr) {
+			// Typed DNS error already prefixes "DNS verification failed:"; don't
+			// double-prefix. Error output goes to stderr so `verify-dns ... -j | jq`
+			// automation that captures stdout doesn't conflate failure envelopes
+			// with success-shaped data.
+			printDNSVerificationError(os.Stderr, dnsErr, cfg.JSON)
+			return err
+		}
 		return fmt.Errorf("DNS verification failed: %w", err)
 	}
 
@@ -72,4 +84,40 @@ func runVerifyDNS(_ *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// printDNSVerificationError renders a DNSVerificationError. In JSON mode it
+// emits the wire-shape struct directly; in text mode it prints two readable
+// tables (missing / incorrect) with the fields a user needs to configure DNS.
+func printDNSVerificationError(w io.Writer, e *models.DNSVerificationError, asJSON bool) {
+	if asJSON {
+		jsonData, _ := json.MarshalIndent(e, "", "  ")
+		fmt.Fprintln(w, string(jsonData))
+		return
+	}
+
+	if len(e.MissingRecords) > 0 {
+		fmt.Fprintln(w, "\nMissing DNS records (configure these):")
+		writeRecordsTable(w, e.MissingRecords)
+	}
+	if len(e.IncorrectRecords) > 0 {
+		fmt.Fprintln(w, "\nIncorrect DNS records (fix these):")
+		writeRecordsTable(w, e.IncorrectRecords)
+	}
+}
+
+// tabwriterColumnPadding sets the number of pad spaces between columns.
+const tabwriterColumnPadding = 2
+
+func writeRecordsTable(w io.Writer, records []models.DNSRecord) {
+	tw := tabwriter.NewWriter(w, 0, 0, tabwriterColumnPadding, ' ', 0)
+	fmt.Fprintln(tw, "  NAME\tTYPE\tVALUE\tREQUIRED")
+	for _, r := range records {
+		required := ""
+		if r.Required {
+			required = "yes"
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Name, r.Type, r.Value, required)
+	}
+	_ = tw.Flush()
 }

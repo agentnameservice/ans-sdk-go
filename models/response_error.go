@@ -7,11 +7,14 @@ import (
 
 // ResponseError represents a structured API error response.
 // Callers extract structured data with errors.As() and check StatusCode directly.
+// RawBody preserves the verbatim response body so callers can re-parse non-standard
+// error shapes (e.g., the verify-dns 422 payload with missingRecords/incorrectRecords).
 type ResponseError struct {
 	StatusCode int            // HTTP status code (e.g., 400, 404, 500)
 	Code       string         // API error code (e.g., "INVALID_AGENT_HOST")
 	Message    string         // Human-readable error message from server
 	Details    map[string]any // Additional error details (optional)
+	RawBody    []byte         // Verbatim response body, preserved for re-parsing
 }
 
 // NewResponseError creates a ResponseError for the given HTTP status code.
