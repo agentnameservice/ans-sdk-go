@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/godaddy/ans-sdk-go/compare/v0.1.11...v0.1.12) (2026-05-06)
+
+
+### Miscellaneous
+
+* **deps:** bump github.com/fxamacker/cbor/v2 from 2.9.1 to 2.9.2 ([#24](https://github.com/godaddy/ans-sdk-go/issues/24)) ([5cfcbbb](https://github.com/godaddy/ans-sdk-go/commit/5cfcbbb6d5e3766149f367178efebea624a051b0))
+
 ## [0.1.11](https://github.com/godaddy/ans-sdk-go/compare/v0.1.10...v0.1.11) (2026-05-06)
 
 
