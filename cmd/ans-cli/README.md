@@ -4,14 +4,93 @@ A command-line tool for interacting with the Agent Name Service (ANS). Use this 
 
 ## Installation
 
+Five install options, in recommended order:
+
+### Install with Homebrew (macOS / Linux)
+
+```bash
+brew install godaddy/ans/ans-cli
+```
+
+This auto-taps <https://github.com/godaddy/homebrew-ans> the first time you reference it. To upgrade later: `brew upgrade ans-cli`.
+
+### Install with Scoop (Windows)
+
+```powershell
+scoop bucket add ans https://github.com/godaddy/scoop-ans
+scoop install ans/ans-cli
+```
+
+To upgrade later: `scoop update ans-cli`.
+
+### Download a release binary
+
+Prebuilt binaries for linux, macOS, and Windows are published with each release.
+
+- Browse releases: <https://github.com/godaddy/ans-sdk-go/releases/latest>
+- Archive name pattern: `ans-cli_<version>_<os>_<arch>.tar.gz` (linux/darwin) or `ans-cli_<version>_windows_<arch>.zip`
+- Supported targets: `linux_amd64`, `linux_arm64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`, `windows_arm64`
+
+In the snippets below, replace `<version>` with the latest release tag from <https://github.com/godaddy/ans-sdk-go/releases/latest> (e.g., `0.1.10`). The leading `v` is part of the tag (`v0.1.10`) but **not** part of the archive filenames.
+
+#### macOS / Linux one-liner
+
+```bash
+VERSION=<version>   # e.g. 0.1.10 — look up at https://github.com/godaddy/ans-sdk-go/releases/latest
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+curl -L "https://github.com/godaddy/ans-sdk-go/releases/download/v${VERSION}/ans-cli_${VERSION}_${OS}_${ARCH}.tar.gz" \
+  | tar -xz ans-cli
+sudo mv ans-cli /usr/local/bin/
+ans-cli --version
+```
+
+#### Windows (amd64 + arm64)
+
+Most Windows users will prefer the Scoop install above. If you want the raw archive:
+
+1. Download the appropriate zip for your architecture from the [latest release](https://github.com/godaddy/ans-sdk-go/releases/latest):
+   - amd64 (most PCs): `ans-cli_<version>_windows_amd64.zip`
+   - arm64 (Surface Pro X, Snapdragon X laptops, Windows VMs on Apple Silicon): `ans-cli_<version>_windows_arm64.zip`
+2. Extract `ans-cli.exe` to a directory on your `%PATH%` (e.g., `C:\Tools\ans-cli\`).
+3. Verify: `ans-cli.exe --version`
+
+#### Verify the download against `checksums.txt`
+
+Each release ships a `checksums.txt` of SHA-256 hashes. Download it alongside the archive, then:
+
+- macOS: `shasum -a 256 -c checksums.txt --ignore-missing`
+- Linux: `sha256sum -c checksums.txt --ignore-missing`
+- Windows (PowerShell): `Get-FileHash -Algorithm SHA256 ans-cli_<version>_windows_<arch>.zip` and compare the hash against the corresponding line in `checksums.txt`.
+
+### Install with `go install`
+
+If you have Go 1.25 or newer:
+
+```bash
+# Track the latest tag
+go install github.com/godaddy/ans-sdk-go/cmd/ans-cli@latest
+
+# Or pin to a specific release (recommended for reproducible installs).
+# Replace <version> with a tag from https://github.com/godaddy/ans-sdk-go/releases — include the leading `v`.
+go install github.com/godaddy/ans-sdk-go/cmd/ans-cli@v<version>
+```
+
+The binary lands in `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin`. Make sure that directory is on your `PATH`.
+
+> **Heads up:** `go install` does not embed the version metadata that GoReleaser injects, so `ans-cli --version` will report the in-source defaults (`version: dev`, `commit: none`, `date: unknown`). Download a release archive if you need accurate build provenance.
+
 ### Build from source
+
+For contributors and local testing:
 
 ```bash
 cd cmd/ans-cli
 go build -o ans-cli .
+./ans-cli --version
 ```
 
-The binary will be created in the current directory.
+The binary is written to the current directory.
 
 ## Configuration
 
@@ -112,6 +191,9 @@ ans-cli register \
   --identity-csr ./certs/identity.csr \
   --server-csr ./certs/server.csr \
   --endpoint-url https://myagent.example.com/api \
+  --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
   --function "analyze-sentiment:Sentiment Analysis:nlp,ml" \
   --function "extract-entities:Entity Extraction:nlp,ner" \
   --function "summarize:Text Summarization:nlp"
@@ -339,6 +421,8 @@ ans-cli register \
   --server-csr ./certs/server.csr \
   --endpoint-url https://myagent.example.com/mcp \
   --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
   --function "analyze:Analyze Data:analytics,ml" \
   --function "predict:Make Predictions:ml,forecasting"
 
@@ -399,7 +483,11 @@ ans-cli register \
   --version 1.0.0 \
   --identity-csr ./certs/identity.csr \
   --server-csr ./certs/server.csr \
-  --endpoint-url https://myagent.example.com/mcp
+  --endpoint-url https://myagent.example.com/mcp \
+  --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
+  --function "analyze:Analyze Data:analytics"
 ```
 
 ### Register with metadata URL
@@ -412,6 +500,8 @@ ans-cli register \
   --server-csr ./certs/server.csr \
   --endpoint-url https://myagent.example.com/mcp \
   --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
   --function "analyze:Analyze Data:analytics"
 ```
 
