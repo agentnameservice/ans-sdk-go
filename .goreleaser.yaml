@@ -50,6 +50,46 @@ archives:
       - src: cmd/ans-cli/README.md
         dst: README.md
 
+brews:
+  - name: ans-cli
+    ids:
+      - ans-cli
+    repository:
+      owner: godaddy
+      name: homebrew-ans
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_ANS_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/godaddy/ans-sdk-go"
+    description: "Command-line tool for the Agent Name Service (ANS) Registry"
+    license: "MIT"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore(brew): ans-cli {{ .Tag }}"
+    install: |
+      bin.install "ans-cli"
+    test: |
+      system "#{bin}/ans-cli", "--version"
+
+scoops:
+  - name: ans-cli
+    ids:
+      - ans-cli
+    repository:
+      owner: godaddy
+      name: scoop-ans
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_ANS_GITHUB_TOKEN }}"
+    directory: bucket
+    homepage: "https://github.com/godaddy/ans-sdk-go"
+    description: "Command-line tool for the Agent Name Service (ANS) Registry"
+    license: "MIT"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore(scoop): ans-cli {{ .Tag }}"
+
 checksum:
   name_template: checksums.txt
   algorithm: sha256
