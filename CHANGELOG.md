@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/godaddy/ans-sdk-go/compare/v0.1.12...v0.1.13) (2026-05-07)
+
+
+### Features
+
+* **installation:** add Homebrew and Scoop installation options for a… ([#29](https://github.com/godaddy/ans-sdk-go/issues/29)) ([70f10e8](https://github.com/godaddy/ans-sdk-go/commit/70f10e85ca9b149c5b385a4acc2a4621c9ae939d))
+
 ## [0.1.12](https://github.com/godaddy/ans-sdk-go/compare/v0.1.11...v0.1.12) (2026-05-06)
 
 
