@@ -432,22 +432,30 @@ The SDK includes a comprehensive CLI tool for interacting with ANS:
 
 Five options, in recommended order:
 
-```bash
-# 1. Install with Homebrew (macOS / Linux)
-brew install godaddy/ans/ans-cli
+**1. Install with Homebrew (macOS / Linux)**
 
-# 2. Install with Scoop (Windows)
+```bash
+brew install godaddy/ans/ans-cli
+```
+
+**2. Install with Scoop (Windows, PowerShell)**
+
+```powershell
 scoop bucket add ans https://github.com/godaddy/scoop-ans
 scoop install ans/ans-cli
+```
 
-# 3. Download a prebuilt release binary (linux/darwin/windows × amd64/arm64)
-#    Archives at: https://github.com/godaddy/ans-sdk-go/releases/latest
-#    Pattern: ans-cli_<version>_<os>_<arch>.tar.gz (or .zip on Windows)
+**3. Download a prebuilt release binary** — `linux`/`darwin`/`windows` × `amd64`/`arm64`. Archives at <https://github.com/godaddy/ans-sdk-go/releases/latest>. Pattern: `ans-cli_<version>_<os>_<arch>.tar.gz` (or `.zip` on Windows).
 
-# 4. Install with Go (requires Go >= 1.25)
+**4. Install with Go** (requires Go ≥ 1.25)
+
+```bash
 go install github.com/godaddy/ans-sdk-go/cmd/ans-cli@latest
+```
 
-# 5. Build from source
+**5. Build from source**
+
+```bash
 cd cmd/ans-cli && go build -o ans-cli .
 ```
 
