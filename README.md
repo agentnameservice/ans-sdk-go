@@ -1,25 +1,99 @@
-# ANS Registry Go SDK
+# ANS CLI and Go SDK
 
-A comprehensive Go SDK for interacting with the Agent Name Service (ANS) Registry Authority and Transparency Log.
+A command-line tool and Go SDK for the Agent Name Service (ANS) Registry Authority and Transparency Log.
 
+- **`ans-cli`** ([cmd/ans-cli](cmd/ans-cli)) — the fastest way to register, verify, and manage agents from a terminal. Most users start here.
+- **Go SDK** (`github.com/godaddy/ans-sdk-go/ans`) — the library the CLI is built on. Embed it in Go services that need to register agents programmatically, verify agent badges, or query the Transparency Log.
 
 ## API Specification Reference
 
-The ANS Registry SDK is based off of the REST API. The spec is documented using the OpenAPI (Swagger) specification:
-- [View OpenAPI Spec - Human Readable](https://developer.godaddy.com/doc/endpoint/ans)
-- [OpenAPI Spec - AI/Machine Readable](https://developer.godaddy.com/swagger/swagger_ans.json)
+Both the CLI and the SDK target the published REST API:
+- [View OpenAPI Spec — Human Readable](https://developer.godaddy.com/doc/endpoint/ans)
+- [OpenAPI Spec — AI/Machine Readable](https://developer.godaddy.com/swagger/swagger_ans.json)
 
-## CLI Tool
+## CLI Quickstart
 
-A full-featured CLI for interacting with ANS is included in this repository. See [cmd/ans-cli](cmd/ans-cli) for installation and usage instructions.
+### Install
 
-## Installation
+Top two options shown; see [cmd/ans-cli/README.md#installation](cmd/ans-cli/README.md#installation) for all five (release archive, `go install`, build from source).
+
+```bash
+# macOS / Linux
+brew install godaddy/ans/ans-cli
+```
+
+```powershell
+# Windows (PowerShell)
+scoop bucket add ans https://github.com/godaddy/scoop-ans
+scoop install ans/ans-cli
+```
+
+### Authenticate
+
+```bash
+export ANS_API_KEY="your-api-key"
+export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
+```
+
+### Register an agent (end-to-end)
+
+```bash
+# 1. Generate identity + server CSRs
+ans-cli generate-csr \
+  --host myagent.example.com \
+  --org "Example Corp" \
+  --version 1.0.0 \
+  --out-dir ./certs
+
+# 2. Register the agent — declare endpoint, transports, and functions with tags
+ans-cli register \
+  --name "My Agent" \
+  --host myagent.example.com \
+  --version 1.0.0 \
+  --description "An AI agent that analyzes sentiment" \
+  --identity-csr ./certs/identity.csr \
+  --server-csr ./certs/server.csr \
+  --endpoint-url https://myagent.example.com/mcp \
+  --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
+  --function "analyze-sentiment:Sentiment Analysis:nlp,ml" \
+  --function "extract-entities:Entity Extraction:nlp,ner"
+
+# Note the agentId from the response.
+
+# 3. Place the DNS TXT record shown in the registration response.
+
+# 4. Trigger ACME validation
+ans-cli verify-acme <agentId>
+
+# 5. Poll until certificates are ready
+ans-cli status <agentId>
+
+# 6. Retrieve your certificates
+ans-cli get-identity-certs <agentId>
+ans-cli get-server-certs <agentId>
+```
+
+### Other common commands
+
+```bash
+ans-cli search --name "My Agent"
+ans-cli resolve myagent.example.com --version "^1.0.0"
+ans-cli badge <agentId> --audit
+ans-cli events --follow
+ans-cli revoke <agentId> --reason SUPERSEDED --comments "Replaced by v2.0.0"
+```
+
+For full per-command flag references and additional workflows, see [cmd/ans-cli/README.md](cmd/ans-cli/README.md). For release-engineering / publishing the CLI, see [RELEASE.md](RELEASE.md).
+
+## SDK Installation
 
 ```bash
 go get github.com/godaddy/ans-sdk-go
 ```
 
-## Quick Start
+## SDK Quick Start
 
 ### Registry Authority Client
 
@@ -55,9 +129,10 @@ func main() {
         IdentityCSRPEM:   string(identityCSR),
         Endpoints: []models.AgentEndpoint{
             {
-                AgentURL:   "https://my-agent.example.com/mcp",
-                Protocol:   "MCP",
-                Transports: []string{"STREAMABLE-HTTP"},
+                AgentURL:    "https://my-agent.example.com/mcp",
+                MetaDataURL: "https://my-agent.example.com/.well-known/agent-card.json",
+                Protocol:    "MCP",
+                Transports:  []string{"STREAMABLE-HTTP"},
                 Functions: []models.AgentFunction{
                     {
                         ID:   "search",
@@ -423,81 +498,6 @@ if err != nil {
         fmt.Printf("Error: %v\n", err)
     }
 }
-
-## CLI Tool
-
-The SDK includes a comprehensive CLI tool for interacting with ANS:
-
-### Installation
-
-Five options, in recommended order:
-
-**1. Install with Homebrew (macOS / Linux)**
-
-```bash
-brew install godaddy/ans/ans-cli
-```
-
-**2. Install with Scoop (Windows, PowerShell)**
-
-```powershell
-scoop bucket add ans https://github.com/godaddy/scoop-ans
-scoop install ans/ans-cli
-```
-
-**3. Download a prebuilt release binary** — `linux`/`darwin`/`windows` × `amd64`/`arm64`. Archives at <https://github.com/godaddy/ans-sdk-go/releases/latest>. Pattern: `ans-cli_<version>_<os>_<arch>.tar.gz` (or `.zip` on Windows).
-
-**4. Install with Go** (requires Go ≥ 1.25)
-
-```bash
-go install github.com/godaddy/ans-sdk-go/cmd/ans-cli@latest
-```
-
-**5. Build from source**
-
-```bash
-cd cmd/ans-cli && go build -o ans-cli .
-```
-
-See [cmd/ans-cli/README.md](cmd/ans-cli/README.md#installation) for full instructions, checksum verification, and Windows steps.
-
-### Usage Examples
-
-```bash
-# Set authentication
-export ANS_API_KEY="your-jwt-token"
-export ANS_BASE_URL="https://api.godaddy.com"
-
-# Register a new agent
-ans-cli register \
-  --name "My Agent" \
-  --host "my-agent.example.com" \
-  --version "1.0.0" \
-  --identity-csr ./identity.csr \
-  --endpoint-url "https://my-agent.example.com/api" \
-  --metadata-url "https://my-agent.example.com/.well-known/agent-card.json"
-
-# Search for agents
-ans-cli search --name "My Agent"
-
-# Resolve an agent by host
-ans-cli resolve my-agent.example.com --version "^1.0.0"
-
-# Get agent status
-ans-cli status <agent-id>
-
-# Verify ACME challenges
-ans-cli verify-acme <agent-id>
-
-# Revoke an agent
-ans-cli revoke <agent-id> --reason SUPERSEDED --comments "Replaced by v2.0.0"
-
-# Get transparency log badge
-ans-cli badge <agentId> --audit
-
-# Follow events in real-time
-ans-cli events --follow
-```
 
 ## Package Structure
 

@@ -191,6 +191,9 @@ ans-cli register \
   --identity-csr ./certs/identity.csr \
   --server-csr ./certs/server.csr \
   --endpoint-url https://myagent.example.com/api \
+  --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
   --function "analyze-sentiment:Sentiment Analysis:nlp,ml" \
   --function "extract-entities:Entity Extraction:nlp,ner" \
   --function "summarize:Text Summarization:nlp"
@@ -418,6 +421,8 @@ ans-cli register \
   --server-csr ./certs/server.csr \
   --endpoint-url https://myagent.example.com/mcp \
   --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
   --function "analyze:Analyze Data:analytics,ml" \
   --function "predict:Make Predictions:ml,forecasting"
 
@@ -478,7 +483,11 @@ ans-cli register \
   --version 1.0.0 \
   --identity-csr ./certs/identity.csr \
   --server-csr ./certs/server.csr \
-  --endpoint-url https://myagent.example.com/mcp
+  --endpoint-url https://myagent.example.com/mcp \
+  --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
+  --function "analyze:Analyze Data:analytics"
 ```
 
 ### Register with metadata URL
@@ -491,6 +500,8 @@ ans-cli register \
   --server-csr ./certs/server.csr \
   --endpoint-url https://myagent.example.com/mcp \
   --metadata-url https://myagent.example.com/.well-known/agent-card.json \
+  --endpoint-protocol MCP \
+  --endpoint-transports STREAMABLE-HTTP \
   --function "analyze:Analyze Data:analytics"
 ```
 

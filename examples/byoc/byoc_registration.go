@@ -39,6 +39,7 @@ func main() {
 		agentVersion     = "1.0.0"
 		agentDescription = "An agent registered with BYOC workflow"
 		endpointURL      = "https://myagent.example.com/api"
+		endpointMetaURL  = "https://myagent.example.com/.well-known/agent-card.json"
 		endpointProtocol = "MCP"
 	)
 
@@ -119,12 +120,26 @@ func main() {
 		req.ServerCertificateChainPEM = string(serverChainData)
 	}
 
-	// Add endpoint configuration
+	// Add endpoint configuration — declare the agent's URL, metadata, transports,
+	// and the functions it offers (each function may carry tags for discovery).
 	req.Endpoints = []models.AgentEndpoint{
 		{
-			AgentURL:   endpointURL,
-			Protocol:   endpointProtocol,
-			Transports: []string{"STREAMABLE-HTTP"},
+			AgentURL:    endpointURL,
+			MetaDataURL: endpointMetaURL,
+			Protocol:    endpointProtocol,
+			Transports:  []string{"STREAMABLE-HTTP"},
+			Functions: []models.AgentFunction{
+				{
+					ID:   "analyze-sentiment",
+					Name: "Sentiment Analysis",
+					Tags: []string{"nlp", "ml"},
+				},
+				{
+					ID:   "extract-entities",
+					Name: "Entity Extraction",
+					Tags: []string{"nlp", "ner"},
+				},
+			},
 		},
 	}
 
