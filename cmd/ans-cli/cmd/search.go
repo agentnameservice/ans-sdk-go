@@ -8,40 +8,52 @@ import (
 	"os"
 	"strings"
 
+	"github.com/godaddy/ans-sdk-go/ans"
 	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
 	"github.com/godaddy/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
 
+// searchParams holds the flag-bound inputs for the `ans-cli search` command.
+type searchParams struct {
+	name     string
+	host     string
+	version  string
+	protocol string
+	statuses []string
+	limit    int
+	offset   int
+}
+
 func buildSearchCmd() *cobra.Command {
-	var (
-		searchName    string
-		searchHost    string
-		searchVersion string
-		searchLimit   int
-		searchOffset  int
-	)
+	p := &searchParams{}
 
 	cmd := &cobra.Command{
 		Use:   "search",
 		Short: "Search for registered agents",
 		Long: `Search the Agent Name Service registry using flexible criteria such as
-agent name, host domain, and version ranges.`,
+agent name, host domain, version ranges, protocol, or lifecycle status.
+
+By default the registry returns only ACTIVE agents. Use --status PENDING_DNS to
+find registrations still completing DNS validation, or --status ALL to see
+agents in every lifecycle state.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runSearchWithParams(searchName, searchHost, searchVersion, searchLimit, searchOffset)
+			return runSearchWithParams(p)
 		},
 	}
 
-	cmd.Flags().StringVar(&searchName, "name", "", "Agent display name (partial matching supported)")
-	cmd.Flags().StringVar(&searchHost, "host", "", "Agent host domain (partial matching supported)")
-	cmd.Flags().StringVar(&searchVersion, "version", "", "Agent version (flexible matching supported)")
-	cmd.Flags().IntVar(&searchLimit, "limit", DefaultSearchLimit, "Maximum number of results (default: 20, max: 100)")
-	cmd.Flags().IntVar(&searchOffset, "offset", 0, "Number of results to skip for pagination")
+	cmd.Flags().StringVar(&p.name, "name", "", "Agent display name (partial matching supported)")
+	cmd.Flags().StringVar(&p.host, "host", "", "Agent host domain (partial matching supported)")
+	cmd.Flags().StringVar(&p.version, "version", "", "Agent version (flexible matching supported)")
+	cmd.Flags().StringVar(&p.protocol, "protocol", "", "Endpoint protocol filter (A2A, MCP, HTTP-API)")
+	cmd.Flags().StringSliceVar(&p.statuses, "status", nil, "Lifecycle status filter, repeatable (PENDING_DNS, ACTIVE, DEPRECATED, REVOKED, ALL)")
+	cmd.Flags().IntVar(&p.limit, "limit", DefaultSearchLimit, "Maximum number of results (default: 20, max: 100)")
+	cmd.Flags().IntVar(&p.offset, "offset", 0, "Number of results to skip for pagination")
 
 	return cmd
 }
 
-func runSearchWithParams(searchName, searchHost, searchVersion string, searchLimit, searchOffset int) error {
+func runSearchWithParams(p *searchParams) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -51,19 +63,19 @@ func runSearchWithParams(searchName, searchHost, searchVersion string, searchLim
 		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
 	}
 
-	// Validate search criteria
-	if searchName == "" && searchHost == "" && searchVersion == "" {
-		return errors.New("at least one search criteria is required (--name, --host, or --version)")
+	if p.name == "" && p.host == "" && p.version == "" && p.protocol == "" && len(p.statuses) == 0 {
+		return errors.New("at least one search criteria is required (--name, --host, --version, --protocol, or --status)")
 	}
 
-	// Create client and search
+	opts := buildSearchOptions(p)
+
 	c, err := createClient(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
 	ctx := context.Background()
-	result, err := c.SearchAgents(ctx, searchName, searchHost, searchVersion, searchLimit, searchOffset)
+	result, err := c.SearchAgents(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
@@ -77,6 +89,41 @@ func runSearchWithParams(searchName, searchHost, searchVersion string, searchLim
 	}
 
 	return nil
+}
+
+// buildSearchOptions converts CLI flag values into ans.SearchOption values.
+// Status and protocol strings are uppercased for caller convenience; the SDK
+// validates the normalised value against the documented enum.
+func buildSearchOptions(p *searchParams) []ans.SearchOption {
+	var opts []ans.SearchOption
+
+	if p.name != "" {
+		opts = append(opts, ans.WithSearchName(p.name))
+	}
+	if p.host != "" {
+		opts = append(opts, ans.WithSearchHost(p.host))
+	}
+	if p.version != "" {
+		opts = append(opts, ans.WithSearchVersion(p.version))
+	}
+	if p.protocol != "" {
+		opts = append(opts, ans.WithSearchProtocol(models.AgentProtocol(strings.ToUpper(p.protocol))))
+	}
+	if len(p.statuses) > 0 {
+		statuses := make([]models.AgentLifecycleStatus, len(p.statuses))
+		for i, s := range p.statuses {
+			statuses[i] = models.AgentLifecycleStatus(strings.ToUpper(strings.TrimSpace(s)))
+		}
+		opts = append(opts, ans.WithSearchStatus(statuses...))
+	}
+	if p.limit > 0 {
+		opts = append(opts, ans.WithSearchLimit(p.limit))
+	}
+	if p.offset > 0 {
+		opts = append(opts, ans.WithSearchOffset(p.offset))
+	}
+
+	return opts
 }
 
 func printSearchResults(result *models.AgentSearchResponse) {

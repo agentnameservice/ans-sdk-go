@@ -17,7 +17,7 @@ func TestBuildSearchCmd(t *testing.T) {
 		{
 			name:      "command properties and flags",
 			checkUse:  "search",
-			flagNames: []string{"name", "host", "version", "limit", "offset"},
+			flagNames: []string{"name", "host", "version", "protocol", "status", "limit", "offset"},
 		},
 	}
 
@@ -34,6 +34,52 @@ func TestBuildSearchCmd(t *testing.T) {
 				if cmd.Flags().Lookup(flagName) == nil {
 					t.Errorf("missing flag %q", flagName)
 				}
+			}
+		})
+	}
+}
+
+func TestBuildSearchOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      *searchParams
+		wantLen int
+	}{
+		{
+			name:    "empty params produces no opts",
+			in:      &searchParams{},
+			wantLen: 0,
+		},
+		{
+			name: "all scalars plus status",
+			in: &searchParams{
+				name:     "agent",
+				host:     "example.com",
+				version:  "1.0.0",
+				protocol: "mcp",
+				statuses: []string{"pending_dns", "ACTIVE"},
+				limit:    50,
+				offset:   10,
+			},
+			wantLen: 7,
+		},
+		{
+			name:    "only status",
+			in:      &searchParams{statuses: []string{"PENDING_DNS"}},
+			wantLen: 1,
+		},
+		{
+			name:    "zero limit is skipped",
+			in:      &searchParams{name: "x"},
+			wantLen: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := buildSearchOptions(tt.in)
+			if len(opts) != tt.wantLen {
+				t.Errorf("len(opts) = %d, want %d", len(opts), tt.wantLen)
 			}
 		})
 	}

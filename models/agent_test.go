@@ -110,3 +110,51 @@ func TestAgentRegistrationRequest_JSON(t *testing.T) {
 		t.Errorf("Endpoints length = %v, want %v", len(got.Endpoints), len(req.Endpoints))
 	}
 }
+
+func TestIsValidAgentLifecycleStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status AgentLifecycleStatus
+		want   bool
+	}{
+		{"pending_dns", AgentStatusPendingDNS, true},
+		{"active", AgentStatusActive, true},
+		{"deprecated", AgentStatusDeprecated, true},
+		{"revoked", AgentStatusRevoked, true},
+		{"all", AgentStatusAll, true},
+		{"empty string", AgentLifecycleStatus(""), false},
+		{"unknown value", AgentLifecycleStatus("GARBAGE"), false},
+		{"lowercase rejected", AgentLifecycleStatus("active"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsValidAgentLifecycleStatus(tt.status); got != tt.want {
+				t.Errorf("IsValidAgentLifecycleStatus(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsValidAgentProtocol(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol AgentProtocol
+		want     bool
+	}{
+		{"a2a", AgentProtocolA2A, true},
+		{"mcp", AgentProtocolMCP, true},
+		{"http-api", AgentProtocolHTTPAPI, true},
+		{"empty string", AgentProtocol(""), false},
+		{"unknown value", AgentProtocol("GRPC"), false},
+		{"lowercase rejected", AgentProtocol("mcp"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsValidAgentProtocol(tt.protocol); got != tt.want {
+				t.Errorf("IsValidAgentProtocol(%q) = %v, want %v", tt.protocol, got, tt.want)
+			}
+		})
+	}
+}

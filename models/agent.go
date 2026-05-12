@@ -5,6 +5,51 @@ import (
 	"time"
 )
 
+// AgentLifecycleStatus is a registration-lifecycle state value accepted by the
+// `status` query parameter on GET /v1/agents. Multiple values may be combined
+// on a single request; the API defaults to ACTIVE when the parameter is absent.
+type AgentLifecycleStatus string
+
+const (
+	AgentStatusPendingDNS AgentLifecycleStatus = "PENDING_DNS"
+	AgentStatusActive     AgentLifecycleStatus = "ACTIVE"
+	AgentStatusDeprecated AgentLifecycleStatus = "DEPRECATED"
+	AgentStatusRevoked    AgentLifecycleStatus = "REVOKED"
+	AgentStatusAll        AgentLifecycleStatus = "ALL"
+)
+
+// IsValidAgentLifecycleStatus reports whether s is a recognised lifecycle
+// status value.
+func IsValidAgentLifecycleStatus(s AgentLifecycleStatus) bool {
+	switch s {
+	case AgentStatusPendingDNS, AgentStatusActive, AgentStatusDeprecated,
+		AgentStatusRevoked, AgentStatusAll:
+		return true
+	default:
+		return false
+	}
+}
+
+// AgentProtocol is a protocol filter value accepted by the `protocol` query
+// parameter on GET /v1/agents.
+type AgentProtocol string
+
+const (
+	AgentProtocolA2A     AgentProtocol = "A2A"
+	AgentProtocolMCP     AgentProtocol = "MCP"
+	AgentProtocolHTTPAPI AgentProtocol = "HTTP-API"
+)
+
+// IsValidAgentProtocol reports whether p is a recognised protocol filter value.
+func IsValidAgentProtocol(p AgentProtocol) bool {
+	switch p {
+	case AgentProtocolA2A, AgentProtocolMCP, AgentProtocolHTTPAPI:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentEndpoint represents an agent endpoint configuration
 type AgentEndpoint struct {
 	AgentURL         string          `json:"agentUrl"`

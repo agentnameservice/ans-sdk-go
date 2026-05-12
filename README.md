@@ -300,9 +300,25 @@ GetAgentDetails(ctx context.Context, agentID string) (*models.AgentDetails, erro
 Retrieves detailed information about a specific agent.
 
 ```go
-SearchAgents(ctx context.Context, name, host, version string, limit, offset int) (*models.AgentSearchResponse, error)
+SearchAgents(ctx context.Context, opts ...ans.SearchOption) (*models.AgentSearchResponse, error)
 ```
-Searches for agents using flexible criteria with pagination support.
+Searches for agents using flexible criteria with pagination support. Filter
+values are provided via functional options:
+
+- `ans.WithSearchName(name)` — agent display name (partial match)
+- `ans.WithSearchHost(host)` — agent host domain (partial match)
+- `ans.WithSearchVersion(version)` — agent version (flexible match)
+- `ans.WithSearchProtocol(models.AgentProtocolMCP)` — endpoint protocol
+- `ans.WithSearchStatus(models.AgentStatusPendingDNS, ...)` — lifecycle status (multi-valued). Defaults to `ACTIVE` server-side when unset; pass `AgentStatusPendingDNS` to find registrations still completing DNS validation, or `AgentStatusAll` to include every state.
+- `ans.WithSearchLimit(n)` / `ans.WithSearchOffset(n)` — pagination
+
+Example — list every pending registration:
+
+```go
+result, err := client.SearchAgents(ctx,
+    ans.WithSearchStatus(models.AgentStatusPendingDNS),
+)
+```
 
 #### Agent Resolution
 
@@ -580,10 +596,15 @@ The SDK automatically handles URL encoding for query parameters and path segment
 
 ```go
 // ✅ Correct - SDK handles encoding
-client.SearchAgents(ctx, "Name with spaces", "host.com", "1.0.0", 20, 0)
+client.SearchAgents(ctx,
+    ans.WithSearchName("Name with spaces"),
+    ans.WithSearchHost("host.com"),
+    ans.WithSearchVersion("1.0.0"),
+    ans.WithSearchLimit(20),
+)
 
 // ❌ Wrong - don't pre-encode
-client.SearchAgents(ctx, url.QueryEscape("Name with spaces"), ...)
+client.SearchAgents(ctx, ans.WithSearchName(url.QueryEscape("Name with spaces")))
 ```
 
 ## Contributing
