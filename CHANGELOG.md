@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/godaddy/ans-sdk-go/compare/v0.1.13...v0.1.14) (2026-05-12)
+
+
+### Features
+
+* **search:** implement functional options for SearchAgents with lifecycle status and protocol filters ([#31](https://github.com/godaddy/ans-sdk-go/issues/31)) ([55a28cd](https://github.com/godaddy/ans-sdk-go/commit/55a28cda16869f15b4625c5fe9e66e0eee7abb99))
+
 ## [0.1.13](https://github.com/godaddy/ans-sdk-go/compare/v0.1.12...v0.1.13) (2026-05-07)
 
 
