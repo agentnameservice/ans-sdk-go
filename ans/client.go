@@ -136,30 +136,42 @@ func asDNSVerificationError(err error) error {
 	return &dnsErr
 }
 
-// SearchAgents searches for agents using safe URL encoding
-func (c *Client) SearchAgents(ctx context.Context, name, host, version string, limit, offset int) (*models.AgentSearchResponse, error) {
-	if limit < 0 || limit > 1000 {
-		return nil, fmt.Errorf("%w: limit must be between 0 and 1000", models.ErrBadRequest)
+// SearchAgents searches for agents using safe URL encoding. Pass filters via
+// functional options (WithSearchName, WithSearchHost, WithSearchVersion,
+// WithSearchProtocol, WithSearchStatus, WithSearchLimit, WithSearchOffset).
+//
+// By default the API returns only ACTIVE agents; use WithSearchStatus to
+// include other lifecycle states (for example, AgentStatusPendingDNS to list
+// registrations still completing DNS validation).
+func (c *Client) SearchAgents(ctx context.Context, opts ...SearchOption) (*models.AgentSearchResponse, error) {
+	cfg := &searchConfig{}
+	for _, opt := range opts {
+		if err := opt(cfg); err != nil {
+			return nil, err
+		}
 	}
-	if offset < 0 {
-		return nil, fmt.Errorf("%w: offset cannot be negative", models.ErrBadRequest)
-	}
-	params := url.Values{}
 
-	if name != "" {
-		params.Set("agentDisplayName", name)
+	params := url.Values{}
+	if cfg.name != "" {
+		params.Set("agentDisplayName", cfg.name)
 	}
-	if host != "" {
-		params.Set("agentHost", host)
+	if cfg.host != "" {
+		params.Set("agentHost", cfg.host)
 	}
-	if version != "" {
-		params.Set("version", version)
+	if cfg.version != "" {
+		params.Set("version", cfg.version)
 	}
-	if limit > 0 {
-		params.Set("limit", strconv.Itoa(limit))
+	if cfg.protocol != "" {
+		params.Set("protocol", string(cfg.protocol))
 	}
-	if offset > 0 {
-		params.Set("offset", strconv.Itoa(offset))
+	for _, s := range cfg.statuses {
+		params.Add("status", string(s))
+	}
+	if cfg.limit > 0 {
+		params.Set("limit", strconv.Itoa(cfg.limit))
+	}
+	if cfg.offset > 0 {
+		params.Set("offset", strconv.Itoa(cfg.offset))
 	}
 
 	path := "/v1/agents"

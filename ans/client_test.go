@@ -279,7 +279,12 @@ func TestClient_SearchAgents(t *testing.T) {
 
 			// Execute test
 			ctx := context.Background()
-			result, err := client.SearchAgents(ctx, tt.queryName, tt.queryHost, "", tt.limit, tt.offset)
+			result, err := client.SearchAgents(ctx,
+				WithSearchName(tt.queryName),
+				WithSearchHost(tt.queryHost),
+				WithSearchLimit(tt.limit),
+				WithSearchOffset(tt.offset),
+			)
 
 			// Verify error
 			if (err != nil) != tt.wantErr {
@@ -435,7 +440,7 @@ func TestClient_ServerErrorResponses(t *testing.T) {
 		{
 			name: "SearchAgents",
 			call: func(ctx context.Context, c *Client) error {
-				_, err := c.SearchAgents(ctx, "test", "", "", 20, 0)
+				_, err := c.SearchAgents(ctx, WithSearchName("test"), WithSearchLimit(20))
 				return err
 			},
 		},
@@ -502,31 +507,55 @@ func TestClient_GetCheckpoint_Error(t *testing.T) {
 func TestClient_SearchAgents_Variants(t *testing.T) {
 	tests := []struct {
 		name        string
-		queryName   string
-		queryHost   string
-		queryVer    string
-		limit       int
-		offset      int
+		opts        []SearchOption
 		wantParams  map[string]string
+		wantStatus  []string
 		wantNoQuery bool
 	}{
 		{
-			name:      "with all params",
-			queryName: "test",
-			queryHost: "example.com",
-			queryVer:  "1.0.0",
-			limit:     10,
-			offset:    5,
+			name: "with all scalar params",
+			opts: []SearchOption{
+				WithSearchName("test"),
+				WithSearchHost("example.com"),
+				WithSearchVersion("1.0.0"),
+				WithSearchProtocol(models.AgentProtocolMCP),
+				WithSearchLimit(10),
+				WithSearchOffset(5),
+			},
 			wantParams: map[string]string{
 				"agentDisplayName": "test",
 				"agentHost":        "example.com",
 				"version":          "1.0.0",
+				"protocol":         "MCP",
 				"limit":            "10",
 				"offset":           "5",
 			},
 		},
 		{
-			name:        "no params",
+			name: "single status filter",
+			opts: []SearchOption{
+				WithSearchStatus(models.AgentStatusPendingDNS),
+			},
+			wantStatus: []string{"PENDING_DNS"},
+		},
+		{
+			name: "multiple status filters emitted as repeated keys",
+			opts: []SearchOption{
+				WithSearchStatus(models.AgentStatusPendingDNS, models.AgentStatusActive),
+			},
+			wantStatus: []string{"PENDING_DNS", "ACTIVE"},
+		},
+		{
+			name: "WithSearchStatus replaces previous values",
+			opts: []SearchOption{
+				WithSearchStatus(models.AgentStatusRevoked),
+				WithSearchStatus(models.AgentStatusAll),
+			},
+			wantStatus: []string{"ALL"},
+		},
+		{
+			name:        "no opts produces empty query",
+			opts:        nil,
 			wantNoQuery: true,
 		},
 	}
@@ -538,8 +567,19 @@ func TestClient_SearchAgents_Variants(t *testing.T) {
 					t.Errorf("expected no query params, got %s", r.URL.RawQuery)
 				}
 				for k, v := range tt.wantParams {
-					if r.URL.Query().Get(k) != v {
-						t.Errorf("param %s = %q, want %q", k, r.URL.Query().Get(k), v)
+					if got := r.URL.Query().Get(k); got != v {
+						t.Errorf("param %s = %q, want %q", k, got, v)
+					}
+				}
+				if tt.wantStatus != nil {
+					got := r.URL.Query()["status"]
+					if len(got) != len(tt.wantStatus) {
+						t.Fatalf("status param count = %d, want %d (%v vs %v)", len(got), len(tt.wantStatus), got, tt.wantStatus)
+					}
+					for i, v := range tt.wantStatus {
+						if got[i] != v {
+							t.Errorf("status[%d] = %q, want %q", i, got[i], v)
+						}
 					}
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -548,7 +588,7 @@ func TestClient_SearchAgents_Variants(t *testing.T) {
 			defer server.Close()
 
 			client, _ := NewClient(WithBaseURL(server.URL), WithJWT("token"))
-			result, err := client.SearchAgents(context.Background(), tt.queryName, tt.queryHost, tt.queryVer, tt.limit, tt.offset)
+			result, err := client.SearchAgents(context.Background(), tt.opts...)
 			if err != nil {
 				t.Fatalf("SearchAgents() error = %v", err)
 			}
@@ -556,6 +596,57 @@ func TestClient_SearchAgents_Variants(t *testing.T) {
 				t.Fatal("SearchAgents() returned nil")
 			}
 		})
+	}
+}
+
+func TestClient_SearchAgents_OptionValidation(t *testing.T) {
+	client, err := NewClient(WithBaseURL("http://unused.invalid"), WithJWT("t"))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		opt  SearchOption
+	}{
+		{"negative limit", WithSearchLimit(-1)},
+		{"limit above max", WithSearchLimit(MaxSearchLimit + 1)},
+		{"negative offset", WithSearchOffset(-1)},
+		{"invalid protocol", WithSearchProtocol("GRPC")},
+		{"invalid status", WithSearchStatus(models.AgentLifecycleStatus("NOT_A_STATUS"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.SearchAgents(context.Background(), tt.opt)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(err, models.ErrBadRequest) {
+				t.Errorf("error = %v, want wrapped ErrBadRequest", err)
+			}
+		})
+	}
+}
+
+func TestClient_SearchAgents_EmptyProtocolResets(t *testing.T) {
+	// WithSearchProtocol("") should clear, not reject.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("protocol") != "" {
+			t.Errorf("protocol should be cleared, got %q", r.URL.Query().Get("protocol"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalCount":0,"returnedCount":0,"agents":[]}`))
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(WithBaseURL(server.URL), WithJWT("t"))
+	_, err := client.SearchAgents(context.Background(),
+		WithSearchProtocol(models.AgentProtocolMCP),
+		WithSearchProtocol(""),
+	)
+	if err != nil {
+		t.Fatalf("SearchAgents() error = %v", err)
 	}
 }
 
@@ -1140,15 +1231,15 @@ func TestClient_ParameterValidation(t *testing.T) {
 		},
 		{
 			name: "SearchAgents negative limit",
-			call: func() error { _, err := client.SearchAgents(ctx, "", "", "", -1, 0); return err },
+			call: func() error { _, err := client.SearchAgents(ctx, WithSearchLimit(-1)); return err },
 		},
 		{
-			name: "SearchAgents limit over 1000",
-			call: func() error { _, err := client.SearchAgents(ctx, "", "", "", 1001, 0); return err },
+			name: "SearchAgents limit above MaxSearchLimit",
+			call: func() error { _, err := client.SearchAgents(ctx, WithSearchLimit(MaxSearchLimit+1)); return err },
 		},
 		{
 			name: "SearchAgents negative offset",
-			call: func() error { _, err := client.SearchAgents(ctx, "", "", "", 10, -1); return err },
+			call: func() error { _, err := client.SearchAgents(ctx, WithSearchOffset(-1)); return err },
 		},
 		{
 			name: "GetIdentityCertificates empty agentID",

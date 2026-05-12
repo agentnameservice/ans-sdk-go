@@ -114,7 +114,7 @@ func TestRunSearchWithParams_Success(t *testing.T) {
 
 	setupViperForTest(t, server.URL)
 
-	err := runSearchWithParams("test", "", "", 20, 0)
+	err := runSearchWithParams(&searchParams{name: "test", limit: 20})
 	if err != nil {
 		t.Fatalf("runSearchWithParams() error = %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRunSearchWithParams_JSONMode(t *testing.T) {
 	setupViperForTest(t, server.URL)
 	viper.Set("json", true)
 
-	err := runSearchWithParams("test", "", "", 20, 0)
+	err := runSearchWithParams(&searchParams{name: "test", limit: 20})
 	if err != nil {
 		t.Fatalf("runSearchWithParams() JSON mode error = %v", err)
 	}
@@ -147,7 +147,7 @@ func TestRunSearchWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
-	err := runSearchWithParams("test", "", "", 20, 0)
+	err := runSearchWithParams(&searchParams{name: "test", limit: 20})
 	if err == nil {
 		t.Fatal("runSearchWithParams() expected error for missing API key")
 	}
@@ -156,7 +156,7 @@ func TestRunSearchWithParams_NoAPIKey(t *testing.T) {
 func TestRunSearchWithParams_NoCriteria(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
-	err := runSearchWithParams("", "", "", 20, 0)
+	err := runSearchWithParams(&searchParams{limit: 20})
 	if err == nil {
 		t.Fatal("runSearchWithParams() expected error for no search criteria")
 	}
@@ -170,9 +170,35 @@ func TestRunSearchWithParams_ServerError(t *testing.T) {
 
 	setupViperForTest(t, server.URL)
 
-	err := runSearchWithParams("test", "", "", 20, 0)
+	err := runSearchWithParams(&searchParams{name: "test", limit: 20})
 	if err == nil {
 		t.Fatal("runSearchWithParams() expected error for server error")
+	}
+}
+
+// TestRunSearchWithParams_InvalidAPIKeyFormat exercises the createClient
+// error branch: a non-empty API key that doesn't match the "key:secret" shape
+// causes createClient to fail before any HTTP call.
+func TestRunSearchWithParams_InvalidAPIKeyFormat(t *testing.T) {
+	setupViperForTest(t, "http://localhost")
+	viper.Set("api-key", "no-colon-here")
+
+	err := runSearchWithParams(&searchParams{name: "test", limit: 20})
+	if err == nil {
+		t.Fatal("runSearchWithParams() expected error for malformed API key")
+	}
+}
+
+// TestBuildSearchCmd_RunE invokes the cobra RunE closure so it's exercised by
+// coverage. The inner call will return a "no criteria" error (no flags set),
+// which is the easiest failure mode to reach without a live HTTP server.
+func TestBuildSearchCmd_RunE(t *testing.T) {
+	setupViperForTest(t, "http://localhost")
+
+	cmd := buildSearchCmd()
+	err := cmd.RunE(cmd, nil)
+	if err == nil {
+		t.Fatal("RunE() expected error when no criteria provided")
 	}
 }
 
