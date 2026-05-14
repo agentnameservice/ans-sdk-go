@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/godaddy/ans-sdk-go/compare/v0.1.14...v0.1.15) (2026-05-14)
+
+
+### Features
+
+* **dns:** fix incorrect records handling with detailed structure ([#33](https://github.com/godaddy/ans-sdk-go/issues/33)) ([efee1fb](https://github.com/godaddy/ans-sdk-go/commit/efee1fb1a95f64eb258ee3983c7c749ca043a17e))
+
 ## [0.1.14](https://github.com/godaddy/ans-sdk-go/compare/v0.1.13...v0.1.14) (2026-05-12)
 
 
