@@ -98,18 +98,18 @@ func printDNSVerificationError(w io.Writer, e *models.DNSVerificationError, asJS
 
 	if len(e.MissingRecords) > 0 {
 		fmt.Fprintln(w, "\nMissing DNS records (configure these):")
-		writeRecordsTable(w, e.MissingRecords)
+		writeMissingRecordsTable(w, e.MissingRecords)
 	}
 	if len(e.IncorrectRecords) > 0 {
 		fmt.Fprintln(w, "\nIncorrect DNS records (fix these):")
-		writeRecordsTable(w, e.IncorrectRecords)
+		writeIncorrectRecordsTable(w, e.IncorrectRecords)
 	}
 }
 
 // tabwriterColumnPadding sets the number of pad spaces between columns.
 const tabwriterColumnPadding = 2
 
-func writeRecordsTable(w io.Writer, records []models.DNSRecord) {
+func writeMissingRecordsTable(w io.Writer, records []models.DNSRecord) {
 	tw := tabwriter.NewWriter(w, 0, 0, tabwriterColumnPadding, ' ', 0)
 	fmt.Fprintln(tw, "  NAME\tTYPE\tVALUE\tREQUIRED")
 	for _, r := range records {
@@ -118,6 +118,26 @@ func writeRecordsTable(w io.Writer, records []models.DNSRecord) {
 			required = "yes"
 		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Name, r.Type, r.Value, required)
+	}
+	_ = tw.Flush()
+}
+
+func writeIncorrectRecordsTable(w io.Writer, records []models.IncorrectDNSRecord) {
+	tw := tabwriter.NewWriter(w, 0, 0, tabwriterColumnPadding, ' ', 0)
+	fmt.Fprintln(tw, "  NAME\tTYPE\tEXPECTED\tFOUND")
+	for _, ir := range records {
+		name := ir.Record.Name
+		recType := ir.Record.Type
+		// AND (not OR): partial-record metadata still gets rendered as-is so
+		// the operator sees whichever field the registry did report. Only when
+		// BOTH name and type are missing do we substitute the placeholder, to
+		// avoid two blank cells that would mimic the empty-record bug this
+		// renderer is closing.
+		if name == "" && recType == "" {
+			name = "<unknown>"
+			recType = "<unknown>"
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", name, recType, ir.Expected, ir.Found)
 	}
 	_ = tw.Flush()
 }

@@ -34,7 +34,40 @@ const dnsVerificationErrorBody = `{
   "incorrectRecords": []
 }`
 
-func TestDNSVerificationError_Unmarshal(t *testing.T) {
+// realWorldMismatchBody mirrors the structure of the 2026-05-13 incident: an
+// `_ans` record and an `_ans-badge` record whose values are stale (older
+// version string still published in DNS). Identifiers are synthetic — no
+// real customer data is committed to the public OSS repo.
+const realWorldMismatchBody = `{
+  "status": "ERROR",
+  "missingRecords": [],
+  "incorrectRecords": [
+    {
+      "record": {
+        "name": "_ans.example.com",
+        "type": "TXT",
+        "value": "v=ans1; version=v0.1.36; p=mcp; mode=direct; url=https://example.com/api/mcp/v0.1.36",
+        "ttl": 3600,
+        "purpose": "TRUST",
+        "required": true
+      },
+      "expected": "v=ans1; version=v0.1.36; p=mcp; mode=direct; url=https://example.com/api/mcp/v0.1.36",
+      "found": "v=ans1; version=v0.1.35; p=mcp; mode=direct; url=https://example.com/api/mcp/v0.1.35"
+    },
+    {
+      "record": {
+        "name": "_ans-badge.example.com",
+        "type": "TXT",
+        "value": "v=ans-badge1; version=v0.1.36; url=https://transparency.example.com/v1/agents/00000000-0000-0000-0000-000000000001",
+        "purpose": "BADGE"
+      },
+      "expected": "v=ans-badge1; version=v0.1.36; url=https://transparency.example.com/v1/agents/00000000-0000-0000-0000-000000000001",
+      "found": "v=ans-badge1; version=v0.1.35; url=https://transparency.example.com/v1/agents/00000000-0000-0000-0000-000000000002"
+    }
+  ]
+}`
+
+func TestDNSVerificationError_Unmarshal_Missing(t *testing.T) {
 	tests := []struct {
 		name             string
 		body             string
@@ -49,14 +82,6 @@ func TestDNSVerificationError_Unmarshal(t *testing.T) {
 			wantMissingCount: 2,
 			wantIncorrCount:  0,
 			wantFirstName:    "_ans.example.com",
-			wantFirstType:    "TXT",
-		},
-		{
-			name:             "only incorrectRecords populated",
-			body:             `{"status":"ERROR","incorrectRecords":[{"name":"a.b","type":"TXT","value":"x"}]}`,
-			wantMissingCount: 0,
-			wantIncorrCount:  1,
-			wantFirstName:    "a.b",
 			wantFirstType:    "TXT",
 		},
 		{
@@ -80,16 +105,75 @@ func TestDNSVerificationError_Unmarshal(t *testing.T) {
 				t.Errorf("IncorrectRecords len = %d, want %d", len(got.IncorrectRecords), tt.wantIncorrCount)
 			}
 			if tt.wantFirstName != "" {
-				records := got.MissingRecords
-				if len(records) == 0 {
-					records = got.IncorrectRecords
+				if got.MissingRecords[0].Name != tt.wantFirstName {
+					t.Errorf("first record Name = %q, want %q", got.MissingRecords[0].Name, tt.wantFirstName)
 				}
-				if records[0].Name != tt.wantFirstName {
-					t.Errorf("first record Name = %q, want %q", records[0].Name, tt.wantFirstName)
+				if got.MissingRecords[0].Type != tt.wantFirstType {
+					t.Errorf("first record Type = %q, want %q", got.MissingRecords[0].Type, tt.wantFirstType)
 				}
-				if records[0].Type != tt.wantFirstType {
-					t.Errorf("first record Type = %q, want %q", records[0].Type, tt.wantFirstType)
-				}
+			}
+		})
+	}
+}
+
+func TestDNSVerificationError_Unmarshal_Incorrect(t *testing.T) {
+	tests := []struct {
+		name              string
+		body              string
+		wantIncorrCount   int
+		wantFirstName     string
+		wantFirstType     string
+		wantFirstExpected string
+		wantFirstFound    string
+		wantFirstRequired bool
+	}{
+		{
+			name: "single incorrect record",
+			body: `{"status":"ERROR","incorrectRecords":[
+				{"record":{"name":"a.b","type":"TXT","value":"expected-val"},
+				 "expected":"expected-val","found":"actual-val"}]}`,
+			wantIncorrCount:   1,
+			wantFirstName:     "a.b",
+			wantFirstType:     "TXT",
+			wantFirstExpected: "expected-val",
+			wantFirstFound:    "actual-val",
+		},
+		{
+			name:              "real-world _ans / _ans-badge mismatch (regression for 2026-05-13 incident)",
+			body:              realWorldMismatchBody,
+			wantIncorrCount:   2,
+			wantFirstName:     "_ans.example.com",
+			wantFirstType:     "TXT",
+			wantFirstExpected: "v=ans1; version=v0.1.36; p=mcp; mode=direct; url=https://example.com/api/mcp/v0.1.36",
+			wantFirstFound:    "v=ans1; version=v0.1.35; p=mcp; mode=direct; url=https://example.com/api/mcp/v0.1.35",
+			wantFirstRequired: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got DNSVerificationError
+			if err := json.Unmarshal([]byte(tt.body), &got); err != nil {
+				t.Fatalf("Unmarshal error: %v", err)
+			}
+			if len(got.IncorrectRecords) != tt.wantIncorrCount {
+				t.Fatalf("IncorrectRecords len = %d, want %d", len(got.IncorrectRecords), tt.wantIncorrCount)
+			}
+			first := got.IncorrectRecords[0]
+			if first.Record.Name != tt.wantFirstName {
+				t.Errorf("Record.Name = %q, want %q", first.Record.Name, tt.wantFirstName)
+			}
+			if first.Record.Type != tt.wantFirstType {
+				t.Errorf("Record.Type = %q, want %q", first.Record.Type, tt.wantFirstType)
+			}
+			if first.Expected != tt.wantFirstExpected {
+				t.Errorf("Expected = %q, want %q", first.Expected, tt.wantFirstExpected)
+			}
+			if first.Found != tt.wantFirstFound {
+				t.Errorf("Found = %q, want %q", first.Found, tt.wantFirstFound)
+			}
+			if first.Record.Required != tt.wantFirstRequired {
+				t.Errorf("Record.Required = %v, want %v", first.Record.Required, tt.wantFirstRequired)
 			}
 		})
 	}
@@ -112,15 +196,18 @@ func TestDNSVerificationError_Error(t *testing.T) {
 		{
 			name: "incorrect only",
 			err: &DNSVerificationError{
-				IncorrectRecords: []DNSRecord{{Name: "a"}},
+				IncorrectRecords: []IncorrectDNSRecord{{Record: DNSRecord{Name: "a"}}},
 			},
 			wantSubstr: []string{"DNS verification failed", "1 incorrect"},
 		},
 		{
 			name: "both",
 			err: &DNSVerificationError{
-				MissingRecords:   []DNSRecord{{Name: "a"}},
-				IncorrectRecords: []DNSRecord{{Name: "b"}, {Name: "c"}},
+				MissingRecords: []DNSRecord{{Name: "a"}},
+				IncorrectRecords: []IncorrectDNSRecord{
+					{Record: DNSRecord{Name: "b"}},
+					{Record: DNSRecord{Name: "c"}},
+				},
 			},
 			wantSubstr: []string{"DNS verification failed", "1 missing", "2 incorrect"},
 		},
@@ -199,7 +286,7 @@ func TestDNSVerificationError_ErrorsAs(t *testing.T) {
 	dnsErr := &DNSVerificationError{
 		ResponseError:    wrapped,
 		MissingRecords:   []DNSRecord{{Name: "a"}},
-		IncorrectRecords: []DNSRecord{},
+		IncorrectRecords: []IncorrectDNSRecord{},
 	}
 
 	var err error = dnsErr
