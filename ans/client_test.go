@@ -811,7 +811,8 @@ func TestClient_VerifyDNS_422_ReturnsDNSVerificationError(t *testing.T) {
 				"status": "ERROR",
 				"missingRecords": [],
 				"incorrectRecords": [
-					{"name":"a.b","type":"TXT","value":"wrong"}
+					{"record":{"name":"a.b","type":"TXT","value":"expected-val"},
+					 "expected":"expected-val","found":"actual-val"}
 				]
 			}`,
 			contentType:      "application/json",
@@ -824,7 +825,10 @@ func TestClient_VerifyDNS_422_ReturnsDNSVerificationError(t *testing.T) {
 			body: `{
 				"status": "ERROR",
 				"missingRecords": [{"name":"a","type":"TXT","value":"x"}],
-				"incorrectRecords": [{"name":"b","type":"TXT","value":"y"}]
+				"incorrectRecords": [
+					{"record":{"name":"b","type":"TXT","value":"expected-y"},
+					 "expected":"expected-y","found":"actual-y"}
+				]
 			}`,
 			contentType:      "application/json",
 			wantTyped:        true,

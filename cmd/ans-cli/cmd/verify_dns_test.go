@@ -18,8 +18,15 @@ func TestPrintDNSVerificationError(t *testing.T) {
 		{Name: "_ans.example.com", Type: "TXT", Value: "v=ans1; mode=direct", TTL: 3600, Required: true},
 		{Name: "example.com", Type: "HTTPS", Value: "1 . alpn=h2", TTL: 3600, Priority: 1},
 	}
-	incorrect := []models.DNSRecord{
-		{Name: "_443._tcp.example.com", Type: "TLSA", Value: "3 0 1 abc"},
+	incorrect := []models.IncorrectDNSRecord{
+		{
+			Record:   models.DNSRecord{Name: "_443._tcp.example.com", Type: "TLSA", Value: "3 0 1 expected-cert-hash"},
+			Expected: "3 0 1 expected-cert-hash",
+			Found:    "3 0 1 actual-cert-hash",
+		},
+	}
+	incorrectEmptyRecord := []models.IncorrectDNSRecord{
+		{Record: models.DNSRecord{}, Expected: "expected-val", Found: "actual-val"},
 	}
 
 	tests := []struct {
@@ -47,8 +54,23 @@ func TestPrintDNSVerificationError(t *testing.T) {
 			asJSON: false,
 			wantSubs: []string{
 				"Incorrect",
+				"EXPECTED",
+				"FOUND",
 				"_443._tcp.example.com",
 				"TLSA",
+				"actual-cert-hash",
+				"expected-cert-hash",
+			},
+		},
+		{
+			name:   "text mode - incorrect with empty Record renders <unknown> placeholder",
+			err:    &models.DNSVerificationError{IncorrectRecords: incorrectEmptyRecord},
+			asJSON: false,
+			wantSubs: []string{
+				"Incorrect",
+				"<unknown>",
+				"expected-val",
+				"actual-val",
 			},
 		},
 		{
@@ -71,6 +93,8 @@ func TestPrintDNSVerificationError(t *testing.T) {
 				`"incorrectRecords"`,
 				`"_ans.example.com"`,
 				`"_443._tcp.example.com"`,
+				`"expected"`,
+				`"found"`,
 			},
 		},
 	}
