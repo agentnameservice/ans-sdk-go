@@ -52,12 +52,18 @@ type AgentListV2Response struct {
 // version nor an Identity CSR. AgentHost remains the canonical
 // identity field for those rows.
 type AgentListV2Item struct {
-	AgentID               string          `json:"agentId"`
-	AgentDisplayName      string          `json:"agentDisplayName"`
-	AgentDescription      string          `json:"agentDescription,omitempty"`
-	Version               string          `json:"version"`
-	AgentHost             string          `json:"agentHost"`
-	AnsName               string          `json:"ansName"`
+	AgentID          string `json:"agentId"`
+	AgentDisplayName string `json:"agentDisplayName"`
+	AgentDescription string `json:"agentDescription,omitempty"`
+	Version          string `json:"version"`
+	AgentHost        string `json:"agentHost"`
+	AnsName          string `json:"ansName"`
+	// AnchorType + AnchorResolvedID surface the registration's
+	// ANS-0 anchor profile. Both empty for legacy FQDN-implicit
+	// rows; populated for any registration that came in through
+	// the anchor block on V2 register.
+	AnchorType            string          `json:"anchorType,omitempty"`
+	AnchorResolvedID      string          `json:"anchorResolvedId,omitempty"`
 	Status                string          `json:"status"`
 	TTL                   int             `json:"ttl"`
 	RegistrationTimestamp time.Time       `json:"registrationTimestamp,omitempty"`
@@ -71,4 +77,23 @@ type AgentListV2Item struct {
 // pattern-matching empty strings.
 func (a AgentListV2Item) IsBaseOnly() bool {
 	return a.AnsName == "" && a.Version == ""
+}
+
+// IsAnchored reports whether the row was registered through the
+// V2 anchor block. False for legacy FQDN-implicit registrations
+// (anchorType empty); true otherwise.
+func (a AgentListV2Item) IsAnchored() bool {
+	return a.AnchorType != ""
+}
+
+// IsDIDAnchor reports whether the registration's anchor is a DID
+// of any method.
+func (a AgentListV2Item) IsDIDAnchor() bool {
+	return a.AnchorType == "did"
+}
+
+// IsLEIAnchor reports whether the registration's anchor is an
+// ISO 17442 LEI.
+func (a AgentListV2Item) IsLEIAnchor() bool {
+	return a.AnchorType == "lei"
 }

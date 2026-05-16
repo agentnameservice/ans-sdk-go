@@ -122,7 +122,42 @@ type AgentRegistrationRequest struct {
 	//
 	// Empty/missing → consolidated (the RA applies the default).
 	DNSRecordStyle string `json:"dnsRecordStyle,omitempty"`
+
+	// Anchor optionally selects which ANS-0 anchor profile the
+	// registration uses. Omit for the legacy FQDN-implicit path
+	// (anchor type inferred from AgentHost). Populate for DID or
+	// LEI registrations, or to be explicit about the FQDN profile.
+	// See the proposal at docs/proposals/2026-05-16-spec-skeletons/
+	// ans-0-identity-anchor.md in github.com/gdcorp-engineering/
+	// ans-registry-poc.
+	Anchor *AnchorRequest `json:"anchor,omitempty"`
 }
+
+// AnchorRequest is the anchor block on AgentRegistrationRequest.
+//
+// Pair AnchorType with one of the AnchorType* constants below.
+// Input is the anchor-specific identifier:
+//   - AnchorTypeFQDN: the agent's fully-qualified domain name
+//     (must equal AgentHost, case-insensitive).
+//   - AnchorTypeDID: a Decentralized Identifier URI per W3C DID
+//     Core 1.0 (e.g. "did:web:agent.example.com").
+//   - AnchorTypeLEI: a 20-character ISO 17442 Legal Entity
+//     Identifier (e.g. "529900T8BM49AURSDO55").
+//
+// Non-FQDN profiles (DID, LEI) force base-only registration: the
+// version + identityCsrPEM fields must be empty. The RA rejects
+// the request with NON_FQDN_REQUIRES_BASE_ONLY otherwise.
+type AnchorRequest struct {
+	AnchorType string `json:"anchorType"`
+	Input      string `json:"input"`
+}
+
+// AnchorType* enumerate the supported values for AnchorRequest.AnchorType.
+const (
+	AnchorTypeFQDN = "fqdn"
+	AnchorTypeDID  = "did"
+	AnchorTypeLEI  = "lei"
+)
 
 // DNSRecordStyle constants enumerate the supported values for
 // AgentRegistrationRequest.DNSRecordStyle.
@@ -231,12 +266,18 @@ func (a *AgentStatus) UnmarshalJSON(data []byte) error {
 
 // AgentDetails represents detailed agent information
 type AgentDetails struct {
-	AgentID               string               `json:"agentId"`
-	AgentDisplayName      string               `json:"agentDisplayName"`
-	AgentHost             string               `json:"agentHost"`
-	AgentDescription      string               `json:"agentDescription,omitempty"`
-	ANSName               string               `json:"ansName"`
-	Version               string               `json:"version"`
+	AgentID          string `json:"agentId"`
+	AgentDisplayName string `json:"agentDisplayName"`
+	AgentHost        string `json:"agentHost"`
+	AgentDescription string `json:"agentDescription,omitempty"`
+	ANSName          string `json:"ansName"`
+	Version          string `json:"version"`
+	// AnchorType + AnchorResolvedID surface the registration's
+	// ANS-0 anchor profile. Both empty for legacy FQDN-implicit
+	// registrations; populated for any registration that came in
+	// through the anchor block on V2 register.
+	AnchorType            string               `json:"anchorType,omitempty"`
+	AnchorResolvedID      string               `json:"anchorResolvedId,omitempty"`
 	AgentStatus           *AgentStatus         `json:"agentStatus,omitempty"`
 	Endpoints             []AgentEndpoint      `json:"endpoints"`
 	DNSRecords            []DNSRecord          `json:"dnsRecords,omitempty"`

@@ -15,7 +15,8 @@ import (
 
 // registerOptions groups the register subcommand's flag values so the
 // argument list of runRegisterWithParams stays manageable as the
-// surface grows (Plan A/C/D added several optional fields).
+// surface grows (Plan A/C/D added several optional fields; Plan G
+// added Anchor + UseV2).
 type registerOptions struct {
 	Name             string
 	Host             string
@@ -31,6 +32,9 @@ type registerOptions struct {
 	Functions        []string
 	AgentCardContent string // path to JSON file (Plan C)
 	DNSRecordStyle   string // consolidated|legacy|both (Plan D)
+	AnchorType       string // fqdn|did|lei (Plan G)
+	AnchorInput      string // FQDN, DID URI, or LEI (Plan G)
+	UseV2            bool   // force V2 endpoint regardless of inputs (Plan G)
 }
 
 func buildRegisterCmd() *cobra.Command {
@@ -80,11 +84,18 @@ Optional fields:
 		"Path to JSON file containing the ANS Trust Card body (Plan C; §A.1)")
 	cmd.Flags().StringVar(&opts.DNSRecordStyle, "dns-record-style", "",
 		"DNS record family: consolidated (default) | legacy | both (Plan D; §4.4.2)")
+	cmd.Flags().StringVar(&opts.AnchorType, "anchor-type", "",
+		"ANS-0 anchor profile: fqdn | did | lei (Plan G). Routes through V2 endpoint.")
+	cmd.Flags().StringVar(&opts.AnchorInput, "anchor-input", "",
+		"Anchor input string: FQDN, DID URI, or LEI (Plan G).")
+	cmd.Flags().BoolVar(&opts.UseV2, "v2", false,
+		"Force V2 endpoint (POST /v2/ans/agents). Implied by --anchor-type or by base-only (no --version, no --identity-csr).")
 
+	// name, host, endpoint-url remain required. version and identity-csr
+	// were required under V1; under V2 they are optional (base-only path)
+	// and the runRegister logic enforces the both-or-neither invariant.
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("host")
-	_ = cmd.MarkFlagRequired("version")
-	_ = cmd.MarkFlagRequired("identity-csr")
 	_ = cmd.MarkFlagRequired("endpoint-url")
 
 	return cmd
@@ -126,10 +137,15 @@ func runRegisterWithOptions(opts registerOptions) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Read identity CSR
-	identityCSRData, err := os.ReadFile(opts.IdentityCSR)
-	if err != nil {
-		return fmt.Errorf("failed to read identity CSR file: %w", err)
+	// Plan G: identity-csr is OPTIONAL under V2 (base-only and non-FQDN
+	// anchor profiles register without an Identity Certificate). Empty
+	// IdentityCSR signals base-only; both-or-neither validated below.
+	var identityCSRData []byte
+	if opts.IdentityCSR != "" {
+		identityCSRData, err = os.ReadFile(opts.IdentityCSR)
+		if err != nil {
+			return fmt.Errorf("failed to read identity CSR file: %w", err)
+		}
 	}
 
 	// Read server CSR or certificate
@@ -185,6 +201,16 @@ func runRegisterWithOptions(opts registerOptions) error {
 		}
 	}
 
+	// Plan G: validate anchor block + decide whether to route to V2.
+	// V2 is required when:
+	//   - the operator passed --anchor-type (explicit anchor profile);
+	//   - the operator passed --v2 (forced);
+	//   - the registration is base-only (no version, no identity-csr).
+	useV2, anchor, err := decideAnchorAndRoute(opts, len(identityCSRData) > 0)
+	if err != nil {
+		return err
+	}
+
 	// Build registration request
 	req := &models.AgentRegistrationRequest{
 		AgentDisplayName: opts.Name,
@@ -194,6 +220,7 @@ func runRegisterWithOptions(opts registerOptions) error {
 		IdentityCSRPEM:   string(identityCSRData),
 		AgentCardContent: agentCardContent,
 		DNSRecordStyle:   opts.DNSRecordStyle,
+		Anchor:           anchor,
 		Endpoints: []models.AgentEndpoint{
 			{
 				AgentURL:    opts.EndpointURL,
@@ -213,7 +240,12 @@ func runRegisterWithOptions(opts registerOptions) error {
 
 	// Register the agent
 	ctx := context.Background()
-	result, err := c.RegisterAgent(ctx, req)
+	var result *models.RegistrationPending
+	if useV2 {
+		result, err = c.RegisterAgentV2(ctx, req)
+	} else {
+		result, err = c.RegisterAgent(ctx, req)
+	}
 	if err != nil {
 		return fmt.Errorf("registration failed: %w", err)
 	}
@@ -344,4 +376,69 @@ func printResultLinks(links []models.Link) {
 	for _, link := range links {
 		fmt.Fprintf(os.Stdout, "  %s: %s\n", link.Rel, link.Href)
 	}
+}
+
+// decideAnchorAndRoute resolves the Plan G register-flag combination
+// into (useV2, anchor) and validates the both-or-neither invariant
+// the RA enforces.
+//
+// Decision matrix:
+//
+//	|version | identity-csr | anchor-type | route | anchor block |
+//	|--------|--------------|-------------|-------|--------------|
+//	| set    | set          | unset       | V1    | nil          |
+//	| set    | set          | set         | V2    | populated    |
+//	| unset  | unset        | unset       | V2    | nil (base)   |
+//	| unset  | unset        | set         | V2    | populated    |
+//	| set    | unset        | *           | error | -            |
+//	| unset  | set          | *           | error | -            |
+//
+// --v2 forces V2 regardless. --anchor-input is required when
+// --anchor-type is set; --anchor-input alone (without --anchor-type)
+// is an error.
+func decideAnchorAndRoute(opts registerOptions, hasIdentityCSR bool) (bool, *models.AnchorRequest, error) {
+	versionGiven := strings.TrimSpace(opts.Version) != ""
+	csrGiven := hasIdentityCSR
+	anchorTypeGiven := strings.TrimSpace(opts.AnchorType) != ""
+	anchorInputGiven := strings.TrimSpace(opts.AnchorInput) != ""
+
+	// Both-or-neither invariant on version + identity-csr.
+	if versionGiven != csrGiven {
+		return false, nil, fmt.Errorf(
+			"--version and --identity-csr must be supplied together (or both omitted for base-only). " +
+				"Versioned registrations require both; base-only registrations require neither.")
+	}
+
+	// --anchor-input requires --anchor-type and vice versa.
+	if anchorTypeGiven != anchorInputGiven {
+		return false, nil, fmt.Errorf("--anchor-type and --anchor-input must be supplied together")
+	}
+
+	// Validate anchor-type if given.
+	var anchor *models.AnchorRequest
+	if anchorTypeGiven {
+		anchorType := strings.ToLower(strings.TrimSpace(opts.AnchorType))
+		switch anchorType {
+		case models.AnchorTypeFQDN, models.AnchorTypeDID, models.AnchorTypeLEI:
+		default:
+			return false, nil, fmt.Errorf(
+				"invalid --anchor-type %q (want fqdn, did, or lei)", opts.AnchorType)
+		}
+		anchor = &models.AnchorRequest{
+			AnchorType: anchorType,
+			Input:      strings.TrimSpace(opts.AnchorInput),
+		}
+		// Non-FQDN anchors force base-only: reject combinations the RA
+		// would reject anyway with a friendlier client-side error.
+		if anchorType != models.AnchorTypeFQDN && (versionGiven || csrGiven) {
+			return false, nil, fmt.Errorf(
+				"--anchor-type %s requires base-only registration (omit --version and --identity-csr)",
+				anchorType)
+		}
+	}
+
+	// Routing: V2 when forced, when an anchor block is set, or when
+	// the registration is base-only.
+	useV2 := opts.UseV2 || anchorTypeGiven || (!versionGiven && !csrGiven)
+	return useV2, anchor, nil
 }
