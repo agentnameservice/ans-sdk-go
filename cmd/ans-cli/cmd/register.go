@@ -13,46 +13,73 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// registerOptions groups the register subcommand's flag values so the
+// argument list of runRegisterWithParams stays manageable as the
+// surface grows (Plan A/C/D added several optional fields).
+type registerOptions struct {
+	Name             string
+	Host             string
+	Version          string
+	Description      string
+	IdentityCSR      string
+	ServerCSR        string
+	ServerCert       string
+	EndpointURL      string
+	MetaDataURL      string
+	EndpointProto    string
+	EndpointTrans    []string
+	Functions        []string
+	AgentCardContent string // path to JSON file (Plan C)
+	DNSRecordStyle   string // consolidated|legacy|both (Plan D)
+}
+
 func buildRegisterCmd() *cobra.Command {
-	var (
-		regName          string
-		regHost          string
-		regVersion       string
-		regDescription   string
-		regIdentityCSR   string
-		regServerCSR     string
-		regServerCert    string
-		regEndpointURL   string
-		regMetaDataURL   string
-		regEndpointProto string
-		regEndpointTrans []string
-		regFunctions     []string
-	)
+	var opts registerOptions
 
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register a new agent with ANS",
 		Long: `Register a new agent with the Agent Name Service by providing agent details,
-CSRs for identity and server certificates, and endpoint configuration.`,
+CSRs for identity and server certificates, and endpoint configuration.
+
+Optional fields:
+  --agent-card-content   Path to a JSON file containing the ANS Trust Card
+                         body. The RA computes SHA-256(JCS(content)) and seals
+                         the digest into the AGENT_REGISTERED Transparency
+                         Log event under metadataHashes.capabilitiesHash, per
+                         ANS_SPEC.md §A.1. The same digest re-encoded as
+                         base64url appears in the Consolidated Approach SVCB
+                         record's card-sha256 SvcParam (§4.4.2 cross-check).
+  --dns-record-style     Selects which DNS record family the RA tells you to
+                         publish. Values:
+                           consolidated (default, recommended): one SVCB
+                             record per protocol at the bare FQDN per §4.4.2,
+                             plus shared records.
+                           legacy: original _ans TXT shape plus an HTTPS RR.
+                             Backwards-compatible.
+                           both: union; the §4.4.2 transition shape.
+                         Empty/missing → consolidated.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runRegisterWithParams(regName, regHost, regVersion, regDescription,
-				regIdentityCSR, regServerCSR, regServerCert,
-				regEndpointURL, regMetaDataURL, regEndpointProto, regEndpointTrans, regFunctions)
+			return runRegisterWithOptions(opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&regName, "name", "", "Agent display name (required)")
-	cmd.Flags().StringVar(&regHost, "host", "", "Agent host domain (required)")
-	cmd.Flags().StringVar(&regVersion, "version", "", "Agent version in semver format (required)")
-	cmd.Flags().StringVar(&regDescription, "description", "", "Agent description")
-	cmd.Flags().StringVar(&regIdentityCSR, "identity-csr", "", "Path to identity CSR PEM file (required)")
-	cmd.Flags().StringVar(&regServerCSR, "server-csr", "", "Path to server CSR PEM file")
-	cmd.Flags().StringVar(&regServerCert, "server-cert", "", "Path to server certificate PEM file (BYOC)")
-	cmd.Flags().StringVar(&regEndpointURL, "endpoint-url", "", "Agent endpoint URL (required)")
-	cmd.Flags().StringVar(&regMetaDataURL, "metadata-url", "", "Agent metadata URL (e.g., /.well-known/agent-card.json)")
-	cmd.Flags().StringVar(&regEndpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
-	cmd.Flags().StringSliceVar(&regEndpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
-	cmd.Flags().StringArrayVar(&regFunctions, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
+	cmd.Flags().StringVar(&opts.Name, "name", "", "Agent display name (required)")
+	cmd.Flags().StringVar(&opts.Host, "host", "", "Agent host domain (required)")
+	cmd.Flags().StringVar(&opts.Version, "version", "", "Agent version in semver format (required)")
+	cmd.Flags().StringVar(&opts.Description, "description", "", "Agent description")
+	cmd.Flags().StringVar(&opts.IdentityCSR, "identity-csr", "", "Path to identity CSR PEM file (required)")
+	cmd.Flags().StringVar(&opts.ServerCSR, "server-csr", "", "Path to server CSR PEM file")
+	cmd.Flags().StringVar(&opts.ServerCert, "server-cert", "", "Path to server certificate PEM file (BYOC)")
+	cmd.Flags().StringVar(&opts.EndpointURL, "endpoint-url", "", "Agent endpoint URL (required)")
+	cmd.Flags().StringVar(&opts.MetaDataURL, "metadata-url", "", "Agent metadata URL (e.g., /.well-known/agent-card.json)")
+	cmd.Flags().StringVar(&opts.EndpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
+	cmd.Flags().StringSliceVar(&opts.EndpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
+	cmd.Flags().StringArrayVar(&opts.Functions, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
+	cmd.Flags().StringVar(&opts.AgentCardContent, "agent-card-content", "",
+		"Path to JSON file containing the ANS Trust Card body (Plan C; §A.1)")
+	cmd.Flags().StringVar(&opts.DNSRecordStyle, "dns-record-style", "",
+		"DNS record family: consolidated (default) | legacy | both (Plan D; §4.4.2)")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("host")
@@ -63,7 +90,28 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	return cmd
 }
 
+// runRegisterWithParams is the legacy positional-argument entry point
+// kept alive for callers (tests, external scripts) that predate the
+// registerOptions struct introduced for Plan A/C/D fields. New code
+// SHOULD use runRegisterWithOptions directly.
 func runRegisterWithParams(name, host, version, description, identityCSR, serverCSR, serverCert, endpointURL, metaDataURL, endpointProto string, endpointTrans, functionFlags []string) error {
+	return runRegisterWithOptions(registerOptions{
+		Name:          name,
+		Host:          host,
+		Version:       version,
+		Description:   description,
+		IdentityCSR:   identityCSR,
+		ServerCSR:     serverCSR,
+		ServerCert:    serverCert,
+		EndpointURL:   endpointURL,
+		MetaDataURL:   metaDataURL,
+		EndpointProto: endpointProto,
+		EndpointTrans: endpointTrans,
+		Functions:     functionFlags,
+	})
+}
+
+func runRegisterWithOptions(opts registerOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -79,44 +127,79 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 	}
 
 	// Read identity CSR
-	identityCSRData, err := os.ReadFile(identityCSR)
+	identityCSRData, err := os.ReadFile(opts.IdentityCSR)
 	if err != nil {
 		return fmt.Errorf("failed to read identity CSR file: %w", err)
 	}
 
 	// Read server CSR or certificate
 	var serverCSRData, serverCertData []byte
-	if serverCert != "" {
-		serverCertData, err = os.ReadFile(serverCert)
+	if opts.ServerCert != "" {
+		serverCertData, err = os.ReadFile(opts.ServerCert)
 		if err != nil {
 			return fmt.Errorf("failed to read server certificate file: %w", err)
 		}
-	} else if serverCSR != "" {
-		serverCSRData, err = os.ReadFile(serverCSR)
+	} else if opts.ServerCSR != "" {
+		serverCSRData, err = os.ReadFile(opts.ServerCSR)
 		if err != nil {
 			return fmt.Errorf("failed to read server CSR file: %w", err)
 		}
 	}
 
 	// Parse and validate functions
-	functions, err := ParseFunctionFlags(functionFlags)
+	functions, err := ParseFunctionFlags(opts.Functions)
 	if err != nil {
 		return fmt.Errorf("invalid function specification: %w", err)
 	}
 
+	// Read agentCardContent body (Plan C / §A.1) if provided. Pass
+	// the raw bytes through json.RawMessage so JCS canonicalization
+	// at the RA sees exactly what the operator wrote.
+	var agentCardContent json.RawMessage
+	if opts.AgentCardContent != "" {
+		raw, err := os.ReadFile(opts.AgentCardContent)
+		if err != nil {
+			return fmt.Errorf("failed to read agent-card-content file: %w", err)
+		}
+		// Sanity-check: must be valid JSON. Catches operator typos
+		// before the RA returns 422 INVALID_AGENT_CARD_CONTENT.
+		var probe interface{}
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			return fmt.Errorf("agent-card-content file is not valid JSON: %w", err)
+		}
+		agentCardContent = json.RawMessage(raw)
+	}
+
+	// Validate dnsRecordStyle locally so the operator sees a clear
+	// error before the registration round-trip. The RA performs the
+	// authoritative check; this is an ergonomics layer.
+	if opts.DNSRecordStyle != "" {
+		switch opts.DNSRecordStyle {
+		case models.DNSRecordStyleConsolidated,
+			models.DNSRecordStyleLegacy,
+			models.DNSRecordStyleBoth:
+			// ok
+		default:
+			return fmt.Errorf("invalid --dns-record-style %q (want consolidated, legacy, or both)",
+				opts.DNSRecordStyle)
+		}
+	}
+
 	// Build registration request
 	req := &models.AgentRegistrationRequest{
-		AgentDisplayName: name,
-		AgentHost:        host,
-		AgentDescription: description,
-		Version:          version,
+		AgentDisplayName: opts.Name,
+		AgentHost:        opts.Host,
+		AgentDescription: opts.Description,
+		Version:          opts.Version,
 		IdentityCSRPEM:   string(identityCSRData),
+		AgentCardContent: agentCardContent,
+		DNSRecordStyle:   opts.DNSRecordStyle,
 		Endpoints: []models.AgentEndpoint{
 			{
-				AgentURL:    endpointURL,
-				MetaDataURL: metaDataURL,
-				Protocol:    endpointProto,
-				Transports:  endpointTrans,
+				AgentURL:    opts.EndpointURL,
+				MetaDataURL: opts.MetaDataURL,
+				Protocol:    opts.EndpointProto,
+				Transports:  opts.EndpointTrans,
 				Functions:   functions,
 			},
 		},
