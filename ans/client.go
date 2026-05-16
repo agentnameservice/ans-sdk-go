@@ -44,7 +44,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any, r
 	return httputility.DoRequest(ctx, httpCfg, method, path, body, result)
 }
 
-// RegisterAgent registers a new agent
+// RegisterAgent registers a new agent through the V1 endpoint at
+// POST /v1/agents/register. Use this for backwards-compatible
+// FQDN-only registrations against deployments that have not yet
+// rolled out the V2 surface.
 func (c *Client) RegisterAgent(ctx context.Context, req *models.AgentRegistrationRequest) (*models.RegistrationPending, error) {
 	if req == nil {
 		return nil, fmt.Errorf("%w: request cannot be nil", models.ErrBadRequest)
@@ -55,6 +58,70 @@ func (c *Client) RegisterAgent(ctx context.Context, req *models.AgentRegistratio
 		return nil, err
 	}
 	return &result, nil
+}
+
+// RegisterAgentV2 registers a new agent through the V2 endpoint
+// at POST /v2/ans/agents.
+//
+// V2 admits §3.2.0 base-only registrations (Version + IdentityCSRPEM
+// both empty) and ANS-0 anchor blocks (DID, LEI alongside FQDN). For
+// the FQDN profile the path is identical to the V1 endpoint; for
+// non-FQDN profiles the V2 path is required.
+//
+// Use this method when:
+//   - registering a base-only agent (no version, no Identity Cert);
+//   - registering with an explicit anchor block (FQDN, DID, or LEI);
+//   - relying on the V2 wire shape (cursor pagination, capabilitiesHash
+//     sealing, dnsRecordStyle selection).
+func (c *Client) RegisterAgentV2(ctx context.Context, req *models.AgentRegistrationRequest) (*models.RegistrationPending, error) {
+	if req == nil {
+		return nil, fmt.Errorf("%w: request cannot be nil", models.ErrBadRequest)
+	}
+	var result models.RegistrationPending
+	err := c.doRequest(ctx, http.MethodPost, "/v2/ans/agents", req, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// NewDIDWebRegistration is a convenience constructor for a
+// base-only did:web registration. The resulting request omits
+// Version and IdentityCSRPEM (forced base-only for non-FQDN anchors)
+// and sets AnchorType to "did" with the supplied DID URI.
+//
+// The caller still supplies the agent's operational FQDN
+// (AgentHost) where the agent terminates TLS, the display name,
+// and the endpoint set. The DID URI is the identity anchor; the
+// AgentHost is the operational endpoint. The two are intentionally
+// distinct for non-FQDN anchors.
+func NewDIDWebRegistration(displayName, agentHost, didURI string, endpoints []models.AgentEndpoint) *models.AgentRegistrationRequest {
+	return &models.AgentRegistrationRequest{
+		AgentDisplayName: displayName,
+		AgentHost:        agentHost,
+		Endpoints:        endpoints,
+		Anchor: &models.AnchorRequest{
+			AnchorType: models.AnchorTypeDID,
+			Input:      didURI,
+		},
+	}
+}
+
+// NewLEIRegistration is a convenience constructor for a base-only
+// LEI-anchored registration. The LEI must pass ISO 17442 mod-97
+// validation server-side (the SDK does not pre-validate). Cross-
+// anchor binding to an FQDN or DID via the spec's equivalence-link
+// flow lands in a follow-up SDK helper.
+func NewLEIRegistration(displayName, agentHost, lei string, endpoints []models.AgentEndpoint) *models.AgentRegistrationRequest {
+	return &models.AgentRegistrationRequest{
+		AgentDisplayName: displayName,
+		AgentHost:        agentHost,
+		Endpoints:        endpoints,
+		Anchor: &models.AnchorRequest{
+			AnchorType: models.AnchorTypeLEI,
+			Input:      lei,
+		},
+	}
 }
 
 // GetAgentDetails retrieves agent details by ID
