@@ -78,7 +78,54 @@ type AgentRegistrationRequest struct {
 	ServerCSRPEM              string          `json:"serverCsrPEM,omitempty"`
 	Version                   string          `json:"version"`
 	Endpoints                 []AgentEndpoint `json:"endpoints"`
+
+	// AgentCardContent is the optional ANS Trust Card body the
+	// operator submits per ANS_SPEC.md §A.1. The RA computes
+	// SHA-256 over the JCS-canonical bytes (RFC 8785) and seals
+	// the hex-lowercase digest into the AGENT_REGISTERED TL event
+	// under attestations.metadataHashes.capabilitiesHash. The same
+	// digest re-encoded as base64url appears in the Consolidated
+	// Approach SVCB record's card-sha256 SvcParam (§4.4.2 cross-
+	// check).
+	//
+	// Modeled as json.RawMessage so the operator-submitted bytes
+	// reach the RA without re-marshaling — JCS canonicalization is
+	// byte-precise; any round-trip through map[string]any could
+	// shift the digest.
+	AgentCardContent json.RawMessage `json:"agentCardContent,omitempty"`
+
+	// DNSRecordStyle selects which DNS record family the RA emits
+	// for this registration. Use the DNSRecordStyle* constants:
+	//   "consolidated" (default): Consolidated Approach SVCB at the
+	//      bare FQDN per ANS_SPEC.md §4.4.2, plus shared records.
+	//   "legacy": original `_ans` TXT shape plus shared records
+	//      plus an HTTPS RR. Backwards-compatible.
+	//   "both": union; the §4.4.2 transition shape.
+	//
+	// Empty/missing → consolidated (the RA applies the default).
+	DNSRecordStyle string `json:"dnsRecordStyle,omitempty"`
 }
+
+// DNSRecordStyle constants enumerate the supported values for
+// AgentRegistrationRequest.DNSRecordStyle.
+const (
+	DNSRecordStyleConsolidated = "consolidated"
+	DNSRecordStyleLegacy       = "legacy"
+	DNSRecordStyleBoth         = "both"
+	// DefaultDNSRecordStyle is what the RA applies when the request
+	// omits dnsRecordStyle. Pinned to "consolidated" so callers that
+	// don't think about the field still get the §4.4.2 SHOULD shape.
+	DefaultDNSRecordStyle = DNSRecordStyleConsolidated
+)
+
+// DNSRecord type-string constants. The wire format uses uppercase
+// strings; these constants prevent typos at call sites.
+const (
+	DNSRecordTypeTXT   = "TXT"
+	DNSRecordTypeTLSA  = "TLSA"
+	DNSRecordTypeHTTPS = "HTTPS"
+	DNSRecordTypeSVCB  = "SVCB"
+)
 
 // RegistrationPending represents a pending registration response
 type RegistrationPending struct {
