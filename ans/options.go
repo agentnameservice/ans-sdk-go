@@ -66,6 +66,19 @@ func WithAPIKey(key, secret string) Option {
 	}
 }
 
+// WithBearerToken sets a raw `Authorization: Bearer <token>` header.
+// Use this for the reference RA's static-API-key auth (the demo lane
+// in the godaddy/ans repo accepts `Bearer <key>` directly), local
+// development, and any deployment that doesn't sit behind the GoDaddy
+// SSO gateway. Production calls against the gateway should keep using
+// WithJWT or WithAPIKey, which encode the gateway's required prefix.
+func WithBearerToken(token string) Option {
+	return func(c *clientConfig) error {
+		c.authHeader = "Bearer " + token
+		return nil
+	}
+}
+
 // WithTimeout sets the HTTP client timeout
 func WithTimeout(timeout time.Duration) Option {
 	return func(c *clientConfig) error {
@@ -182,6 +195,76 @@ func WithSearchOffset(offset int) SearchOption {
 			return fmt.Errorf("%w: offset cannot be negative", models.ErrBadRequest)
 		}
 		c.offset = offset
+		return nil
+	}
+}
+
+// ListV2Option is a functional option for Client.ListAgentsV2.
+//
+// Distinct from SearchOption (V1 search): the V2 endpoint at
+// GET /v2/ans/agents uses cursor pagination rather than offset/limit
+// and returns a wrapped page shape, so it gets its own option family
+// to keep the client API honest about the difference.
+type ListV2Option func(*listV2Config) error
+
+// listV2Config accumulates filter values for a single ListAgentsV2 call.
+type listV2Config struct {
+	host     string
+	statuses []models.AgentLifecycleStatus
+	cursor   string
+	limit    int
+}
+
+// WithListV2Host scopes the page to a single agent FQDN. Empty string
+// is the no-filter default (the API returns every agent the caller is
+// authorized to see).
+func WithListV2Host(host string) ListV2Option {
+	return func(c *listV2Config) error {
+		c.host = host
+		return nil
+	}
+}
+
+// WithListV2Status filters by one or more lifecycle statuses. The V2
+// endpoint defaults to ACTIVE when no `status` parameter is sent —
+// pass AgentStatusAll to lift the filter and see every state, or pass
+// specific lifecycle states (AgentStatusPendingDNS,
+// AgentStatusPendingValidation, etc.) to scope to that slice.
+//
+// Repeated calls replace the previous set rather than append, matching
+// the semantics of WithSearchStatus on the V1 path.
+func WithListV2Status(statuses ...models.AgentLifecycleStatus) ListV2Option {
+	return func(c *listV2Config) error {
+		for _, s := range statuses {
+			if !models.IsValidAgentLifecycleStatus(s) {
+				return fmt.Errorf("%w: invalid lifecycle status %q", models.ErrBadRequest, s)
+			}
+		}
+		c.statuses = append(c.statuses[:0], statuses...)
+		return nil
+	}
+}
+
+// WithListV2Cursor passes the opaque cursor token from a prior
+// AgentListV2Response.NextCursor into the next call. Empty string
+// requests the first page.
+func WithListV2Cursor(cursor string) ListV2Option {
+	return func(c *listV2Config) error {
+		c.cursor = cursor
+		return nil
+	}
+}
+
+// WithListV2Limit caps the page size. Must be in [0, MaxSearchLimit];
+// 0 omits the parameter entirely so the server applies its default
+// (20 at time of writing). Negative or above-cap values return
+// ErrBadRequest.
+func WithListV2Limit(limit int) ListV2Option {
+	return func(c *listV2Config) error {
+		if limit < 0 || limit > MaxSearchLimit {
+			return fmt.Errorf("%w: limit must be between 0 and %d", models.ErrBadRequest, MaxSearchLimit)
+		}
+		c.limit = limit
 		return nil
 	}
 }

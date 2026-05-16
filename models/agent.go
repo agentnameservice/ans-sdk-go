@@ -11,19 +11,37 @@ import (
 type AgentLifecycleStatus string
 
 const (
-	AgentStatusPendingDNS AgentLifecycleStatus = "PENDING_DNS"
-	AgentStatusActive     AgentLifecycleStatus = "ACTIVE"
-	AgentStatusDeprecated AgentLifecycleStatus = "DEPRECATED"
-	AgentStatusRevoked    AgentLifecycleStatus = "REVOKED"
-	AgentStatusAll        AgentLifecycleStatus = "ALL"
+	// AgentStatusPendingValidation is the state immediately after a
+	// successful POST /v2/ans/agents — domain control has not yet been
+	// proven and no certificates have been issued. The V2 list endpoint
+	// at /v2/ans/agents excludes this state from the default response;
+	// pass it explicitly via WithListV2Status to see freshly-registered
+	// agents (including §3.2.0 base-only registrations) before they
+	// reach ACTIVE.
+	AgentStatusPendingValidation AgentLifecycleStatus = "PENDING_VALIDATION"
+	AgentStatusPendingDNS        AgentLifecycleStatus = "PENDING_DNS"
+	AgentStatusActive            AgentLifecycleStatus = "ACTIVE"
+	AgentStatusDeprecated        AgentLifecycleStatus = "DEPRECATED"
+	AgentStatusRevoked           AgentLifecycleStatus = "REVOKED"
+	// AgentStatusFailed and AgentStatusExpired are terminal failure
+	// states for pending registrations that timed out or hit a hard
+	// validator error before activation. The V2 list endpoint includes
+	// them only when status=ALL is in effect.
+	AgentStatusFailed  AgentLifecycleStatus = "FAILED"
+	AgentStatusExpired AgentLifecycleStatus = "EXPIRED"
+	// AgentStatusAll is a sentinel that lifts the default ACTIVE-only
+	// filter on the V2 list endpoint; the RA strips it from the
+	// applied filter set.
+	AgentStatusAll AgentLifecycleStatus = "ALL"
 )
 
 // IsValidAgentLifecycleStatus reports whether s is a recognised lifecycle
 // status value.
 func IsValidAgentLifecycleStatus(s AgentLifecycleStatus) bool {
 	switch s {
-	case AgentStatusPendingDNS, AgentStatusActive, AgentStatusDeprecated,
-		AgentStatusRevoked, AgentStatusAll:
+	case AgentStatusPendingValidation, AgentStatusPendingDNS, AgentStatusActive,
+		AgentStatusDeprecated, AgentStatusRevoked, AgentStatusFailed,
+		AgentStatusExpired, AgentStatusAll:
 		return true
 	default:
 		return false
