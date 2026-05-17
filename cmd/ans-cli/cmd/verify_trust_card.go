@@ -75,6 +75,15 @@ convenience field, falling back to "transparencyPayload.producer.event.ansId"
 when present. Production agents SHOULD include "agentId" at the top level
 so verifiers can resolve it without parsing the receipt.`,
 		Args: cobra.ExactArgs(1),
+		// SilenceUsage + SilenceErrors stop cobra from printing the
+		// usage block and the error message when runVerifyTrustCard
+		// returns a non-nil error. Verification failures are not user
+		// errors; they're the report's payload. The structured output
+		// already tells the operator what failed and why; the non-zero
+		// exit code (cobra honors a returned error in os.Exit) is the
+		// machine signal.
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			result := runVerifyTrustCard(args[0], transparencyBaseURL)
 			return printVerifyTrustCardResult(result, jsonOutput)
