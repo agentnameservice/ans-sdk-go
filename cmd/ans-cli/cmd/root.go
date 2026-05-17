@@ -74,6 +74,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 		buildVerifyACMECmd(),
 		buildVerifyDNSCmd(),
 		buildVerifyHashCmd(),
+		buildVerifyTrustCardCmd(),
 	)
 
 	return cmd
