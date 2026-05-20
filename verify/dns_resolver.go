@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"sort"
 	"time"
@@ -21,6 +22,7 @@ var ErrRecordNotFound = errors.New("no matching badge record found")
 type StandardDNSResolver struct {
 	resolver *net.Resolver
 	timeout  time.Duration
+	logger   *slog.Logger
 }
 
 // NewStandardDNSResolver creates a new StandardDNSResolver with default settings.
@@ -28,6 +30,7 @@ func NewStandardDNSResolver() *StandardDNSResolver {
 	return &StandardDNSResolver{
 		resolver: net.DefaultResolver,
 		timeout:  defaultDNSTimeoutSeconds * time.Second,
+		logger:   slog.Default(),
 	}
 }
 
@@ -43,22 +46,62 @@ func (r *StandardDNSResolver) WithTimeout(timeout time.Duration) *StandardDNSRes
 	return r
 }
 
-// LookupAnsBadge queries _ans-badge TXT records for an FQDN.
-// If _ans-badge returns NXDOMAIN/NotFound, falls back to _ra-badge.
-// On hard errors (SERVFAIL/timeout), does NOT fallback.
-func (r *StandardDNSResolver) LookupAnsBadge(ctx context.Context, fqdn models.Fqdn) (DNSLookupResult, error) {
-	// Try _ans-badge first
-	result, err := r.lookupBadgeRecords(ctx, fqdn.AnsBadgeName(), BadgeRecordSourceAnsBadge)
-	if err != nil {
-		// Hard error — do NOT fallback
-		return result, err
+// WithLogger sets the slog.Logger used for fallback diagnostics. A nil logger
+// resets to slog.Default().
+func (r *StandardDNSResolver) WithLogger(logger *slog.Logger) *StandardDNSResolver {
+	if logger == nil {
+		logger = slog.Default()
 	}
-	if result.Found {
-		return result, nil
+	r.logger = logger
+	return r
+}
+
+// LookupAnsBadge queries _ans-badge TXT records for an FQDN.
+//
+// Source-selection rule: if _ans-badge returns at least one validly-parsed
+// record, those records are authoritative and _ra-badge is NOT consulted.
+// Otherwise — for any reason (NXDOMAIN, empty/malformed response, timeout,
+// SERVFAIL, etc.) — the resolver falls back to _ra-badge.
+//
+// When fallback is triggered by a transient primary error (not NXDOMAIN), the
+// primary error is stamped onto each fallback record's PrimaryError field so
+// callers can surface a warning. If the fallback also fails, the primary
+// error is returned in preference to the fallback error to preserve the
+// original diagnostic signal.
+func (r *StandardDNSResolver) LookupAnsBadge(ctx context.Context, fqdn models.Fqdn) (DNSLookupResult, error) {
+	// Primary lookup
+	primaryResult, primaryErr := r.lookupBadgeRecords(ctx, fqdn.AnsBadgeName(), BadgeRecordSourceAnsBadge)
+	if primaryErr == nil && primaryResult.Found {
+		return primaryResult, nil
 	}
 
-	// Fallback to _ra-badge
-	return r.lookupBadgeRecords(ctx, fqdn.RaBadgeName(), BadgeRecordSourceRaBadge)
+	// Primary did not yield records — try _ra-badge.
+	fallbackResult, fallbackErr := r.lookupBadgeRecords(ctx, fqdn.RaBadgeName(), BadgeRecordSourceRaBadge)
+	if fallbackErr == nil && fallbackResult.Found {
+		if primaryErr != nil {
+			r.logger.WarnContext(ctx,
+				"_ans-badge transient failure; resolved via legacy _ra-badge",
+				slog.String("fqdn", fqdn.String()),
+				slog.String("primary_error", primaryErr.Error()))
+			for i := range fallbackResult.Records {
+				fallbackResult.Records[i].PrimaryError = primaryErr
+			}
+		}
+		return fallbackResult, nil
+	}
+
+	// Neither resolved. Prefer the primary error so callers see the original
+	// cause (e.g., timeout) rather than a downstream NXDOMAIN on the legacy
+	// record.
+	if primaryErr != nil {
+		r.logger.WarnContext(ctx,
+			"_ans-badge lookup failed and _ra-badge fallback did not resolve",
+			slog.String("fqdn", fqdn.String()),
+			slog.String("primary_error", primaryErr.Error()),
+			slog.Any("fallback_error", fallbackErr))
+		return primaryResult, primaryErr
+	}
+	return fallbackResult, fallbackErr
 }
 
 // lookupBadgeRecords queries a specific DNS name for badge TXT records.

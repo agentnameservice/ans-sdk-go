@@ -99,6 +99,54 @@ func validateBadgeURL(config *verifierConfig, badgeURL string) *VerificationOutc
 	return nil
 }
 
+// appendFallbackWarning attaches a warning to the outcome when the resolved
+// record came from the legacy _ra-badge fallback because the primary
+// _ans-badge query failed transiently. The warning is informational — the
+// verification result itself is unchanged. Callers that want to refuse
+// transient-fallback results can inspect outcome.Warnings or check
+// record.PrimaryError directly upstream.
+func appendFallbackWarning(outcome *VerificationOutcome, record *AnsBadgeRecord) {
+	if outcome == nil || record == nil || record.PrimaryError == nil {
+		return
+	}
+	outcome.Warnings = append(outcome.Warnings, fallbackWarningMessage(record.PrimaryError))
+}
+
+// appendCachedFallbackWarning re-emits the fallback warning on a cache-hit
+// outcome when the cached badge was originally fetched via legacy fallback
+// because the primary _ans-badge query failed transiently.
+func appendCachedFallbackWarning(outcome *VerificationOutcome, cached *CachedBadge) {
+	if outcome == nil || cached == nil || cached.PrimaryError == nil {
+		return
+	}
+	outcome.Warnings = append(outcome.Warnings, fallbackWarningMessage(cached.PrimaryError))
+}
+
+// fallbackWarningMessage formats the fallback warning consistently across
+// fresh-fetch and cache-hit code paths.
+func fallbackWarningMessage(primaryErr error) string {
+	return fmt.Sprintf("_ans-badge unavailable (%v); resolved via legacy _ra-badge", primaryErr)
+}
+
+// recordSource returns the BadgeRecordSource of a resolved record, defaulting
+// to BadgeRecordSourceAnsBadge when the record is nil. The default is benign:
+// nil records arise only on fail-open paths where no provenance is meaningful.
+func recordSource(record *AnsBadgeRecord) BadgeRecordSource {
+	if record == nil {
+		return BadgeRecordSourceAnsBadge
+	}
+	return record.Source
+}
+
+// recordPrimaryError returns the primary-lookup error of a resolved record,
+// or nil when the record is nil or no primary error was recorded.
+func recordPrimaryError(record *AnsBadgeRecord) error {
+	if record == nil {
+		return nil
+	}
+	return record.PrimaryError
+}
+
 // ServerVerifier verifies server certificates against the ANS transparency log.
 // Use this when a client wants to verify that a server is a legitimate ANS agent.
 type ServerVerifier struct {
@@ -125,7 +173,11 @@ func (v *ServerVerifier) Verify(ctx context.Context, fqdn models.Fqdn, cert *Cer
 				slog.String("fqdn", fqdn.String()), slog.Bool("cache_hit", true))
 			result := v.verifyWithBadge(cached.Badge, cert, fqdn)
 			if result.Type != OutcomeFingerprintMismatch {
-				// Cache hit: either success or non-fingerprint failure (hostname, status)
+				// Cache hit: either success or non-fingerprint failure
+				// (hostname, status). Re-emit fallback warning if the cached
+				// badge was originally fetched via legacy fallback due to a
+				// transient primary error.
+				appendCachedFallbackWarning(result, cached)
 				return result
 			}
 			// Fingerprint mismatch from cache — may be stale after cert renewal.
@@ -137,14 +189,15 @@ func (v *ServerVerifier) Verify(ctx context.Context, fqdn models.Fqdn, cert *Cer
 	}
 
 	// 2. Fetch badge from DNS + TLog
-	badge, outcome := v.fetchBadge(ctx, fqdn)
+	badge, record, outcome := v.fetchBadge(ctx, fqdn)
 	if outcome != nil {
 		return outcome
 	}
 
-	// 3. Cache the badge
+	// 3. Cache the badge with provenance so subsequent cache hits can
+	//    re-emit the fallback warning.
 	if v.config.cache != nil {
-		v.config.cache.Insert(fqdn, badge)
+		v.config.cache.InsertWithProvenance(fqdn, badge, recordSource(record), recordPrimaryError(record))
 	}
 
 	// 4. Verify against badge
@@ -153,8 +206,16 @@ func (v *ServerVerifier) Verify(ctx context.Context, fqdn models.Fqdn, cert *Cer
 		return outcome
 	}
 
-	// 5. Optional DANE/TLSA check (can reject even if badge verification passed)
+	// 5. Surface fallback warning if _ra-badge was used due to transient
+	//    primary failure
+	appendFallbackWarning(outcome, record)
+
+	// 6. Optional DANE/TLSA check (can reject even if badge verification passed)
 	if rejection := verifyDANE(ctx, v.config, fqdn, cert, outcome); rejection != nil {
+		// Preserve any warnings (e.g. fallback warning) on the rejection
+		// outcome — DANE rejection constructs a fresh outcome and would
+		// otherwise drop diagnostic context the caller has already accrued.
+		rejection.Warnings = append(rejection.Warnings, outcome.Warnings...)
 		return rejection
 	}
 
@@ -171,13 +232,13 @@ func (v *ServerVerifier) Prefetch(ctx context.Context, fqdn models.Fqdn) (*model
 		}
 	}
 
-	badge, outcome := v.fetchBadge(ctx, fqdn)
+	badge, record, outcome := v.fetchBadge(ctx, fqdn)
 	if outcome != nil {
 		return nil, outcome.ToError()
 	}
 
 	if v.config.cache != nil {
-		v.config.cache.Insert(fqdn, badge)
+		v.config.cache.InsertWithProvenance(fqdn, badge, recordSource(record), recordPrimaryError(record))
 	}
 
 	return badge, nil
@@ -210,7 +271,11 @@ func (v *ServerVerifier) VerifyWithScitt(ctx context.Context, fqdn models.Fqdn, 
 }
 
 // fetchBadge fetches a badge from DNS and TLog.
-func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*models.Badge, *VerificationOutcome) {
+//
+// Returns the resolved AnsBadgeRecord alongside the badge so callers can
+// inspect record.PrimaryError to surface a warning when the legacy _ra-badge
+// fallback was used due to a transient _ans-badge error.
+func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*models.Badge, *AnsBadgeRecord, *VerificationOutcome) {
 	log := configLogger(v.config)
 
 	// DNS lookup
@@ -219,20 +284,20 @@ func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*mod
 	if err != nil {
 		// ErrRecordNotFound means not an ANS agent — never apply failure policy
 		if errors.Is(err, ErrRecordNotFound) {
-			return nil, NewNotAnsAgentOutcome(fqdn.String())
+			return nil, nil, NewNotAnsAgentOutcome(fqdn.String())
 		}
 		log.WarnContext(ctx, "fetchBadge: DNS error",
 			slog.String("fqdn", fqdn.String()), slog.String("error", err.Error()))
 		outcome := NewDNSErrorOutcome(err)
-		return nil, applyFailurePolicy(v.config, fqdn, nil, outcome)
+		return nil, nil, applyFailurePolicy(v.config, fqdn, nil, outcome)
 	}
 	if record == nil {
-		return nil, NewNotAnsAgentOutcome(fqdn.String())
+		return nil, nil, NewNotAnsAgentOutcome(fqdn.String())
 	}
 
 	// Validate badge URL before fetching
 	if outcome := validateBadgeURL(v.config, record.URL); outcome != nil {
-		return nil, outcome
+		return nil, record, outcome
 	}
 
 	// Fetch badge from transparency log
@@ -242,10 +307,10 @@ func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*mod
 		log.WarnContext(ctx, "fetchBadge: TLog error",
 			slog.String("url", record.URL), slog.String("error", err.Error()))
 		outcome := NewTlogErrorOutcome(err)
-		return nil, applyFailurePolicy(v.config, fqdn, nil, outcome)
+		return nil, record, applyFailurePolicy(v.config, fqdn, nil, outcome)
 	}
 
-	return badge, nil
+	return badge, record, nil
 }
 
 // verifyWithBadge verifies a certificate against a badge.
@@ -320,19 +385,24 @@ func (v *ClientVerifier) Verify(ctx context.Context, cert *CertIdentity) *Verifi
 	// 4. Check cache first (by FQDN + version)
 	if v.config.cache != nil {
 		if cached, ok := v.config.cache.GetByFqdnVersion(fqdn, version); ok {
-			return v.verifyWithBadge(cached.Badge, cert, fqdn, ansName)
+			result := v.verifyWithBadge(cached.Badge, cert, fqdn, ansName)
+			// Re-emit fallback warning if the cached badge was originally
+			// fetched via legacy fallback due to a transient primary error.
+			appendCachedFallbackWarning(result, cached)
+			return result
 		}
 	}
 
 	// 5. Fetch badge from DNS + TLog (matching version)
-	badge, outcome := v.fetchBadge(ctx, fqdn, version)
+	badge, record, outcome := v.fetchBadge(ctx, fqdn, version)
 	if outcome != nil {
 		return outcome
 	}
 
-	// 6. Cache the badge
+	// 6. Cache the badge with provenance so subsequent cache hits can
+	//    re-emit the fallback warning.
 	if v.config.cache != nil {
-		v.config.cache.InsertForVersion(fqdn, version, badge)
+		v.config.cache.InsertForVersionWithProvenance(fqdn, version, badge, recordSource(record), recordPrimaryError(record))
 	}
 
 	// 7. Verify against badge
@@ -341,8 +411,16 @@ func (v *ClientVerifier) Verify(ctx context.Context, cert *CertIdentity) *Verifi
 		return outcome
 	}
 
-	// 8. Optional DANE/TLSA check (can reject even if badge verification passed)
+	// 8. Surface fallback warning if _ra-badge was used due to transient
+	//    primary failure
+	appendFallbackWarning(outcome, record)
+
+	// 9. Optional DANE/TLSA check (can reject even if badge verification passed)
 	if rejection := verifyDANE(ctx, v.config, fqdn, cert, outcome); rejection != nil {
+		// Preserve any warnings (e.g. fallback warning) on the rejection
+		// outcome — DANE rejection constructs a fresh outcome and would
+		// otherwise drop diagnostic context the caller has already accrued.
+		rejection.Warnings = append(rejection.Warnings, outcome.Warnings...)
 		return rejection
 	}
 
@@ -388,7 +466,11 @@ func (v *ClientVerifier) VerifyWithScitt(ctx context.Context, cert *CertIdentity
 }
 
 // fetchBadge fetches a badge from DNS and TLog for a specific version.
-func (v *ClientVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn, version models.Version) (*models.Badge, *VerificationOutcome) {
+//
+// Returns the resolved AnsBadgeRecord alongside the badge so callers can
+// inspect record.PrimaryError to surface a warning when the legacy _ra-badge
+// fallback was used due to a transient _ans-badge error.
+func (v *ClientVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn, version models.Version) (*models.Badge, *AnsBadgeRecord, *VerificationOutcome) {
 	log := configLogger(v.config)
 
 	// DNS lookup for specific version
@@ -397,20 +479,20 @@ func (v *ClientVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn, versi
 	if err != nil {
 		// ErrRecordNotFound means not an ANS agent — never apply failure policy
 		if errors.Is(err, ErrRecordNotFound) {
-			return nil, NewNotAnsAgentOutcome(fqdn.String())
+			return nil, nil, NewNotAnsAgentOutcome(fqdn.String())
 		}
 		log.WarnContext(ctx, "fetchBadge: DNS error",
 			slog.String("fqdn", fqdn.String()), slog.String("error", err.Error()))
 		outcome := NewDNSErrorOutcome(err)
-		return nil, applyFailurePolicy(v.config, fqdn, &version, outcome)
+		return nil, nil, applyFailurePolicy(v.config, fqdn, &version, outcome)
 	}
 	if record == nil {
-		return nil, NewNotAnsAgentOutcome(fqdn.String())
+		return nil, nil, NewNotAnsAgentOutcome(fqdn.String())
 	}
 
 	// Validate badge URL before fetching
 	if outcome := validateBadgeURL(v.config, record.URL); outcome != nil {
-		return nil, outcome
+		return nil, record, outcome
 	}
 
 	// Fetch badge from transparency log
@@ -420,10 +502,10 @@ func (v *ClientVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn, versi
 		log.WarnContext(ctx, "fetchBadge: TLog error",
 			slog.String("url", record.URL), slog.String("error", err.Error()))
 		outcome := NewTlogErrorOutcome(err)
-		return nil, applyFailurePolicy(v.config, fqdn, &version, outcome)
+		return nil, record, applyFailurePolicy(v.config, fqdn, &version, outcome)
 	}
 
-	return badge, nil
+	return badge, record, nil
 }
 
 // verifyWithBadge verifies a client certificate against a badge.
@@ -623,6 +705,9 @@ func verifyWithHeaders(
 
 	// Optional DANE/TLSA check (mirrors badge path). May reject even after SCITT passes.
 	if rejection := verifyDANE(ctx, config, fqdn, cert, outcome); rejection != nil {
+		// Preserve any warnings (e.g. DEPRECATED) accrued during SCITT
+		// verification — DANE rejection constructs a fresh outcome.
+		rejection.Warnings = append(rejection.Warnings, outcome.Warnings...)
 		return rejection
 	}
 

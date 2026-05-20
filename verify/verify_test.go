@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -102,6 +103,202 @@ func TestServerVerifier_Success(t *testing.T) {
 	}
 	if outcome.MatchedFingerprint == nil {
 		t.Error("Verify() MatchedFingerprint is nil")
+	}
+}
+
+// TestServerVerifier_RaBadgeFallback_CacheHitReemitsWarning exercises the
+// cache-hit path: when a badge originally fetched via _ra-badge fallback (due
+// to a transient _ans-badge error) is served from cache, the fallback warning
+// must be re-emitted on every cache hit, not just the original fetch.
+func TestServerVerifier_RaBadgeFallback_CacheHitReemitsWarning(t *testing.T) {
+	const host = "test.example.com"
+	const fingerprint = "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	const badgeURL = "https://tlog.example.com/v1/agents/test-id"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	raRecord := AnsBadgeRecord{
+		FormatVersion: "ra-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithPrimaryError(host, &DNSError{Type: DNSErrorTimeout, Fqdn: host}).
+		WithRaBadgeRecords(host, []AnsBadgeRecord{raRecord})
+	tlogClient := NewMockTransparencyLogClient().WithBadge(badgeURL, badge)
+	cache := NewBadgeCache(DefaultCacheConfig())
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithCache(cache),
+		WithoutURLValidation(),
+	)
+
+	cert := createTestCertIdentity(host, fingerprint)
+	fqdn, _ := models.NewFqdn(host)
+
+	// First call: cache miss → fallback fires → warning surfaced + cached.
+	first := verifier.Verify(context.Background(), fqdn, cert)
+	if !first.IsSuccess() {
+		t.Fatalf("first Verify() failed: %v", first.Type)
+	}
+	if !hasFallbackWarning(first) {
+		t.Fatalf("first call: missing fallback warning; got %v", first.Warnings)
+	}
+
+	// Second call: cache hit → must re-emit the warning rather than silently
+	// returning success.
+	second := verifier.Verify(context.Background(), fqdn, cert)
+	if !second.IsSuccess() {
+		t.Fatalf("second Verify() failed: %v", second.Type)
+	}
+	if !hasFallbackWarning(second) {
+		t.Errorf("second call (cache hit): warning was dropped; got %v", second.Warnings)
+	}
+}
+
+func hasFallbackWarning(outcome *VerificationOutcome) bool {
+	for _, w := range outcome.Warnings {
+		if strings.Contains(w, "_ra-badge") && strings.Contains(w, "_ans-badge unavailable") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRecordSourceAndPrimaryErrorHelpers covers the nil-guard branches of the
+// recordSource / recordPrimaryError / appendCachedFallbackWarning helpers
+// that the resolver-driven paths don't naturally exercise.
+func TestRecordSourceAndPrimaryErrorHelpers(t *testing.T) {
+	t.Run("recordSource nil returns AnsBadge default", func(t *testing.T) {
+		if got := recordSource(nil); got != BadgeRecordSourceAnsBadge {
+			t.Errorf("recordSource(nil) = %v, want BadgeRecordSourceAnsBadge", got)
+		}
+	})
+	t.Run("recordSource non-nil returns record.Source", func(t *testing.T) {
+		rec := &AnsBadgeRecord{Source: BadgeRecordSourceRaBadge}
+		if got := recordSource(rec); got != BadgeRecordSourceRaBadge {
+			t.Errorf("recordSource = %v, want BadgeRecordSourceRaBadge", got)
+		}
+	})
+	t.Run("recordPrimaryError nil returns nil", func(t *testing.T) {
+		if got := recordPrimaryError(nil); got != nil {
+			t.Errorf("recordPrimaryError(nil) = %v, want nil", got)
+		}
+	})
+	t.Run("recordPrimaryError non-nil returns record.PrimaryError", func(t *testing.T) {
+		want := &DNSError{Type: DNSErrorTimeout}
+		rec := &AnsBadgeRecord{PrimaryError: want}
+		if got := recordPrimaryError(rec); !errors.Is(got, want) {
+			t.Errorf("recordPrimaryError = %v, want %v", got, want)
+		}
+	})
+	t.Run("appendCachedFallbackWarning skips when outcome nil", func(_ *testing.T) {
+		// Must not panic.
+		appendCachedFallbackWarning(nil, &CachedBadge{PrimaryError: errors.New("x")})
+	})
+	t.Run("appendCachedFallbackWarning skips when cached nil", func(t *testing.T) {
+		outcome := &VerificationOutcome{}
+		appendCachedFallbackWarning(outcome, nil)
+		if len(outcome.Warnings) != 0 {
+			t.Errorf("Warnings = %v, want empty", outcome.Warnings)
+		}
+	})
+	t.Run("appendCachedFallbackWarning skips when no PrimaryError", func(t *testing.T) {
+		outcome := &VerificationOutcome{}
+		appendCachedFallbackWarning(outcome, &CachedBadge{})
+		if len(outcome.Warnings) != 0 {
+			t.Errorf("Warnings = %v, want empty", outcome.Warnings)
+		}
+	})
+}
+
+// TestStandardDNSResolver_WithLogger covers the WithLogger builder method.
+func TestStandardDNSResolver_WithLogger(t *testing.T) {
+	custom := slog.New(slog.NewTextHandler(io.Discard, nil))
+	r := NewStandardDNSResolver().WithLogger(custom)
+	if r.logger != custom {
+		t.Error("WithLogger did not install the provided logger")
+	}
+	r2 := r.WithLogger(nil)
+	if r2.logger == nil {
+		t.Error("WithLogger(nil) should reset to slog.Default(), got nil")
+	}
+}
+
+// TestServerVerifier_RaBadgeFallback exercises end-to-end Verify() behavior
+// when the resolver hits the _ra-badge fallback path, asserting that a
+// warning is surfaced only when the fallback was triggered by a transient
+// primary error (not when _ans-badge was simply absent).
+func TestServerVerifier_RaBadgeFallback(t *testing.T) {
+	const host = "test.example.com"
+	const fingerprint = "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	const badgeURL = "https://tlog.example.com/v1/agents/test-id"
+
+	tests := []struct {
+		name        string
+		primaryErr  error
+		wantWarning bool
+	}{
+		{
+			name:        "primary timeout — fallback warning surfaced",
+			primaryErr:  &DNSError{Type: DNSErrorTimeout, Fqdn: host},
+			wantWarning: true,
+		},
+		{
+			name:        "primary absent (NXDOMAIN) — silent fallback, no warning",
+			primaryErr:  nil,
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+			raRecord := AnsBadgeRecord{
+				FormatVersion: "ra-badge1",
+				Version:       ptr(models.NewVersion(1, 0, 0)),
+				URL:           badgeURL,
+			}
+
+			dnsResolver := NewMockDNSResolver().
+				WithRaBadgeRecords(host, []AnsBadgeRecord{raRecord})
+			if tt.primaryErr != nil {
+				dnsResolver = dnsResolver.WithPrimaryError(host, tt.primaryErr)
+			}
+
+			tlogClient := NewMockTransparencyLogClient().WithBadge(badgeURL, badge)
+
+			verifier := NewServerVerifier(
+				WithDNSResolver(dnsResolver),
+				WithTlogClient(tlogClient),
+				WithoutURLValidation(),
+			)
+
+			cert := createTestCertIdentity(host, fingerprint)
+			fqdn, _ := models.NewFqdn(host)
+
+			outcome := verifier.Verify(context.Background(), fqdn, cert)
+			if !outcome.IsSuccess() {
+				t.Fatalf("Verify() failed: %v", outcome.Type)
+			}
+
+			hasFallbackWarning := false
+			for _, w := range outcome.Warnings {
+				if strings.Contains(w, "_ra-badge") && strings.Contains(w, "_ans-badge unavailable") {
+					hasFallbackWarning = true
+					break
+				}
+			}
+
+			if tt.wantWarning && !hasFallbackWarning {
+				t.Errorf("Warnings = %v, want one mentioning _ans-badge unavailable + _ra-badge", outcome.Warnings)
+			}
+			if !tt.wantWarning && hasFallbackWarning {
+				t.Errorf("Warnings = %v, want no fallback warning (primary was absent, not errored)", outcome.Warnings)
+			}
+		})
 	}
 }
 

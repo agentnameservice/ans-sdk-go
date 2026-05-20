@@ -35,6 +35,11 @@ type AnsBadgeRecord struct {
 	URL string
 	// Source indicates where this record was resolved from.
 	Source BadgeRecordSource
+	// PrimaryError is set when this record was resolved from _ra-badge because
+	// the primary _ans-badge query failed with a transient error (timeout,
+	// SERVFAIL, etc.). Nil when _ans-badge was simply absent (NXDOMAIN/NODATA)
+	// or when this record came from _ans-badge itself.
+	PrimaryError error
 }
 
 // ParseAnsBadgeRecord parses an _ans-badge TXT record.

@@ -50,6 +50,14 @@ type CachedBadge struct {
 	FetchedAt time.Time
 	// ExpiresAt is when the cache entry expires.
 	ExpiresAt time.Time
+	// Source records which DNS record (primary _ans-badge or legacy
+	// _ra-badge) supplied this badge at fetch time.
+	Source BadgeRecordSource
+	// PrimaryError is the error returned by the primary _ans-badge lookup
+	// at fetch time, when fallback to _ra-badge was triggered by a
+	// transient failure. Nil when the cached badge came from _ans-badge or
+	// when the primary was simply absent (NXDOMAIN/NODATA).
+	PrimaryError error
 }
 
 // IsExpired returns true if the cache entry has expired.
@@ -136,8 +144,19 @@ func (c *BadgeCache) GetByFqdnVersion(fqdn models.Fqdn, version models.Version) 
 	return entry.badge, true
 }
 
-// Insert adds a badge to the cache by FQDN.
+// Insert adds a badge to the cache by FQDN. The cached entry records no
+// provenance; use InsertWithProvenance to also persist the resolved
+// BadgeRecordSource and any primary-lookup error so cache hits can re-emit
+// fallback warnings.
 func (c *BadgeCache) Insert(fqdn models.Fqdn, badge *models.Badge) {
+	c.InsertWithProvenance(fqdn, badge, BadgeRecordSourceAnsBadge, nil)
+}
+
+// InsertWithProvenance adds a badge to the cache by FQDN, recording the DNS
+// source (`_ans-badge` vs `_ra-badge`) and any primary-lookup error captured
+// at fetch time. Callers can later use those fields to re-emit a
+// fallback-was-used warning on cache hits.
+func (c *BadgeCache) InsertWithProvenance(fqdn models.Fqdn, badge *models.Badge, source BadgeRecordSource, primaryErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -145,9 +164,11 @@ func (c *BadgeCache) Insert(fqdn models.Fqdn, badge *models.Badge) {
 	expiresAt := now.Add(c.config.DefaultTTL)
 
 	cached := &CachedBadge{
-		Badge:     badge,
-		FetchedAt: now,
-		ExpiresAt: expiresAt,
+		Badge:        badge,
+		FetchedAt:    now,
+		ExpiresAt:    expiresAt,
+		Source:       source,
+		PrimaryError: primaryErr,
 	}
 
 	c.byFqdn[fqdnKey(fqdn)] = &cacheEntry{
@@ -159,8 +180,16 @@ func (c *BadgeCache) Insert(fqdn models.Fqdn, badge *models.Badge) {
 	c.cleanupLocked()
 }
 
-// InsertForVersion adds a badge to the cache by FQDN and version.
+// InsertForVersion adds a badge to the cache by FQDN and version. See
+// InsertForVersionWithProvenance for the variant that also persists DNS
+// source and primary-lookup error.
 func (c *BadgeCache) InsertForVersion(fqdn models.Fqdn, version models.Version, badge *models.Badge) {
+	c.InsertForVersionWithProvenance(fqdn, version, badge, BadgeRecordSourceAnsBadge, nil)
+}
+
+// InsertForVersionWithProvenance adds a badge to the cache by FQDN+version,
+// recording DNS source and any primary-lookup error.
+func (c *BadgeCache) InsertForVersionWithProvenance(fqdn models.Fqdn, version models.Version, badge *models.Badge, source BadgeRecordSource, primaryErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -168,9 +197,11 @@ func (c *BadgeCache) InsertForVersion(fqdn models.Fqdn, version models.Version, 
 	expiresAt := now.Add(c.config.DefaultTTL)
 
 	cached := &CachedBadge{
-		Badge:     badge,
-		FetchedAt: now,
-		ExpiresAt: expiresAt,
+		Badge:        badge,
+		FetchedAt:    now,
+		ExpiresAt:    expiresAt,
+		Source:       source,
+		PrimaryError: primaryErr,
 	}
 
 	c.byFqdnVer[fqdnVersionKey(fqdn, version)] = &cacheEntry{

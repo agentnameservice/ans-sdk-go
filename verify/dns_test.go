@@ -219,13 +219,15 @@ func TestMockDNSResolver_RaBadgeFallback(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		resolver   *MockDNSResolver
-		fqdn       string
-		wantFound  bool
-		wantErr    bool
-		wantURL    string
-		wantSource BadgeRecordSource
+		name           string
+		resolver       *MockDNSResolver
+		fqdn           string
+		wantFound      bool
+		wantErr        bool
+		wantErrType    DNSErrorType // zero value = don't assert error type
+		wantURL        string
+		wantSource     BadgeRecordSource
+		wantPrimaryErr bool
 	}{
 		{
 			name: "ans-badge only",
@@ -244,6 +246,8 @@ func TestMockDNSResolver_RaBadgeFallback(t *testing.T) {
 			wantFound:  true,
 			wantURL:    "https://example.com/ra-badge",
 			wantSource: BadgeRecordSourceRaBadge,
+			// Primary was simply absent (not errored); no PrimaryError stamped.
+			wantPrimaryErr: false,
 		},
 		{
 			name: "ans-badge takes priority over ra-badge",
@@ -262,10 +266,36 @@ func TestMockDNSResolver_RaBadgeFallback(t *testing.T) {
 			wantFound: false,
 		},
 		{
-			name: "hard error does not fallback to ra-badge",
+			name: "primary timeout falls back to ra-badge with PrimaryError stamped",
 			resolver: NewMockDNSResolver().
-				WithError("agent.example.com", &DNSError{Type: DNSErrorTimeout, Fqdn: "agent.example.com"}).
+				WithPrimaryError("agent.example.com", &DNSError{Type: DNSErrorTimeout, Fqdn: "agent.example.com"}).
 				WithRaBadgeRecords("agent.example.com", []AnsBadgeRecord{raRecord}),
+			fqdn:           "agent.example.com",
+			wantFound:      true,
+			wantURL:        "https://example.com/ra-badge",
+			wantSource:     BadgeRecordSourceRaBadge,
+			wantPrimaryErr: true,
+		},
+		{
+			name: "primary timeout and no ra-badge returns primary error",
+			resolver: NewMockDNSResolver().
+				WithPrimaryError("agent.example.com", &DNSError{Type: DNSErrorTimeout, Fqdn: "agent.example.com"}),
+			fqdn:    "agent.example.com",
+			wantErr: true,
+		},
+		{
+			name: "primary error wins over fallback error when both fail",
+			resolver: NewMockDNSResolver().
+				WithPrimaryError("agent.example.com", &DNSError{Type: DNSErrorTimeout, Fqdn: "agent.example.com"}).
+				WithRaBadgeError("agent.example.com", &DNSError{Type: DNSErrorLookupFailed, Fqdn: "agent.example.com"}),
+			fqdn:        "agent.example.com",
+			wantErr:     true,
+			wantErrType: DNSErrorTimeout,
+		},
+		{
+			name: "primary absent and fallback errored returns fallback error",
+			resolver: NewMockDNSResolver().
+				WithRaBadgeError("agent.example.com", &DNSError{Type: DNSErrorLookupFailed, Fqdn: "agent.example.com"}),
 			fqdn:    "agent.example.com",
 			wantErr: true,
 		},
@@ -279,6 +309,15 @@ func TestMockDNSResolver_RaBadgeFallback(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("LookupAnsBadge() expected error, got nil")
+				}
+				if tt.wantErrType != 0 {
+					var dnsErr *DNSError
+					if !errors.As(err, &dnsErr) {
+						t.Fatalf("expected *DNSError, got %T: %v", err, err)
+					}
+					if dnsErr.Type != tt.wantErrType {
+						t.Errorf("DNSError.Type = %v, want %v", dnsErr.Type, tt.wantErrType)
+					}
 				}
 				return
 			}
@@ -299,6 +338,12 @@ func TestMockDNSResolver_RaBadgeFallback(t *testing.T) {
 				}
 				if result.Records[0].Source != tt.wantSource {
 					t.Errorf("Source = %v, want %v", result.Records[0].Source, tt.wantSource)
+				}
+				if tt.wantPrimaryErr && result.Records[0].PrimaryError == nil {
+					t.Error("PrimaryError = nil, want non-nil (primary errored, fallback used)")
+				}
+				if !tt.wantPrimaryErr && result.Records[0].PrimaryError != nil {
+					t.Errorf("PrimaryError = %v, want nil", result.Records[0].PrimaryError)
 				}
 			}
 		})
