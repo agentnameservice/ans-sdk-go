@@ -1,0 +1,34 @@
+{
+  "status": "ACTIVE",
+  "schemaVersion": "V1",
+  "payload": {
+    "logId": "log-456",
+    "producer": {
+      "keyId": "key-1",
+      "signature": "sig-1",
+      "event": {
+        "ansId": "ans-002",
+        "ansName": "ans://example.com/agent",
+        "eventType": "AGENT_REGISTERED",
+        "agent": {"host": "agent.example.com", "name": "Example", "version": "1.0.0"},
+        "attestations": {
+          "domainValidation": "DV",
+          "validIdentityCerts": [
+            {"fingerprint": "v2-id-fp-a", "type": "X509-OV-CLIENT", "notAfter": "2027-05-01T00:00:00Z"}
+          ],
+          "validServerCerts": [
+            {"fingerprint": "v2-srv-fp-a", "type": "X509-DV-SERVER", "notAfter": "2027-05-01T00:00:00Z"},
+            {"fingerprint": "v2-srv-fp-b", "type": "X509-DV-SERVER", "notAfter": "2027-08-01T00:00:00Z"}
+          ],
+          "dnsRecordsProvisioned": [
+            {"name": "_ans.agent.example.com", "data": "txt-data", "type": "TXT"}
+          ],
+          "metadataHashes": {"agent.json": "sha256-abc"}
+        },
+        "issuedAt":  "2026-05-01T00:00:00Z",
+        "raId":      "ra-1",
+        "timestamp": "2026-05-01T00:00:00Z"
+      }
+    }
+  }
+}
