@@ -156,15 +156,40 @@ type AgentInfo struct {
 	Version string `json:"version"`
 }
 
-// Attestations contains certificate attestations.
+// Attestations contains certificate attestations for both v1 and v2 shapes.
+//
+// v1 shape populates IdentityCert / ServerCert (singular).
+// v2 shape populates ValidIdentityCerts / ValidServerCerts (plural).
+// DNSRecordsProvisioned is the v2 array shape; v1 used a map and is not exposed
+// on the badge surface.
 type Attestations struct {
-	DomainValidation string             `json:"domainValidation"`
-	IdentityCert     *CertAttestationV1 `json:"identityCert,omitempty"`
-	ServerCert       *CertAttestationV1 `json:"serverCert,omitempty"`
+	DomainValidation      string                 `json:"domainValidation"`
+	IdentityCert          *CertAttestationV1     `json:"identityCert,omitempty"`
+	ServerCert            *CertAttestationV1     `json:"serverCert,omitempty"`
+	ValidIdentityCerts    []ValidCertAttestation `json:"validIdentityCerts,omitempty"`
+	ValidServerCerts      []ValidCertAttestation `json:"validServerCerts,omitempty"`
+	DNSRecordsProvisioned []BadgeDNSRecord        `json:"dnsRecordsProvisioned,omitempty"`
+	MetadataHashes        map[string]string      `json:"metadataHashes,omitempty"`
 }
 
 // CertAttestationV1 contains certificate fingerprint and type.
 type CertAttestationV1 struct {
 	Fingerprint string `json:"fingerprint"`
 	Type        string `json:"type"`
+}
+
+// ValidCertAttestation is the v2 cert entry. Includes notAfter for expiry checks.
+type ValidCertAttestation struct {
+	Fingerprint string     `json:"fingerprint"`
+	Type        string     `json:"type"`
+	NotAfter    *time.Time `json:"notAfter,omitempty"`
+}
+
+// BadgeDNSRecord is a v2 DNS record provisioning attestation carried inside a Badge.
+// It uses the {name, data, type} shape emitted by the v2 publisher.
+// (Distinct from DNSRecord in agent.go which uses the provisioning-request shape.)
+type BadgeDNSRecord struct {
+	Name string `json:"name"`
+	Data string `json:"data"`
+	Type string `json:"type"`
 }
