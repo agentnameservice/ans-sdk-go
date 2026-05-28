@@ -3,8 +3,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/godaddy/ans-sdk-go/ans"
 	"github.com/godaddy/ans-sdk-go/models"
@@ -254,6 +257,77 @@ func stringPtr(s string) *string {
 	return &s
 }
 
+// demoV2Attestations loads the v2 badge fixture and walks the new plural-cert
+// and DNS-record attestation surfaces along with the matcher helpers.
+func demoV2Attestations() {
+	fixturePath, err := resolveBadgeV2Fixture()
+	if err != nil {
+		slog.Error("failed to resolve badge fixture path", "error", err)
+		return
+	}
+
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		slog.Error("failed to read badge fixture", "path", fixturePath, "error", err)
+		return
+	}
+
+	var badge models.Badge
+	if err := json.Unmarshal(raw, &badge); err != nil {
+		slog.Error("failed to unmarshal badge fixture", "error", err)
+		return
+	}
+
+	slog.Info("v2 badge loaded",
+		"status", badge.Status,
+		"ansName", badge.AgentName(),
+		"eventType", badge.EventType())
+
+	for i, fp := range badge.ServerCertFingerprints() {
+		slog.Info("server cert fingerprint", "index", i, "fingerprint", fp)
+	}
+	for i, fp := range badge.IdentityCertFingerprints() {
+		slog.Info("identity cert fingerprint", "index", i, "fingerprint", fp)
+	}
+
+	for _, rec := range badge.Payload.Producer.Event.Attestations.DNSRecordsProvisioned {
+		slog.Info("dns record provisioned",
+			"name", rec.Name,
+			"data", rec.Data,
+			"type", rec.Type)
+	}
+
+	serverFps := badge.ServerCertFingerprints()
+	if len(serverFps) > 0 {
+		slog.Info("matches server cert (valid)",
+			"fingerprint", serverFps[0],
+			"matches", badge.MatchesServerCert(serverFps[0]))
+	}
+	const bogusFingerprint = "sha256:0000"
+	slog.Info("matches server cert (bogus)",
+		"fingerprint", bogusFingerprint,
+		"matches", badge.MatchesServerCert(bogusFingerprint))
+
+	if hashes := badge.Payload.Producer.Event.Attestations.MetadataHashes; len(hashes) > 0 {
+		slog.Info("metadata hashes", "count", len(hashes))
+	}
+}
+
+// resolveBadgeV2Fixture locates models/testdata/badge-v2.json relative to this
+// source file so the demo runs regardless of the caller's working directory.
+// The BADGE_V2_FIXTURE env var overrides for ad-hoc runs.
+func resolveBadgeV2Fixture() (string, error) {
+	if override := os.Getenv("BADGE_V2_FIXTURE"); override != "" {
+		return override, nil
+	}
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	exampleDir := filepath.Dir(thisFile)
+	return filepath.Join(exampleDir, "..", "models", "testdata", "badge-v2.json"), nil
+}
+
 func main() {
 	// Configure structured logging
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -261,4 +335,5 @@ func main() {
 
 	// Run the examples
 	ExampleTransparencySchemas()
+	demoV2Attestations()
 }
