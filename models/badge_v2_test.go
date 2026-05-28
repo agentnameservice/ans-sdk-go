@@ -18,15 +18,15 @@ func TestBadgeUnmarshalsV2Shape(t *testing.T) {
 
 	att := b.Payload.Producer.Event.Attestations
 	if len(att.ValidServerCerts) != 2 {
-		t.Fatalf("ValidServerCerts: want 2, got %d", len(att.ValidServerCerts))
+		t.Fatalf("ValidServerCerts: want 2, got %d; attestations=%+v", len(att.ValidServerCerts), att)
 	}
 	if len(att.ValidIdentityCerts) != 1 {
-		t.Fatalf("ValidIdentityCerts: want 1, got %d", len(att.ValidIdentityCerts))
+		t.Fatalf("ValidIdentityCerts: want 1, got %d; attestations=%+v", len(att.ValidIdentityCerts), att)
 	}
 	if len(att.DNSRecordsProvisioned) != 1 {
-		t.Fatalf("DNSRecordsProvisioned: want 1, got %d", len(att.DNSRecordsProvisioned))
+		t.Fatalf("DNSRecordsProvisioned: want 1, got %d; attestations=%+v", len(att.DNSRecordsProvisioned), att)
 	}
 	if att.MetadataHashes["agent.json"] != "sha256-abc" {
-		t.Fatalf("MetadataHashes missing or wrong")
+		t.Fatalf("MetadataHashes missing or wrong: %+v", att.MetadataHashes)
 	}
 }
