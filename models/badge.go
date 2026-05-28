@@ -129,7 +129,11 @@ func (b *Badge) IdentityCertFingerprints() []string {
 	return nil
 }
 
-// MatchesServerCert returns true when fp matches any valid server cert.
+// MatchesServerCert returns true when fp matches any valid server cert by
+// exact string equality. Callers needing case-insensitive or prefix-tolerant
+// comparison (e.g. for fingerprints from heterogeneous sources) should
+// normalize fp through verify.ParseCertFingerprint before calling, or
+// iterate ServerCertFingerprints() and compare via the verify package.
 func (b *Badge) MatchesServerCert(fp string) bool {
 	for _, candidate := range b.ServerCertFingerprints() {
 		if candidate == fp {
@@ -139,7 +143,11 @@ func (b *Badge) MatchesServerCert(fp string) bool {
 	return false
 }
 
-// MatchesIdentityCert returns true when fp matches any valid identity cert.
+// MatchesIdentityCert returns true when fp matches any valid identity cert by
+// exact string equality. Callers needing case-insensitive or prefix-tolerant
+// comparison (e.g. for fingerprints from heterogeneous sources) should
+// normalize fp through verify.ParseCertFingerprint before calling, or
+// iterate IdentityCertFingerprints() and compare via the verify package.
 func (b *Badge) MatchesIdentityCert(fp string) bool {
 	for _, candidate := range b.IdentityCertFingerprints() {
 		if candidate == fp {
