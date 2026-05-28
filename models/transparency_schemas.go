@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // TransparencyLogV1 represents the V1 schema for ANS Transparency Log entries
 type TransparencyLogV1 struct {
@@ -49,15 +52,71 @@ type AgentV1 struct {
 	ProviderID *string `json:"providerId,omitempty"`
 }
 
-// AttestationsV1 represents the attestations in V1 schema
+// AttestationsV1 represents the attestations in V1 schema.
+//
+// The dnsRecordsProvisioned wire field carries two distinct shapes depending on
+// the schema version of the producing publisher:
+//   - v1 map shape: a JSON object with name→value string pairs. Populated into
+//     DNSRecordsProvisioned.
+//   - v2 array shape: a JSON array of {name, data, type} objects. Populated into
+//     DNSRecordsProvisionedV2.
+//
+// Consumers should check DNSRecordsProvisionedV2 first; fall back to
+// DNSRecordsProvisioned for historical entries.
 type AttestationsV1 struct {
-	DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
-	DomainValidation      *string                 `json:"domainValidation,omitempty"`
-	IdentityCert          *CertificateV1          `json:"identityCert,omitempty"`
-	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
-	ServerCert            *CertificateV1          `json:"serverCert,omitempty"`
-	ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
-	ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
+	// DNSRecordsProvisioned holds v1 map-shaped DNS provisioning data.
+	// Populated from JSON only when the wire value is a JSON object.
+	DNSRecordsProvisioned map[string]string `json:"dnsRecordsProvisioned,omitempty"`
+	// DNSRecordsProvisionedV2 holds v2 array-shaped DNS provisioning data.
+	// Populated from JSON only when the wire value is a JSON array.
+	// Not emitted during marshaling (tag json:"-") to avoid collision with
+	// the map field's key.
+	DNSRecordsProvisionedV2 []DNSRecordAttestation  `json:"-"`
+	DomainValidation        *string                 `json:"domainValidation,omitempty"`
+	IdentityCert            *CertificateV1          `json:"identityCert,omitempty"`
+	MetadataHashes          map[string]string       `json:"metadataHashes,omitempty"`
+	ServerCert              *CertificateV1          `json:"serverCert,omitempty"`
+	ValidIdentityCerts      []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
+	ValidServerCerts        []CertificateV1Extended `json:"validServerCerts,omitempty"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler for AttestationsV1. It handles the
+// two historic wire shapes for dnsRecordsProvisioned: a JSON object (v1 map) and
+// a JSON array of {name,data,type} objects (v2). All other fields are decoded
+// with standard semantics.
+func (a *AttestationsV1) UnmarshalJSON(data []byte) error {
+	type rawAtt struct {
+		DNSRecordsProvisioned json.RawMessage         `json:"dnsRecordsProvisioned,omitempty"`
+		DomainValidation      *string                 `json:"domainValidation,omitempty"`
+		IdentityCert          *CertificateV1          `json:"identityCert,omitempty"`
+		MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
+		ServerCert            *CertificateV1          `json:"serverCert,omitempty"`
+		ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
+		ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
+	}
+	var r rawAtt
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	a.DomainValidation = r.DomainValidation
+	a.IdentityCert = r.IdentityCert
+	a.MetadataHashes = r.MetadataHashes
+	a.ServerCert = r.ServerCert
+	a.ValidIdentityCerts = r.ValidIdentityCerts
+	a.ValidServerCerts = r.ValidServerCerts
+
+	if len(r.DNSRecordsProvisioned) == 0 {
+		return nil
+	}
+	// Try array first (v2 shape).
+	a.DNSRecordsProvisionedV2 = nil
+	if err := json.Unmarshal(r.DNSRecordsProvisioned, &a.DNSRecordsProvisionedV2); err == nil {
+		return nil
+	}
+	// Clear any partial array residue from the failed attempt, then fall back
+	// to map (v1 shape).
+	a.DNSRecordsProvisionedV2 = nil
+	return json.Unmarshal(r.DNSRecordsProvisioned, &a.DNSRecordsProvisioned)
 }
 
 // CertificateV1 represents certificate information in V1 schema
