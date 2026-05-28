@@ -256,10 +256,21 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	}
 
 	// Compare server certificate fingerprint against any valid cert in the badge.
-	if !badge.MatchesServerCert(cert.Fingerprint.String()) {
+	// Iterating via cert.Fingerprint.Matches preserves the case-insensitive prefix
+	// and hex normalization that ParseCertFingerprint provides, which badge.MatchesServerCert
+	// does not (it uses plain string equality).
+	candidates := badge.ServerCertFingerprints()
+	matched := false
+	for _, candidate := range candidates {
+		if cert.Fingerprint.Matches(candidate) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
 		return NewFingerprintMismatchOutcome(
 			badge,
-			firstOrEmpty(badge.ServerCertFingerprints()),
+			firstOrEmpty(candidates),
 			cert.Fingerprint.String(),
 		)
 	}
@@ -437,10 +448,21 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	}
 
 	// Compare identity certificate fingerprint against any valid cert in the badge.
-	if !badge.MatchesIdentityCert(cert.Fingerprint.String()) {
+	// Iterating via cert.Fingerprint.Matches preserves the case-insensitive prefix
+	// and hex normalization that ParseCertFingerprint provides, which badge.MatchesIdentityCert
+	// does not (it uses plain string equality).
+	idCandidates := badge.IdentityCertFingerprints()
+	idMatched := false
+	for _, candidate := range idCandidates {
+		if cert.Fingerprint.Matches(candidate) {
+			idMatched = true
+			break
+		}
+	}
+	if !idMatched {
 		return NewFingerprintMismatchOutcome(
 			badge,
-			firstOrEmpty(badge.IdentityCertFingerprints()),
+			firstOrEmpty(idCandidates),
 			cert.Fingerprint.String(),
 		)
 	}
