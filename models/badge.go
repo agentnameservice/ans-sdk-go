@@ -94,6 +94,61 @@ func (b *Badge) IdentityCertFingerprint() string {
 	return b.Payload.Producer.Event.Attestations.IdentityCert.Fingerprint
 }
 
+// ServerCertFingerprints returns all valid server certificate fingerprints.
+// Returns the v2 plural list when populated; falls back to the v1 singular if
+// only it is set. Empty slice when neither is populated.
+func (b *Badge) ServerCertFingerprints() []string {
+	att := b.Payload.Producer.Event.Attestations
+	if len(att.ValidServerCerts) > 0 {
+		out := make([]string, len(att.ValidServerCerts))
+		for i, c := range att.ValidServerCerts {
+			out[i] = c.Fingerprint
+		}
+		return out
+	}
+	if att.ServerCert != nil {
+		return []string{att.ServerCert.Fingerprint}
+	}
+	return nil
+}
+
+// IdentityCertFingerprints returns all valid identity certificate fingerprints,
+// with v2-then-v1 fallback semantics matching ServerCertFingerprints.
+func (b *Badge) IdentityCertFingerprints() []string {
+	att := b.Payload.Producer.Event.Attestations
+	if len(att.ValidIdentityCerts) > 0 {
+		out := make([]string, len(att.ValidIdentityCerts))
+		for i, c := range att.ValidIdentityCerts {
+			out[i] = c.Fingerprint
+		}
+		return out
+	}
+	if att.IdentityCert != nil {
+		return []string{att.IdentityCert.Fingerprint}
+	}
+	return nil
+}
+
+// MatchesServerCert returns true when fp matches any valid server cert.
+func (b *Badge) MatchesServerCert(fp string) bool {
+	for _, candidate := range b.ServerCertFingerprints() {
+		if candidate == fp {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchesIdentityCert returns true when fp matches any valid identity cert.
+func (b *Badge) MatchesIdentityCert(fp string) bool {
+	for _, candidate := range b.IdentityCertFingerprints() {
+		if candidate == fp {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentID returns the agent's unique ID from the badge.
 func (b *Badge) AgentID() string {
 	return b.Payload.Producer.Event.ANSID
