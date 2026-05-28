@@ -160,16 +160,16 @@ type AgentInfo struct {
 //
 // v1 shape populates IdentityCert / ServerCert (singular).
 // v2 shape populates ValidIdentityCerts / ValidServerCerts (plural).
-// DNSRecordsProvisioned is the v2 array shape; v1 used a map and is not exposed
-// on the badge surface.
+// DNSRecordsProvisioned is the v2 array shape; the v1 publisher emitted a map
+// which the Badge response does not surface.
 type Attestations struct {
-	DomainValidation      string                 `json:"domainValidation"`
-	IdentityCert          *CertAttestationV1     `json:"identityCert,omitempty"`
-	ServerCert            *CertAttestationV1     `json:"serverCert,omitempty"`
-	ValidIdentityCerts    []ValidCertAttestation `json:"validIdentityCerts,omitempty"`
-	ValidServerCerts      []ValidCertAttestation `json:"validServerCerts,omitempty"`
-	DNSRecordsProvisioned []BadgeDNSRecord        `json:"dnsRecordsProvisioned,omitempty"`
-	MetadataHashes        map[string]string      `json:"metadataHashes,omitempty"`
+	DomainValidation      string                  `json:"domainValidation"`
+	IdentityCert          *CertAttestationV1      `json:"identityCert,omitempty"`
+	ServerCert            *CertAttestationV1      `json:"serverCert,omitempty"`
+	ValidIdentityCerts    []ValidCertAttestation  `json:"validIdentityCerts,omitempty"`
+	ValidServerCerts      []ValidCertAttestation  `json:"validServerCerts,omitempty"`
+	DNSRecordsProvisioned []DNSRecordAttestation  `json:"dnsRecordsProvisioned,omitempty"`
+	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
 }
 
 // CertAttestationV1 contains certificate fingerprint and type.
@@ -185,10 +185,11 @@ type ValidCertAttestation struct {
 	NotAfter    *time.Time `json:"notAfter,omitempty"`
 }
 
-// BadgeDNSRecord is a v2 DNS record provisioning attestation carried inside a Badge.
-// It uses the {name, data, type} shape emitted by the v2 publisher.
-// (Distinct from DNSRecord in agent.go which uses the provisioning-request shape.)
-type BadgeDNSRecord struct {
+// DNSRecordAttestation is the v2 DNS record provisioning attestation shape.
+// Carried inside Badge attestations and (in Task 5) AttestationsV1 audit
+// payloads. Distinct from DNSRecord in agent.go which uses the
+// provisioning-request shape with a Value field instead of Data.
+type DNSRecordAttestation struct {
 	Name string `json:"name"`
 	Data string `json:"data"`
 	Type string `json:"type"`
