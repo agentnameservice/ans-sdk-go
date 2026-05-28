@@ -255,10 +255,13 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare server certificate fingerprint
-	expectedFP := badge.ServerCertFingerprint()
-	if !cert.Fingerprint.Matches(expectedFP) {
-		return NewFingerprintMismatchOutcome(badge, expectedFP, cert.Fingerprint.String())
+	// Compare server certificate fingerprint against any valid cert in the badge.
+	if !badge.MatchesServerCert(cert.Fingerprint.String()) {
+		return NewFingerprintMismatchOutcome(
+			badge,
+			firstOrEmpty(badge.ServerCertFingerprints()),
+			cert.Fingerprint.String(),
+		)
 	}
 
 	// Compare hostname
@@ -433,10 +436,13 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare identity certificate fingerprint
-	expectedFP := badge.IdentityCertFingerprint()
-	if !cert.Fingerprint.Matches(expectedFP) {
-		return NewFingerprintMismatchOutcome(badge, expectedFP, cert.Fingerprint.String())
+	// Compare identity certificate fingerprint against any valid cert in the badge.
+	if !badge.MatchesIdentityCert(cert.Fingerprint.String()) {
+		return NewFingerprintMismatchOutcome(
+			badge,
+			firstOrEmpty(badge.IdentityCertFingerprints()),
+			cert.Fingerprint.String(),
+		)
 	}
 
 	// Compare hostname
@@ -512,6 +518,16 @@ func (v *AnsVerifier) Prefetch(ctx context.Context, fqdnStr string) (*models.Bad
 		return nil, err
 	}
 	return v.server.Prefetch(ctx, fqdn)
+}
+
+// firstOrEmpty returns the first element of s, or "" if s is empty.
+// Used only when constructing fingerprint-mismatch outcomes so the human-readable
+// "expected" field carries the first badge fingerprint rather than a blank string.
+func firstOrEmpty(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
 }
 
 // configLogger returns the configured logger or the default.
