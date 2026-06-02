@@ -10,12 +10,13 @@ import (
 
 // createV2TestBadge builds a v2-style badge with plural ValidServerCerts and
 // ValidIdentityCerts. The fingerprint strings must be in SHA256:<hex> format
-// because verifyWithBadge now calls badge.MatchesServerCert(cert.Fingerprint.String())
-// and MatchesServerCert does direct string equality.
+// because verifyWithBadge iterates badge.ServerCertFingerprints() and compares
+// each candidate against the presented cert via CertFingerprint.Matches, which
+// parses the SHA256:<hex> form.
 func createV2TestBadge(host, version string, serverFPs, identityFPs []string) *models.Badge {
 	now := time.Now()
 
-	var validServerCerts []models.ValidCertAttestation
+	validServerCerts := make([]models.ValidCertAttestation, 0, len(serverFPs))
 	for _, fp := range serverFPs {
 		validServerCerts = append(validServerCerts, models.ValidCertAttestation{
 			Fingerprint: fp,
@@ -23,7 +24,7 @@ func createV2TestBadge(host, version string, serverFPs, identityFPs []string) *m
 		})
 	}
 
-	var validIdentityCerts []models.ValidCertAttestation
+	validIdentityCerts := make([]models.ValidCertAttestation, 0, len(identityFPs))
 	for _, fp := range identityFPs {
 		validIdentityCerts = append(validIdentityCerts, models.ValidCertAttestation{
 			Fingerprint: fp,
@@ -33,7 +34,7 @@ func createV2TestBadge(host, version string, serverFPs, identityFPs []string) *m
 
 	return &models.Badge{
 		Status:        models.BadgeStatusActive,
-		SchemaVersion: "V1",
+		SchemaVersion: models.SchemaVersionV2,
 		Payload: models.BadgePayload{
 			LogID: "test-log-id",
 			Producer: models.Producer{

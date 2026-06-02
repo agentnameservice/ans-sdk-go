@@ -1,6 +1,6 @@
 {
   "status": "ACTIVE",
-  "schemaVersion": "V1",
+  "schemaVersion": "V2",
   "payload": {
     "logId": "log-456",
     "producer": {
@@ -13,10 +13,10 @@
         "agent": {"host": "agent.example.com", "name": "Example", "version": "1.0.0"},
         "attestations": {
           "domainValidation": "DV",
-          "validIdentityCerts": [
+          "identityCerts": [
             {"fingerprint": "v2-id-fp-a", "type": "X509-OV-CLIENT", "notAfter": "2027-05-01T00:00:00Z"}
           ],
-          "validServerCerts": [
+          "serverCerts": [
             {"fingerprint": "v2-srv-fp-a", "type": "X509-DV-SERVER", "notAfter": "2027-05-01T00:00:00Z"},
             {"fingerprint": "v2-srv-fp-b", "type": "X509-DV-SERVER", "notAfter": "2027-08-01T00:00:00Z"}
           ],

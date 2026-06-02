@@ -5,23 +5,6 @@ import (
 	"testing"
 )
 
-func TestAttestationsV1ParsesV2DnsRecordsArray(t *testing.T) {
-	raw := []byte(`{
-		"validServerCerts": [{"fingerprint":"a","type":"X509-DV-SERVER"}],
-		"dnsRecordsProvisioned": [{"name":"_ans.foo.example","data":"x","type":"TXT"}]
-	}`)
-	var att AttestationsV1
-	if err := json.Unmarshal(raw, &att); err != nil {
-		t.Fatalf("unmarshal: %v; raw=%s", err, raw)
-	}
-	if len(att.DNSRecordsProvisionedV2) != 1 {
-		t.Fatalf("DNSRecordsProvisionedV2: want 1, got %d; att=%+v", len(att.DNSRecordsProvisionedV2), att)
-	}
-	if att.DNSRecordsProvisionedV2[0].Name != "_ans.foo.example" {
-		t.Fatalf("Name: want _ans.foo.example, got %q", att.DNSRecordsProvisionedV2[0].Name)
-	}
-}
-
 func TestAttestationsV1ParsesV1DnsRecordsMap(t *testing.T) {
 	raw := []byte(`{
 		"identityCert": {"fingerprint":"id","type":"X509-OV-CLIENT"},
@@ -50,5 +33,25 @@ func TestAttestationsV1ParsesEmptyDnsRecords(t *testing.T) {
 	}
 	if len(att.DNSRecordsProvisionedV2) != 0 {
 		t.Fatalf("DNSRecordsProvisionedV2: want empty, got %+v", att.DNSRecordsProvisionedV2)
+	}
+}
+
+// TestAttestationsV1RoundTripsMapDnsShape proves Marshal re-emits the V1
+// map-shaped dnsRecordsProvisioned so values survive a decode/encode round-trip.
+// V2 array DNS round-trips through Badge (version-dispatched), not AttestationsV1.
+func TestAttestationsV1RoundTripsMapDnsShape(t *testing.T) {
+	in := AttestationsV1{
+		DNSRecordsProvisioned: map[string]string{"_ans.x": "d"},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out AttestationsV1
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v; json=%s", err, data)
+	}
+	if out.DNSRecordsProvisioned["_ans.x"] != "d" {
+		t.Fatalf("v1 round-trip lost data: %+v (json=%s)", out, data)
 	}
 }

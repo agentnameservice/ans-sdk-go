@@ -290,7 +290,7 @@ func demoV2Attestations() {
 		slog.Info("identity cert fingerprint", "index", i, "fingerprint", fp)
 	}
 
-	for _, rec := range badge.Payload.Producer.Event.Attestations.DNSRecordsProvisioned {
+	for _, rec := range badge.Payload.Producer.Event.Attestations.DNSRecordsProvisionedV2 {
 		slog.Info("dns record provisioned",
 			"name", rec.Name,
 			"data", rec.Data,
