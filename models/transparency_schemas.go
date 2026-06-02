@@ -62,15 +62,16 @@ type AgentV1 struct {
 //     DNSRecordsProvisionedV2.
 //
 // Consumers should check DNSRecordsProvisionedV2 first; fall back to
-// DNSRecordsProvisioned for historical entries.
+// DNSRecordsProvisioned for historical entries. MarshalJSON re-emits whichever
+// shape is populated so values round-trip losslessly.
 type AttestationsV1 struct {
 	// DNSRecordsProvisioned holds v1 map-shaped DNS provisioning data.
 	// Populated from JSON only when the wire value is a JSON object.
-	DNSRecordsProvisioned map[string]string `json:"dnsRecordsProvisioned,omitempty"`
+	// Managed by (Un)MarshalJSON; the json:"-" tag avoids colliding with
+	// DNSRecordsProvisionedV2 on the same wire key.
+	DNSRecordsProvisioned map[string]string `json:"-"`
 	// DNSRecordsProvisionedV2 holds v2 array-shaped DNS provisioning data.
 	// Populated from JSON only when the wire value is a JSON array.
-	// Not emitted during marshaling (tag json:"-") to avoid collision with
-	// the map field's key.
 	DNSRecordsProvisionedV2 []DNSRecordAttestation  `json:"-"`
 	DomainValidation        *string                 `json:"domainValidation,omitempty"`
 	IdentityCert            *CertificateV1          `json:"identityCert,omitempty"`
@@ -80,13 +81,12 @@ type AttestationsV1 struct {
 	ValidServerCerts        []CertificateV1Extended `json:"validServerCerts,omitempty"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler for AttestationsV1. It handles the
-// two historic wire shapes for dnsRecordsProvisioned: a JSON object (v1 map) and
-// a JSON array of {name,data,type} objects (v2). All other fields are decoded
+// UnmarshalJSON implements json.Unmarshaler for AttestationsV1. V1 schema
+// always uses a map-shaped dnsRecordsProvisioned; all other fields are decoded
 // with standard semantics.
 func (a *AttestationsV1) UnmarshalJSON(data []byte) error {
 	type rawAtt struct {
-		DNSRecordsProvisioned json.RawMessage         `json:"dnsRecordsProvisioned,omitempty"`
+		DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
 		DomainValidation      *string                 `json:"domainValidation,omitempty"`
 		IdentityCert          *CertificateV1          `json:"identityCert,omitempty"`
 		MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
@@ -98,25 +98,31 @@ func (a *AttestationsV1) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return err
 	}
+	a.DNSRecordsProvisioned = r.DNSRecordsProvisioned
 	a.DomainValidation = r.DomainValidation
 	a.IdentityCert = r.IdentityCert
 	a.MetadataHashes = r.MetadataHashes
 	a.ServerCert = r.ServerCert
 	a.ValidIdentityCerts = r.ValidIdentityCerts
 	a.ValidServerCerts = r.ValidServerCerts
+	return nil
+}
 
-	if len(r.DNSRecordsProvisioned) == 0 {
-		return nil
+// MarshalJSON re-emits dnsRecordsProvisioned in whichever shape is populated,
+// preferring the v2 array, so decode/encode round-trips are lossless.
+func (a AttestationsV1) MarshalJSON() ([]byte, error) {
+	type alias AttestationsV1
+	aux := struct {
+		alias
+		DNSRecordsProvisioned any `json:"dnsRecordsProvisioned,omitempty"`
+	}{alias: alias(a)}
+	switch {
+	case len(a.DNSRecordsProvisionedV2) > 0:
+		aux.DNSRecordsProvisioned = a.DNSRecordsProvisionedV2
+	case len(a.DNSRecordsProvisioned) > 0:
+		aux.DNSRecordsProvisioned = a.DNSRecordsProvisioned
 	}
-	// Try array first (v2 shape).
-	a.DNSRecordsProvisionedV2 = nil
-	if err := json.Unmarshal(r.DNSRecordsProvisioned, &a.DNSRecordsProvisionedV2); err == nil {
-		return nil
-	}
-	// Clear any partial array residue from the failed attempt, then fall back
-	// to map (v1 shape).
-	a.DNSRecordsProvisionedV2 = nil
-	return json.Unmarshal(r.DNSRecordsProvisioned, &a.DNSRecordsProvisioned)
+	return json.Marshal(aux)
 }
 
 // CertificateV1 represents certificate information in V1 schema
@@ -243,5 +249,6 @@ type SchemaVersion string
 const (
 	SchemaVersionV0      SchemaVersion = "V0"
 	SchemaVersionV1      SchemaVersion = "V1"
+	SchemaVersionV2      SchemaVersion = "V2"
 	SchemaVersionUnknown SchemaVersion = ""
 )

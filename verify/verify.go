@@ -256,9 +256,8 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	}
 
 	// Compare server certificate fingerprint against any valid cert in the badge.
-	// Iterating via cert.Fingerprint.Matches preserves the case-insensitive prefix
-	// and hex normalization that ParseCertFingerprint provides, which badge.MatchesServerCert
-	// does not (it uses plain string equality).
+	// Using cert.Fingerprint.Matches (rather than badge.MatchesServerCert) ensures
+	// hex decoding and length validation via ParseCertFingerprint.
 	candidates := badge.ServerCertFingerprints()
 	matched := false
 	for _, candidate := range candidates {
@@ -283,7 +282,7 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewHostnameMismatchOutcome(badge, fqdn.String(), badgeHost)
 	}
 
-	if certFqdn != nil && !strings.EqualFold(*certFqdn, badgeHost) {
+	if certFqdn != nil && !wildcardHostMatch(*certFqdn, badgeHost) {
 		return NewHostnameMismatchOutcome(badge, badgeHost, *certFqdn)
 	}
 
@@ -292,6 +291,27 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		outcome.Warnings = append(outcome.Warnings, "badge status is DEPRECATED")
 	}
 	return outcome
+}
+
+// wildcardHostMatch reports whether certSAN covers host using RFC 6125 single-label
+// wildcard rules. An exact case-insensitive match always passes. A wildcard of the
+// form "*.suffix" matches any single-label subdomain of suffix (e.g.
+// "*.example.com" matches "foo.example.com" but not "foo.bar.example.com" or
+// "example.com").
+func wildcardHostMatch(certSAN, host string) bool {
+	if strings.EqualFold(certSAN, host) {
+		return true
+	}
+	if !strings.HasPrefix(certSAN, "*.") {
+		return false
+	}
+	suffix := strings.ToLower(certSAN[1:]) // ".example.com"
+	hostLower := strings.ToLower(host)
+	if !strings.HasSuffix(hostLower, suffix) {
+		return false
+	}
+	prefix := hostLower[:len(hostLower)-len(suffix)]
+	return len(prefix) > 0 && !strings.Contains(prefix, ".")
 }
 
 // ClientVerifier verifies mTLS client certificates against the ANS transparency log.
@@ -448,9 +468,8 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	}
 
 	// Compare identity certificate fingerprint against any valid cert in the badge.
-	// Iterating via cert.Fingerprint.Matches preserves the case-insensitive prefix
-	// and hex normalization that ParseCertFingerprint provides, which badge.MatchesIdentityCert
-	// does not (it uses plain string equality).
+	// Using cert.Fingerprint.Matches (rather than badge.MatchesIdentityCert) ensures
+	// hex decoding and length validation via ParseCertFingerprint.
 	idCandidates := badge.IdentityCertFingerprints()
 	idMatched := false
 	for _, candidate := range idCandidates {
