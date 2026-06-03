@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.16](https://github.com/godaddy/ans-sdk-go/compare/v0.1.15...v0.1.16) (2026-06-03)
+
+
+### Miscellaneous
+
+* **deps:** bump actions/checkout from 6.0.2 to 6.0.3 ([#41](https://github.com/godaddy/ans-sdk-go/issues/41)) ([95ddeb0](https://github.com/godaddy/ans-sdk-go/commit/95ddeb0477b4f6df4fc39ff0c21176b92a45ae8f))
+* **deps:** bump golangci/golangci-lint-action from 9.2.0 to 9.2.1 ([#40](https://github.com/godaddy/ans-sdk-go/issues/40)) ([ca7b90e](https://github.com/godaddy/ans-sdk-go/commit/ca7b90efd38cd314c41647ade75813f0760b1a3c))
+* **deps:** bump goreleaser/goreleaser-action from 7.2.1 to 7.2.2 ([#38](https://github.com/godaddy/ans-sdk-go/issues/38)) ([5394dae](https://github.com/godaddy/ans-sdk-go/commit/5394dae080dc172b95833d0277ee2c65bbcdc814))
+
 ## [0.1.15](https://github.com/godaddy/ans-sdk-go/compare/v0.1.14...v0.1.15) (2026-05-14)
 
 
