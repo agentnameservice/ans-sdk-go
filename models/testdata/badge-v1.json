@@ -12,9 +12,12 @@
         "eventType": "AGENT_REGISTERED",
         "agent": {"host": "agent.example.com", "name": "Example", "version": "1.0.0"},
         "attestations": {
-          "domainValidation": "DV",
+          "domainValidation": "ACME-DNS-01",
           "identityCert": {"fingerprint": "v1-id-fp", "type": "X509-OV-CLIENT"},
-          "serverCert":   {"fingerprint": "v1-srv-fp", "type": "X509-DV-SERVER"}
+          "serverCert":   {"fingerprint": "v1-srv-fp", "type": "X509-DV-SERVER"},
+          "dnsRecordsProvisioned": {
+            "_ans.agent.example.com": "txt-data"
+          }
         },
         "issuedAt":  "2026-05-01T00:00:00Z",
         "raId":      "ra-1",

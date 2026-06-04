@@ -3,11 +3,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"runtime"
 
 	"github.com/godaddy/ans-sdk-go/ans"
 	"github.com/godaddy/ans-sdk-go/models"
@@ -60,6 +57,11 @@ func ExampleTransparencySchemas() {
 }
 
 func printLogEntryDetails(logEntry *models.TransparencyLog) {
+	if logEntry.IsV2() {
+		printV2Details(logEntry.GetV2Payload())
+		return
+	}
+
 	if logEntry.IsV1() {
 		printV1Details(logEntry.GetV1Payload())
 		return
@@ -118,6 +120,41 @@ func printV1Attestations(att *models.AttestationsV1) {
 	}
 }
 
+func printV2Details(v2Payload *models.TransparencyLogV2) {
+	if v2Payload == nil {
+		return
+	}
+
+	slog.Info("V2 schema detected",
+		"logID", v2Payload.LogID,
+		"eventType", v2Payload.Producer.Event.EventType,
+		"ansID", v2Payload.Producer.Event.ANSID,
+		"ansName", v2Payload.Producer.Event.ANSName,
+		"raID", v2Payload.Producer.Event.RAID)
+
+	agent := v2Payload.Producer.Event.Agent
+	slog.Info("agent info",
+		"host", agent.Host,
+		"version", agent.Version)
+
+	printV2Attestations(&v2Payload.Producer.Event.Attestations)
+}
+
+func printV2Attestations(att *models.AttestationsV2) {
+	for i, c := range att.ServerCerts {
+		slog.Info("server cert", "index", i, "type", c.Type, "fingerprint", c.Fingerprint)
+	}
+	for i, c := range att.IdentityCerts {
+		slog.Info("identity cert", "index", i, "type", c.Type, "fingerprint", c.Fingerprint)
+	}
+	for _, rec := range att.DNSRecordsProvisioned {
+		slog.Info("dns record provisioned", "name", rec.Name, "data", rec.Data, "type", rec.Type)
+	}
+	if len(att.MetadataHashes) > 0 {
+		slog.Info("metadata hashes", "count", len(att.MetadataHashes))
+	}
+}
+
 func printV0Details(v0Payload *models.TransparencyLogV0) {
 	if v0Payload == nil {
 		return
@@ -161,6 +198,17 @@ func printAuditRecords(audit *models.TransparencyLogAudit) {
 func printAuditRecord(index int, record *models.TransparencyLog) {
 	recordNum := index + 1
 
+	if record.IsV2() {
+		if v2 := record.GetV2Payload(); v2 != nil {
+			slog.Info("audit record",
+				"record", recordNum,
+				"schema", "V2",
+				"eventType", v2.Producer.Event.EventType,
+				"timestamp", v2.Producer.Event.Timestamp)
+		}
+		return
+	}
+
 	if record.IsV1() {
 		if v1 := record.GetV1Payload(); v1 != nil {
 			slog.Info("audit record",
@@ -187,17 +235,50 @@ func printAuditRecord(index int, record *models.TransparencyLog) {
 func ExampleSchemaValidation() {
 	// You can also work directly with the schema types if you're creating data
 
-	// Create a V1 event
+	v2Event := createV2Event()
+	slog.Info("created V2 event", "logID", v2Event.LogID, "eventType", v2Event.Producer.Event.EventType)
+
 	v1Event := createV1Event()
 	slog.Info("created V1 event", "logID", v1Event.LogID, "eventType", v1Event.Producer.Event.EventType)
 
-	// Create a V0 event
 	v0Event := createV0Event()
 	slog.Info("created V0 event", "logID", v0Event.LogID, "eventType", v0Event.Producer.Event.EventType)
 
-	// Suppress unused warnings
+	_ = v2Event
 	_ = v1Event
 	_ = v0Event
+}
+
+func createV2Event() *models.TransparencyLogV2 {
+	return &models.TransparencyLogV2{
+		LogID: "01936db8-b65e-7e2f-b5e4-d0b5c1234569",
+		Producer: models.ProducerV2{
+			Event: models.EventV2{
+				ANSID:     "6bf2b7a9-1383-4e33-a945-845f34af7528",
+				ANSName:   "ans://v1.0.0.agent-0.ai.domain.com",
+				EventType: models.EventTypeV2AgentRegistered,
+				Agent: models.AgentV2{
+					Host:    "agent-0.ai.domain.com",
+					Version: "v1.0.0",
+				},
+				Attestations: models.AttestationsV2{
+					DomainValidation: stringPtr("ACME-DNS-01"),
+					ServerCerts: []models.CertificateV1Extended{
+						{CertificateV1: models.CertificateV1{
+							Fingerprint: "SHA256:abcdef1234567890",
+							Type:        models.CertTypeX509DVServer,
+						}},
+					},
+					DNSRecordsProvisioned: []models.DNSRecordAttestation{
+						{Name: "_ans.agent-0.ai.domain.com", Data: "txt-data", Type: "TXT"},
+					},
+				},
+				RAID: "api.godaddy.com",
+			},
+			KeyID:     "arn:aws:kms:us-east-1:123456789012:key/stub-key",
+			Signature: "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...",
+		},
+	}
 }
 
 func createV1Event() *models.TransparencyLogV1 {
@@ -257,77 +338,6 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-// demoV2Attestations loads the v2 badge fixture and walks the new plural-cert
-// and DNS-record attestation surfaces along with the matcher helpers.
-func demoV2Attestations() {
-	fixturePath, err := resolveBadgeV2Fixture()
-	if err != nil {
-		slog.Error("failed to resolve badge fixture path", "error", err)
-		return
-	}
-
-	raw, err := os.ReadFile(fixturePath)
-	if err != nil {
-		slog.Error("failed to read badge fixture", "path", fixturePath, "error", err)
-		return
-	}
-
-	var badge models.Badge
-	if err := json.Unmarshal(raw, &badge); err != nil {
-		slog.Error("failed to unmarshal badge fixture", "error", err)
-		return
-	}
-
-	slog.Info("v2 badge loaded",
-		"status", badge.Status,
-		"ansName", badge.AgentName(),
-		"eventType", badge.EventType())
-
-	for i, fp := range badge.ServerCertFingerprints() {
-		slog.Info("server cert fingerprint", "index", i, "fingerprint", fp)
-	}
-	for i, fp := range badge.IdentityCertFingerprints() {
-		slog.Info("identity cert fingerprint", "index", i, "fingerprint", fp)
-	}
-
-	for _, rec := range badge.Payload.Producer.Event.Attestations.DNSRecordsProvisionedV2 {
-		slog.Info("dns record provisioned",
-			"name", rec.Name,
-			"data", rec.Data,
-			"type", rec.Type)
-	}
-
-	serverFps := badge.ServerCertFingerprints()
-	if len(serverFps) > 0 {
-		slog.Info("matches server cert (valid)",
-			"fingerprint", serverFps[0],
-			"matches", badge.MatchesServerCert(serverFps[0]))
-	}
-	const bogusFingerprint = "sha256:0000"
-	slog.Info("matches server cert (bogus)",
-		"fingerprint", bogusFingerprint,
-		"matches", badge.MatchesServerCert(bogusFingerprint))
-
-	if hashes := badge.Payload.Producer.Event.Attestations.MetadataHashes; len(hashes) > 0 {
-		slog.Info("metadata hashes", "count", len(hashes))
-	}
-}
-
-// resolveBadgeV2Fixture locates models/testdata/badge-v2.json relative to this
-// source file so the demo runs regardless of the caller's working directory.
-// The BADGE_V2_FIXTURE env var overrides for ad-hoc runs.
-func resolveBadgeV2Fixture() (string, error) {
-	if override := os.Getenv("BADGE_V2_FIXTURE"); override != "" {
-		return override, nil
-	}
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", os.ErrNotExist
-	}
-	exampleDir := filepath.Dir(thisFile)
-	return filepath.Join(exampleDir, "..", "models", "testdata", "badge-v2.json"), nil
-}
-
 func main() {
 	// Configure structured logging
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -335,5 +345,4 @@ func main() {
 
 	// Run the examples
 	ExampleTransparencySchemas()
-	demoV2Attestations()
 }

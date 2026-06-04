@@ -1,9 +1,6 @@
 package models
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 // TransparencyLogV1 represents the V1 schema for ANS Transparency Log entries
 type TransparencyLogV1 struct {
@@ -52,77 +49,79 @@ type AgentV1 struct {
 	ProviderID *string `json:"providerId,omitempty"`
 }
 
-// AttestationsV1 represents the attestations in V1 schema.
-//
-// The dnsRecordsProvisioned wire field carries two distinct shapes depending on
-// the schema version of the producing publisher:
-//   - v1 map shape: a JSON object with name→value string pairs. Populated into
-//     DNSRecordsProvisioned.
-//   - v2 array shape: a JSON array of {name, data, type} objects. Populated into
-//     DNSRecordsProvisionedV2.
-//
-// Consumers should check DNSRecordsProvisionedV2 first; fall back to
-// DNSRecordsProvisioned for historical entries. MarshalJSON re-emits whichever
-// shape is populated so values round-trip losslessly.
+// AttestationsV1 represents the attestations in V1 schema. The
+// dnsRecordsProvisioned wire field is a JSON object of name→value strings.
+// V2 attestations (array DNS, plural cert arrays without the "valid" prefix)
+// live on AttestationsV2.
 type AttestationsV1 struct {
-	// DNSRecordsProvisioned holds v1 map-shaped DNS provisioning data.
-	// Populated from JSON only when the wire value is a JSON object.
-	// Managed by (Un)MarshalJSON; the json:"-" tag avoids colliding with
-	// DNSRecordsProvisionedV2 on the same wire key.
-	DNSRecordsProvisioned map[string]string `json:"-"`
-	// DNSRecordsProvisionedV2 holds v2 array-shaped DNS provisioning data.
-	// Populated from JSON only when the wire value is a JSON array.
-	DNSRecordsProvisionedV2 []DNSRecordAttestation  `json:"-"`
-	DomainValidation        *string                 `json:"domainValidation,omitempty"`
-	IdentityCert            *CertificateV1          `json:"identityCert,omitempty"`
-	MetadataHashes          map[string]string       `json:"metadataHashes,omitempty"`
-	ServerCert              *CertificateV1          `json:"serverCert,omitempty"`
-	ValidIdentityCerts      []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
-	ValidServerCerts        []CertificateV1Extended `json:"validServerCerts,omitempty"`
+	DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
+	DomainValidation      *string                 `json:"domainValidation,omitempty"`
+	IdentityCert          *CertificateV1          `json:"identityCert,omitempty"`
+	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
+	ServerCert            *CertificateV1          `json:"serverCert,omitempty"`
+	ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
+	ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler for AttestationsV1. V1 schema
-// always uses a map-shaped dnsRecordsProvisioned; all other fields are decoded
-// with standard semantics.
-func (a *AttestationsV1) UnmarshalJSON(data []byte) error {
-	type rawAtt struct {
-		DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
-		DomainValidation      *string                 `json:"domainValidation,omitempty"`
-		IdentityCert          *CertificateV1          `json:"identityCert,omitempty"`
-		MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
-		ServerCert            *CertificateV1          `json:"serverCert,omitempty"`
-		ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
-		ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
-	}
-	var r rawAtt
-	if err := json.Unmarshal(data, &r); err != nil {
-		return err
-	}
-	a.DNSRecordsProvisioned = r.DNSRecordsProvisioned
-	a.DomainValidation = r.DomainValidation
-	a.IdentityCert = r.IdentityCert
-	a.MetadataHashes = r.MetadataHashes
-	a.ServerCert = r.ServerCert
-	a.ValidIdentityCerts = r.ValidIdentityCerts
-	a.ValidServerCerts = r.ValidServerCerts
-	return nil
+// TransparencyLogV2 represents the V2 schema for ANS Transparency Log entries.
+// V2 mirrors V1 except for the attestations shape (plural cert arrays without the
+// "valid" prefix and array-shaped dnsRecordsProvisioned).
+type TransparencyLogV2 struct {
+	LogID    string     `json:"logId"`
+	Producer ProducerV2 `json:"producer"`
 }
 
-// MarshalJSON re-emits dnsRecordsProvisioned in whichever shape is populated,
-// preferring the v2 array, so decode/encode round-trips are lossless.
-func (a AttestationsV1) MarshalJSON() ([]byte, error) {
-	type alias AttestationsV1
-	aux := struct {
-		alias
-		DNSRecordsProvisioned any `json:"dnsRecordsProvisioned,omitempty"`
-	}{alias: alias(a)}
-	switch {
-	case len(a.DNSRecordsProvisionedV2) > 0:
-		aux.DNSRecordsProvisioned = a.DNSRecordsProvisionedV2
-	case len(a.DNSRecordsProvisioned) > 0:
-		aux.DNSRecordsProvisioned = a.DNSRecordsProvisioned
-	}
-	return json.Marshal(aux)
+// ProducerV2 represents the producer section of V2 schema
+type ProducerV2 struct {
+	Event     EventV2 `json:"event"`
+	KeyID     string  `json:"keyId"`
+	Signature string  `json:"signature"`
+}
+
+// EventV2 represents the event structure in V2 schema. Field set mirrors EventV1;
+// only Attestations differs.
+type EventV2 struct {
+	ANSID                string            `json:"ansId"`
+	ANSName              string            `json:"ansName"`
+	EventType            EventTypeV2       `json:"eventType"`
+	Agent                AgentV2           `json:"agent"`
+	Attestations         AttestationsV2    `json:"attestations"`
+	ExpiresAt            *time.Time        `json:"expiresAt,omitempty"`
+	IssuedAt             time.Time         `json:"issuedAt"`
+	RAID                 string            `json:"raId"`
+	RenewalStatus        *string           `json:"renewalStatus,omitempty"`
+	RevocationReasonCode *RevocationReason `json:"revocationReasonCode,omitempty"`
+	RevokedAt            *time.Time        `json:"revokedAt,omitempty"`
+	Timestamp            time.Time         `json:"timestamp"`
+}
+
+// EventTypeV2 represents the event types in V2 schema (same values as V1).
+type EventTypeV2 string
+
+const (
+	EventTypeV2AgentDeprecated EventTypeV2 = "AGENT_DEPRECATED"
+	EventTypeV2AgentRegistered EventTypeV2 = "AGENT_REGISTERED"
+	EventTypeV2AgentRenewed    EventTypeV2 = "AGENT_RENEWED"
+	EventTypeV2AgentRevoked    EventTypeV2 = "AGENT_REVOKED"
+)
+
+// AgentV2 represents the agent information in V2 schema (same shape as AgentV1).
+type AgentV2 struct {
+	Host       string  `json:"host"`
+	Name       *string `json:"name,omitempty"`
+	Version    string  `json:"version"`
+	ProviderID *string `json:"providerId,omitempty"`
+}
+
+// AttestationsV2 represents the attestations in V2 schema. Wire field names
+// match the Badge V2 surface: plural cert arrays (without the V1 "valid"
+// prefix) and array-shaped dnsRecordsProvisioned.
+type AttestationsV2 struct {
+	DomainValidation      *string                 `json:"domainValidation,omitempty"`
+	ServerCerts           []CertificateV1Extended `json:"serverCerts,omitempty"`
+	IdentityCerts         []CertificateV1Extended `json:"identityCerts,omitempty"`
+	DNSRecordsProvisioned []DNSRecordAttestation  `json:"dnsRecordsProvisioned,omitempty"`
+	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
 }
 
 // CertificateV1 represents certificate information in V1 schema

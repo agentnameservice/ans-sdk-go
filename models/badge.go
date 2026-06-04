@@ -324,6 +324,11 @@ func (v2BadgeAttParser) parseAtts(raw json.RawMessage) (Attestations, error) {
 
 // badgeAttParsers maps each schema version to its attestations parser.
 // To add future versions: implement badgeAttParser and add an entry here.
+// V0 and SchemaVersionUnknown are intentionally absent: V0 predates the Badge
+// type and is handled via TransparencyLogV0; Unknown falls back to v1 in
+// parserForBadgeAtts.
+//
+//nolint:exhaustive,gochecknoglobals // V0/Unknown handled by parserForBadgeAtts fallback; registry pattern requires package-level dispatch table
 var badgeAttParsers = map[SchemaVersion]badgeAttParser{
 	SchemaVersionV1: v1BadgeAttParser{},
 	SchemaVersionV2: v2BadgeAttParser{},

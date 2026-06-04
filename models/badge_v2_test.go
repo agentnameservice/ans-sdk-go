@@ -117,7 +117,7 @@ func TestBadgeAttestationsParsesV1MapDnsRecords(t *testing.T) {
 			"ansId":"a","ansName":"ans://example.com/agent","eventType":"AGENT_REGISTERED",
 			"agent":{"host":"agent.example.com","name":"Example","version":"1.0.0"},
 			"attestations":{
-				"domainValidation":"DV",
+				"domainValidation":"ACME-DNS-01",
 				"serverCert":{"fingerprint":"v1-srv-fp","type":"X509-DV-SERVER"},
 				"dnsRecordsProvisioned":{"_ans.agent.example.com":"txt-data"}
 			},
@@ -160,7 +160,7 @@ func TestBadgeMatchesServerCertCaseInsensitive(t *testing.T) {
 func TestAttestationsRoundTripsBothDnsShapes(t *testing.T) {
 	t.Run("v2 array", func(t *testing.T) {
 		in := Attestations{
-			DomainValidation:        "DV",
+			DomainValidation:        "ACME-DNS-01",
 			DNSRecordsProvisionedV2: []DNSRecordAttestation{{Name: "_ans.x", Data: "d", Type: "TXT"}},
 		}
 		data, err := json.Marshal(in)
@@ -177,7 +177,7 @@ func TestAttestationsRoundTripsBothDnsShapes(t *testing.T) {
 	})
 	t.Run("v1 map", func(t *testing.T) {
 		in := Attestations{
-			DomainValidation:      "DV",
+			DomainValidation:      "ACME-DNS-01",
 			DNSRecordsProvisioned: map[string]string{"_ans.x": "d"},
 		}
 		data, err := json.Marshal(in)
@@ -205,7 +205,7 @@ func TestBadgeUnmarshalsWireV2CertNames(t *testing.T) {
 			"ansId":"a","ansName":"ans://example.com/agent","eventType":"AGENT_REGISTERED",
 			"agent":{"host":"agent.example.com","name":"Example","version":"1.0.0"},
 			"attestations":{
-				"domainValidation":"DV",
+				"domainValidation":"ACME-DNS-01",
 				"serverCerts":[
 					{"fingerprint":"wire-srv-fp-a","type":"X509-DV-SERVER","notAfter":"2027-01-01T00:00:00Z"},
 					{"fingerprint":"wire-srv-fp-b","type":"X509-DV-SERVER","notAfter":"2027-06-01T00:00:00Z"}

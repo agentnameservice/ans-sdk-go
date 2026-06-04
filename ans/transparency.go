@@ -140,6 +140,11 @@ func (c *TransparencyClient) parsePayloadBySchema(payload map[string]any, schema
 	}
 
 	switch schemaVersion {
+	case "V2":
+		var v2 models.TransparencyLogV2
+		if err := json.Unmarshal(payloadJSON, &v2); err == nil {
+			return &v2
+		}
 	case "V1":
 		var v1 models.TransparencyLogV1
 		if err := json.Unmarshal(payloadJSON, &v1); err == nil {

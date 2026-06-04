@@ -12,7 +12,7 @@
         "eventType": "AGENT_REGISTERED",
         "agent": {"host": "agent.example.com", "name": "Example", "version": "1.0.0"},
         "attestations": {
-          "domainValidation": "DV",
+          "domainValidation": "ACME-DNS-01",
           "identityCerts": [
             {"fingerprint": "v2-id-fp-a", "type": "X509-OV-CLIENT", "notAfter": "2027-05-01T00:00:00Z"}
           ],
