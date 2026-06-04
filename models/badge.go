@@ -245,29 +245,25 @@ type Attestations struct {
 	ValidIdentityCerts []ValidCertAttestation `json:"validIdentityCerts,omitempty"`
 	ValidServerCerts   []ValidCertAttestation `json:"validServerCerts,omitempty"`
 	// DNSRecordsProvisioned holds v1 map-shaped DNS provisioning data
-	// (name→value). Populated only when the wire value is a JSON object.
-	// Managed by (Un)MarshalJSON; the json:"-" tag avoids colliding with
-	// DNSRecordsProvisionedV2 on the same wire key.
-	DNSRecordsProvisioned map[string]string `json:"-"`
+	// (name→value). Populated by default decoding for standalone
+	// Attestations and by parseV1BadgeAtts when dispatched from Badge.
+	DNSRecordsProvisioned map[string]string `json:"dnsRecordsProvisioned,omitempty"`
 	// DNSRecordsProvisionedV2 holds v2 array-shaped DNS provisioning data.
-	// Populated only when the wire value is a JSON array.
+	// Populated only by parseV2BadgeAtts via Badge.UnmarshalJSON. The
+	// json:"-" tag prevents default decoding from competing with the v1 map
+	// field on the same wire key; MarshalJSON re-emits this shape when set.
 	DNSRecordsProvisionedV2 []DNSRecordAttestation `json:"-"`
 	MetadataHashes          map[string]string      `json:"metadataHashes,omitempty"`
 }
 
-// badgeAttParser parses a raw attestations JSON block into an Attestations value.
-// Each schema version has its own implementation; register new versions in
-// badgeAttParsers — no other code changes are needed.
-type badgeAttParser interface {
-	parseAtts(raw json.RawMessage) (Attestations, error)
-}
+// badgeAttParser parses a raw attestations JSON block into an Attestations
+// value for one schema version. Register new versions in badgeAttParsers —
+// no other code changes are needed.
+type badgeAttParser func(raw json.RawMessage) (Attestations, error)
 
-// v1BadgeAttParser handles V1 schema attestations:
-// singular identityCert/serverCert plus optional rotation arrays,
-// and map-shaped dnsRecordsProvisioned.
-type v1BadgeAttParser struct{}
-
-func (v1BadgeAttParser) parseAtts(raw json.RawMessage) (Attestations, error) {
+// parseV1BadgeAtts handles V1 schema attestations: singular identityCert/serverCert
+// plus optional rotation arrays, and map-shaped dnsRecordsProvisioned.
+func parseV1BadgeAtts(raw json.RawMessage) (Attestations, error) {
 	if len(raw) == 0 {
 		return Attestations{}, nil
 	}
@@ -294,12 +290,10 @@ func (v1BadgeAttParser) parseAtts(raw json.RawMessage) (Attestations, error) {
 	}, nil
 }
 
-// v2BadgeAttParser handles V2 schema attestations:
-// plural serverCerts/identityCerts arrays (the "valid" prefix was dropped from V1
-// wire names), and array-shaped dnsRecordsProvisioned.
-type v2BadgeAttParser struct{}
-
-func (v2BadgeAttParser) parseAtts(raw json.RawMessage) (Attestations, error) {
+// parseV2BadgeAtts handles V2 schema attestations: plural serverCerts/identityCerts
+// arrays (the "valid" prefix was dropped from V1 wire names), and array-shaped
+// dnsRecordsProvisioned.
+func parseV2BadgeAtts(raw json.RawMessage) (Attestations, error) {
 	if len(raw) == 0 {
 		return Attestations{}, nil
 	}
@@ -323,15 +317,14 @@ func (v2BadgeAttParser) parseAtts(raw json.RawMessage) (Attestations, error) {
 }
 
 // badgeAttParsers maps each schema version to its attestations parser.
-// To add future versions: implement badgeAttParser and add an entry here.
 // V0 and SchemaVersionUnknown are intentionally absent: V0 predates the Badge
 // type and is handled via TransparencyLogV0; Unknown falls back to v1 in
 // parserForBadgeAtts.
 //
 //nolint:exhaustive,gochecknoglobals // V0/Unknown handled by parserForBadgeAtts fallback; registry pattern requires package-level dispatch table
 var badgeAttParsers = map[SchemaVersion]badgeAttParser{
-	SchemaVersionV1: v1BadgeAttParser{},
-	SchemaVersionV2: v2BadgeAttParser{},
+	SchemaVersionV1: parseV1BadgeAtts,
+	SchemaVersionV2: parseV2BadgeAtts,
 }
 
 // parserForBadgeAtts returns the parser for the given schema version.
@@ -341,58 +334,14 @@ func parserForBadgeAtts(sv SchemaVersion) badgeAttParser {
 	if p, ok := badgeAttParsers[sv]; ok {
 		return p
 	}
-	return v1BadgeAttParser{}
-}
-
-// UnmarshalJSON handles three dual-shape fields in the Attestations wire format:
-//
-//   - dnsRecordsProvisioned: v1 JSON object (map) or v2 JSON array.
-//   - serverCerts / validServerCerts: v2 API emits "serverCerts"; older badges
-//     and the SDK fixture use "validServerCerts". Both are decoded into ValidServerCerts.
-//   - identityCerts / validIdentityCerts: same aliasing as serverCerts.
-func (a *Attestations) UnmarshalJSON(data []byte) error {
-	type alias Attestations
-	aux := struct {
-		*alias
-		DNSRecordsProvisioned json.RawMessage `json:"dnsRecordsProvisioned,omitempty"`
-		// v2 API wire names — captured separately so they can be merged below.
-		ServerCerts   json.RawMessage `json:"serverCerts,omitempty"`
-		IdentityCerts json.RawMessage `json:"identityCerts,omitempty"`
-	}{alias: (*alias)(a)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// serverCerts/identityCerts: populate ValidServerCerts/ValidIdentityCerts when the
-	// canonical "valid*" names produced nothing (i.e. this is a v2-wire-name badge).
-	if len(a.ValidServerCerts) == 0 && len(aux.ServerCerts) > 0 {
-		if err := json.Unmarshal(aux.ServerCerts, &a.ValidServerCerts); err != nil {
-			return err
-		}
-	}
-	if len(a.ValidIdentityCerts) == 0 && len(aux.IdentityCerts) > 0 {
-		if err := json.Unmarshal(aux.IdentityCerts, &a.ValidIdentityCerts); err != nil {
-			return err
-		}
-	}
-
-	// dnsRecordsProvisioned: v2 array shape or v1 map shape.
-	a.DNSRecordsProvisioned = nil
-	a.DNSRecordsProvisionedV2 = nil
-	if len(aux.DNSRecordsProvisioned) == 0 {
-		return nil
-	}
-	// Try the v2 array shape first.
-	if err := json.Unmarshal(aux.DNSRecordsProvisioned, &a.DNSRecordsProvisionedV2); err == nil {
-		return nil
-	}
-	// Clear partial array residue, then fall back to the v1 map shape.
-	a.DNSRecordsProvisionedV2 = nil
-	return json.Unmarshal(aux.DNSRecordsProvisioned, &a.DNSRecordsProvisioned)
+	return parseV1BadgeAtts
 }
 
 // MarshalJSON re-emits dnsRecordsProvisioned in whichever shape is populated,
 // preferring the v2 array. This keeps decode/encode round-trips lossless.
+// Standalone Attestations decoding goes through default unmarshaling and is
+// V1-only; V2-shaped wire bytes should be decoded via Badge.UnmarshalJSON,
+// which dispatches through the parser registry.
 func (a Attestations) MarshalJSON() ([]byte, error) {
 	type alias Attestations
 	aux := struct {
@@ -410,7 +359,7 @@ func (a Attestations) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON decodes a Badge from JSON. It reads schemaVersion first and
 // dispatches the nested attestations block to the matching badgeAttParser.
-// To add V3 support: implement badgeAttParser and register it in badgeAttParsers.
+// To add V3 support: write a parseV3BadgeAtts function and register it in badgeAttParsers.
 func (b *Badge) UnmarshalJSON(data []byte) error {
 	// rawEvent embeds AgentEvent so all its fields are decoded automatically,
 	// while overriding the Attestations field with json.RawMessage so we can
@@ -447,7 +396,7 @@ func (b *Badge) UnmarshalJSON(data []byte) error {
 	// Copy all AgentEvent fields; Attestations is zero here — set below.
 	b.Payload.Producer.Event = raw.Payload.Producer.Event.AgentEvent
 
-	atts, err := parserForBadgeAtts(b.SchemaVersion).parseAtts(raw.Payload.Producer.Event.Attestations)
+	atts, err := parserForBadgeAtts(b.SchemaVersion)(raw.Payload.Producer.Event.Attestations)
 	if err != nil {
 		return fmt.Errorf("parse attestations (schemaVersion=%q): %w", b.SchemaVersion, err)
 	}

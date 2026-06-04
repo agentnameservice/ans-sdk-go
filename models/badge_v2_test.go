@@ -155,43 +155,26 @@ func TestBadgeMatchesServerCertCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestAttestationsRoundTripsBothDnsShapes proves Marshal->Unmarshal preserves
-// each dnsRecordsProvisioned shape.
-func TestAttestationsRoundTripsBothDnsShapes(t *testing.T) {
-	t.Run("v2 array", func(t *testing.T) {
-		in := Attestations{
-			DomainValidation:        "ACME-DNS-01",
-			DNSRecordsProvisionedV2: []DNSRecordAttestation{{Name: "_ans.x", Data: "d", Type: "TXT"}},
-		}
-		data, err := json.Marshal(in)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		var out Attestations
-		if err := json.Unmarshal(data, &out); err != nil {
-			t.Fatalf("unmarshal: %v; json=%s", err, data)
-		}
-		if len(out.DNSRecordsProvisionedV2) != 1 || out.DNSRecordsProvisionedV2[0].Name != "_ans.x" {
-			t.Fatalf("v2 round-trip lost data: %+v (json=%s)", out, data)
-		}
-	})
-	t.Run("v1 map", func(t *testing.T) {
-		in := Attestations{
-			DomainValidation:      "ACME-DNS-01",
-			DNSRecordsProvisioned: map[string]string{"_ans.x": "d"},
-		}
-		data, err := json.Marshal(in)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		var out Attestations
-		if err := json.Unmarshal(data, &out); err != nil {
-			t.Fatalf("unmarshal: %v; json=%s", err, data)
-		}
-		if out.DNSRecordsProvisioned["_ans.x"] != "d" {
-			t.Fatalf("v1 round-trip lost data: %+v (json=%s)", out, data)
-		}
-	})
+// TestAttestationsRoundTripsV1MapDns proves Marshal->Unmarshal preserves the
+// V1 map-shaped dnsRecordsProvisioned for standalone Attestations decoding.
+// V2 array-DNS round-trip happens through Badge (covered by TestBadgeUnmarshalsV2Shape);
+// standalone Attestations decoding is V1-only by design.
+func TestAttestationsRoundTripsV1MapDns(t *testing.T) {
+	in := Attestations{
+		DomainValidation:      "ACME-DNS-01",
+		DNSRecordsProvisioned: map[string]string{"_ans.x": "d"},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out Attestations
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v; json=%s", err, data)
+	}
+	if out.DNSRecordsProvisioned["_ans.x"] != "d" {
+		t.Fatalf("v1 round-trip lost data: %+v (json=%s)", out, data)
+	}
 }
 
 // TestBadgeUnmarshalsWireV2CertNames tests the real v2 API wire field names

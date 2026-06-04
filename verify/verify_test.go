@@ -284,10 +284,10 @@ func TestServerVerifier_ExpiredStatus(t *testing.T) {
 
 func TestServerVerifier_WildcardCertVerified(t *testing.T) {
 	tests := []struct {
-		name       string
+		name        string
 		wildcardSAN string
-		badgeHost  string
-		wantType   OutcomeType
+		badgeHost   string
+		wantType    OutcomeType
 	}{
 		{
 			// *.domain.api.int.dev-godaddy.com covers agent.domain.api.int.dev-godaddy.com
