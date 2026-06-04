@@ -49,7 +49,10 @@ type AgentV1 struct {
 	ProviderID *string `json:"providerId,omitempty"`
 }
 
-// AttestationsV1 represents the attestations in V1 schema
+// AttestationsV1 represents the attestations in V1 schema. The
+// dnsRecordsProvisioned wire field is a JSON object of name→value strings.
+// V2 attestations (array DNS, plural cert arrays without the "valid" prefix)
+// live on AttestationsV2.
 type AttestationsV1 struct {
 	DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
 	DomainValidation      *string                 `json:"domainValidation,omitempty"`
@@ -58,6 +61,67 @@ type AttestationsV1 struct {
 	ServerCert            *CertificateV1          `json:"serverCert,omitempty"`
 	ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
 	ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
+}
+
+// TransparencyLogV2 represents the V2 schema for ANS Transparency Log entries.
+// V2 mirrors V1 except for the attestations shape (plural cert arrays without the
+// "valid" prefix and array-shaped dnsRecordsProvisioned).
+type TransparencyLogV2 struct {
+	LogID    string     `json:"logId"`
+	Producer ProducerV2 `json:"producer"`
+}
+
+// ProducerV2 represents the producer section of V2 schema
+type ProducerV2 struct {
+	Event     EventV2 `json:"event"`
+	KeyID     string  `json:"keyId"`
+	Signature string  `json:"signature"`
+}
+
+// EventV2 represents the event structure in V2 schema. Field set mirrors EventV1;
+// only Attestations differs.
+type EventV2 struct {
+	ANSID                string            `json:"ansId"`
+	ANSName              string            `json:"ansName"`
+	EventType            EventTypeV2       `json:"eventType"`
+	Agent                AgentV2           `json:"agent"`
+	Attestations         AttestationsV2    `json:"attestations"`
+	ExpiresAt            *time.Time        `json:"expiresAt,omitempty"`
+	IssuedAt             time.Time         `json:"issuedAt"`
+	RAID                 string            `json:"raId"`
+	RenewalStatus        *string           `json:"renewalStatus,omitempty"`
+	RevocationReasonCode *RevocationReason `json:"revocationReasonCode,omitempty"`
+	RevokedAt            *time.Time        `json:"revokedAt,omitempty"`
+	Timestamp            time.Time         `json:"timestamp"`
+}
+
+// EventTypeV2 represents the event types in V2 schema (same values as V1).
+type EventTypeV2 string
+
+const (
+	EventTypeV2AgentDeprecated EventTypeV2 = "AGENT_DEPRECATED"
+	EventTypeV2AgentRegistered EventTypeV2 = "AGENT_REGISTERED"
+	EventTypeV2AgentRenewed    EventTypeV2 = "AGENT_RENEWED"
+	EventTypeV2AgentRevoked    EventTypeV2 = "AGENT_REVOKED"
+)
+
+// AgentV2 represents the agent information in V2 schema (same shape as AgentV1).
+type AgentV2 struct {
+	Host       string  `json:"host"`
+	Name       *string `json:"name,omitempty"`
+	Version    string  `json:"version"`
+	ProviderID *string `json:"providerId,omitempty"`
+}
+
+// AttestationsV2 represents the attestations in V2 schema. Wire field names
+// match the Badge V2 surface: plural cert arrays (without the V1 "valid"
+// prefix) and array-shaped dnsRecordsProvisioned.
+type AttestationsV2 struct {
+	DomainValidation      *string                 `json:"domainValidation,omitempty"`
+	ServerCerts           []CertificateV1Extended `json:"serverCerts,omitempty"`
+	IdentityCerts         []CertificateV1Extended `json:"identityCerts,omitempty"`
+	DNSRecordsProvisioned []DNSRecordAttestation  `json:"dnsRecordsProvisioned,omitempty"`
+	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
 }
 
 // CertificateV1 represents certificate information in V1 schema
@@ -184,5 +248,6 @@ type SchemaVersion string
 const (
 	SchemaVersionV0      SchemaVersion = "V0"
 	SchemaVersionV1      SchemaVersion = "V1"
+	SchemaVersionV2      SchemaVersion = "V2"
 	SchemaVersionUnknown SchemaVersion = ""
 )

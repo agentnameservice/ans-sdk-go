@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -576,6 +577,28 @@ func TestTransparencyClient_parsePayloadBySchema(t *testing.T) {
 			wantType:      "*models.TransparencyLogV0",
 		},
 		{
+			name: "V2 payload",
+			payload: map[string]any{
+				"logId": "test-log",
+				"producer": map[string]any{
+					"event": map[string]any{
+						"ansId":     "test-id",
+						"eventType": "AGENT_REGISTERED",
+						"attestations": map[string]any{
+							"serverCerts": []any{
+								map[string]any{"fingerprint": "fp-a", "type": "X509-DV-SERVER"},
+							},
+							"dnsRecordsProvisioned": []any{
+								map[string]any{"name": "_ans.x", "data": "d", "type": "TXT"},
+							},
+						},
+					},
+				},
+			},
+			schemaVersion: "V2",
+			wantType:      "*models.TransparencyLogV2",
+		},
+		{
 			name: "unknown schema falls back to V0",
 			payload: map[string]any{
 				"logId": "test-log",
@@ -596,6 +619,9 @@ func TestTransparencyClient_parsePayloadBySchema(t *testing.T) {
 			}
 			if result == nil {
 				t.Fatal("parsePayloadBySchema() returned nil")
+			}
+			if got := fmt.Sprintf("%T", result); got != tt.wantType {
+				t.Errorf("parsePayloadBySchema() type = %s, want %s", got, tt.wantType)
 			}
 		})
 	}
@@ -1118,6 +1144,40 @@ func TestTransparencyClient_AuditWithSchemas(t *testing.T) {
 				},
 				{
 					Status:        "ACTIVE",
+					SchemaVersion: "V2",
+					Payload: map[string]any{
+						"logId": "log-v2",
+						"producer": map[string]any{
+							"event": map[string]any{
+								"ansId":     "ans-id-v2",
+								"ansName":   "ans://v1.0.0.test",
+								"eventType": "AGENT_REGISTERED",
+								"agent": map[string]any{
+									"host":    "test.com",
+									"version": "v1.0.0",
+								},
+								"attestations": map[string]any{
+									"serverCerts": []any{
+										map[string]any{"fingerprint": "v2-srv-fp", "type": "X509-DV-SERVER"},
+									},
+									"identityCerts": []any{
+										map[string]any{"fingerprint": "v2-id-fp", "type": "X509-OV-CLIENT"},
+									},
+									"dnsRecordsProvisioned": []any{
+										map[string]any{"name": "_ans.test.com", "data": "txt-data", "type": "TXT"},
+									},
+								},
+								"issuedAt":  time.Now().Format(time.RFC3339),
+								"raId":      "ra.test",
+								"timestamp": time.Now().Format(time.RFC3339),
+							},
+							"keyId":     "key-v2",
+							"signature": "sig-v2",
+						},
+					},
+				},
+				{
+					Status:        "ACTIVE",
 					SchemaVersion: "V0",
 					Payload: map[string]any{
 						"logId": "log-v0",
@@ -1163,8 +1223,8 @@ func TestTransparencyClient_AuditWithSchemas(t *testing.T) {
 		t.Fatalf("GetAgentTransparencyLogAudit() error: %v", err)
 	}
 
-	if len(result.Records) != 2 {
-		t.Fatalf("Expected 2 records, got %d", len(result.Records))
+	if len(result.Records) != 3 {
+		t.Fatalf("Expected 3 records, got %d", len(result.Records))
 	}
 
 	if !result.Records[0].IsV1() {
@@ -1174,10 +1234,24 @@ func TestTransparencyClient_AuditWithSchemas(t *testing.T) {
 		t.Error("Expected V1 payload to be parsed")
 	}
 
-	if !result.Records[1].IsV0() {
-		t.Error("Expected second record to be V0")
+	if !result.Records[1].IsV2() {
+		t.Error("Expected second record to be V2")
 	}
-	if v0 := result.Records[1].GetV0Payload(); v0 == nil {
+	v2 := result.Records[1].GetV2Payload()
+	if v2 == nil {
+		t.Fatal("Expected V2 payload to be parsed")
+	}
+	if got := v2.Producer.Event.Attestations.ServerCerts; len(got) != 1 || got[0].Fingerprint != "v2-srv-fp" {
+		t.Errorf("V2 ServerCerts mismatch: %+v", got)
+	}
+	if got := v2.Producer.Event.Attestations.DNSRecordsProvisioned; len(got) != 1 || got[0].Name != "_ans.test.com" {
+		t.Errorf("V2 DNSRecordsProvisioned mismatch: %+v", got)
+	}
+
+	if !result.Records[2].IsV0() {
+		t.Error("Expected third record to be V0")
+	}
+	if v0 := result.Records[2].GetV0Payload(); v0 == nil {
 		t.Error("Expected V0 payload to be parsed")
 	}
 }
