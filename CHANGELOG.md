@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.16...v0.1.17) (2026-06-23)
+
+
+### Miscellaneous
+
+* update repository references from godaddy to agentnameservice ([#45](https://github.com/agentnameservice/ans-sdk-go/issues/45)) ([9d67e53](https://github.com/agentnameservice/ans-sdk-go/commit/9d67e539b6331ec16a3b89fad038d710bf8f8ecb))
+
 ## [0.1.16](https://github.com/godaddy/ans-sdk-go/compare/v0.1.15...v0.1.16) (2026-06-03)
 
 
