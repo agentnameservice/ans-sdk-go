@@ -65,7 +65,7 @@ contributors about the change, discuss the best way to go about implementing it.
 > pull requests from branches on your fork. To do this, run:
 >
 > ```
-> git remote add upstream https://github.com/godaddy/ans-sdk-go.git
+> git remote add upstream https://github.com/agentnameservice/ans-sdk-go.git
 > git fetch upstream
 > git branch --set-upstream-to=upstream/main main
 > ```
@@ -140,6 +140,6 @@ guide with respect to patterns, naming, documentation and testing.
 - [General GitHub Documentation](https://help.github.com/)
 - [GitHub Pull Request documentation](https://help.github.com/send-pull-requests/)
 
-[issues]: https://github.com/godaddy/ans-sdk-go/issues
+[issues]: https://github.com/agentnameservice/ans-sdk-go/issues
 [coc]: ./CODE_OF_CONDUCT.md
 [fork]: https://help.github.com/en/articles/fork-a-repo

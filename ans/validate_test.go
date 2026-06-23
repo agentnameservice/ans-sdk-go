@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 func TestValidateRequired(t *testing.T) {

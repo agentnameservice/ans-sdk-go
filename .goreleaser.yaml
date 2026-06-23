@@ -27,9 +27,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/godaddy/ans-sdk-go/cmd/ans-cli/cmd.version={{.Version}}
-      - -X github.com/godaddy/ans-sdk-go/cmd/ans-cli/cmd.commit={{.ShortCommit}}
-      - -X github.com/godaddy/ans-sdk-go/cmd/ans-cli/cmd.date={{.Date}}
+      - -X github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/cmd.version={{.Version}}
+      - -X github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/cmd.commit={{.ShortCommit}}
+      - -X github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/cmd.date={{.Date}}
 
 archives:
   - id: ans-cli
@@ -52,12 +52,12 @@ brews:
     ids:
       - ans-cli
     repository:
-      owner: godaddy
+      owner: agentnameservice
       name: homebrew-ans
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_ANS_GITHUB_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_SCOOP_TAP_ANS_PAT }}"
     directory: Formula
-    homepage: "https://github.com/godaddy/ans-sdk-go"
+    homepage: "https://github.com/agentnameservice/ans-sdk-go"
     description: "Command-line tool for the Agent Name Service (ANS) Registry"
     license: "MIT"
     commit_author:
@@ -74,12 +74,12 @@ scoops:
     ids:
       - ans-cli
     repository:
-      owner: godaddy
+      owner: agentnameservice
       name: scoop-ans
       branch: main
-      token: "{{ .Env.SCOOP_BUCKET_ANS_GITHUB_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_SCOOP_TAP_ANS_PAT }}"
     directory: bucket
-    homepage: "https://github.com/godaddy/ans-sdk-go"
+    homepage: "https://github.com/agentnameservice/ans-sdk-go"
     description: "Command-line tool for the Agent Name Service (ANS) Registry"
     license: "MIT"
     commit_author:
@@ -102,5 +102,5 @@ changelog:
 release:
   mode: append
   github:
-    owner: godaddy
+    owner: agentnameservice
     name: ans-sdk-go

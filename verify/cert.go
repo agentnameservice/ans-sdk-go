@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // CertFingerprint represents a SHA-256 certificate fingerprint.

@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/models"
-	"github.com/godaddy/ans-sdk-go/verify/scitt"
+	"github.com/agentnameservice/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
 )
 
 // certRole distinguishes how a certificate should be matched against a SCITT status token.

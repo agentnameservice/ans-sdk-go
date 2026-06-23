@@ -3,7 +3,7 @@ package verify
 import (
 	"fmt"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // OutcomeType represents the type of verification outcome.

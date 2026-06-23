@@ -3,7 +3,7 @@ package verify
 import (
 	"context"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // MockTransparencyLogClient is a mock implementation of TransparencyLogClient for testing.

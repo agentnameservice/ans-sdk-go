@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/verify"
+	"github.com/agentnameservice/ans-sdk-go/verify"
 )
 
 // AgentClient is an HTTP client that verifies ANS agent certificates before requests.
