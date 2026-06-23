@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // RefreshFunc is called during background refresh for each expiring entry.

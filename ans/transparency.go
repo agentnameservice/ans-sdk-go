@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/internal/httputility"
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/internal/httputility"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // TransparencyClient represents an ANS Transparency Log API client

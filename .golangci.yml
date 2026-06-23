@@ -28,7 +28,7 @@ formatters:
       # with the given prefixes are grouped after 3rd-party packages.
       # Default: []
       local-prefixes:
-        - github.com/godaddy/*
+        - github.com/agentnameservice/*
 
     golines:
       # Target maximum line length.

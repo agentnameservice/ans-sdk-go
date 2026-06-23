@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/verify/scitt"
+	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
 )
 
 func TestDefaultConfig(t *testing.T) {

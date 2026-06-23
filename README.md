@@ -3,7 +3,7 @@
 A command-line tool and Go SDK for the Agent Name Service (ANS) Registry Authority and Transparency Log.
 
 - **`ans-cli`** ([cmd/ans-cli](cmd/ans-cli)) — the fastest way to register, verify, and manage agents from a terminal. Most users start here.
-- **Go SDK** (`github.com/godaddy/ans-sdk-go/ans`) — the library the CLI is built on. Embed it in Go services that need to register agents programmatically, verify agent badges, or query the Transparency Log.
+- **Go SDK** (`github.com/agentnameservice/ans-sdk-go/ans`) — the library the CLI is built on. Embed it in Go services that need to register agents programmatically, verify agent badges, or query the Transparency Log.
 
 ## API Specification Reference
 
@@ -19,12 +19,12 @@ Top two options shown; see [cmd/ans-cli/README.md#installation](cmd/ans-cli/READ
 
 ```bash
 # macOS / Linux
-brew install godaddy/ans/ans-cli
+brew install agentnameservice/ans/ans-cli
 ```
 
 ```powershell
 # Windows (PowerShell)
-scoop bucket add ans https://github.com/godaddy/scoop-ans
+scoop bucket add ans https://github.com/agentnameservice/scoop-ans
 scoop install ans/ans-cli
 ```
 
@@ -90,7 +90,7 @@ For full per-command flag references and additional workflows, see [cmd/ans-cli/
 ## SDK Installation
 
 ```bash
-go get github.com/godaddy/ans-sdk-go
+go get github.com/agentnameservice/ans-sdk-go
 ```
 
 ## SDK Quick Start
@@ -105,8 +105,8 @@ import (
     "fmt"
     "log"
 
-    "github.com/godaddy/ans-sdk-go/ans"
-    "github.com/godaddy/ans-sdk-go/models"
+    "github.com/agentnameservice/ans-sdk-go/ans"
+    "github.com/agentnameservice/ans-sdk-go/models"
 )
 
 func main() {
@@ -174,7 +174,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/godaddy/ans-sdk-go/ans"
+    "github.com/agentnameservice/ans-sdk-go/ans"
 )
 
 func main() {
@@ -429,7 +429,7 @@ import (
     "context"
     "time"
 
-    "github.com/godaddy/ans-sdk-go/ans"
+    "github.com/agentnameservice/ans-sdk-go/ans"
 )
 
 // Create agent client with badge verification
@@ -467,7 +467,7 @@ resp, err = agentClient.GetJSON(ctx, "https://other-agent.example.com/api/data",
 The `keygen` package provides utilities for key generation:
 
 ```go
-import "github.com/godaddy/ans-sdk-go/keygen"
+import "github.com/agentnameservice/ans-sdk-go/keygen"
 
 // Generate RSA key pair
 keyPair, err := keygen.GenerateRSAKeyPairWithPEM(2048, nil)
@@ -493,7 +493,7 @@ API errors are returned as `*models.ResponseError`, which provides the HTTP stat
 import (
     "errors"
     "net/http"
-    "github.com/godaddy/ans-sdk-go/models"
+    "github.com/agentnameservice/ans-sdk-go/models"
 )
 
 result, err := client.GetAgentDetails(ctx, agentID)

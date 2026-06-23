@@ -1,4 +1,4 @@
-module github.com/godaddy/ans-sdk-go
+module github.com/agentnameservice/ans-sdk-go
 
 go 1.25.0
 

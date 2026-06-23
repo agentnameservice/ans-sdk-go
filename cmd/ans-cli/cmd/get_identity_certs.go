@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
 

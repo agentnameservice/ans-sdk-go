@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // captureStdout runs fn and returns what was written to os.Stdout.

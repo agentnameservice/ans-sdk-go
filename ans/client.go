@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/godaddy/ans-sdk-go/internal/httputility"
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/internal/httputility"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // Client represents an ANS Registry Authority API client

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentnameservice/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
 	"github.com/fxamacker/cbor/v2"
-	"github.com/godaddy/ans-sdk-go/models"
-	"github.com/godaddy/ans-sdk-go/verify/scitt"
 )
 
 func createTestBadge(host, version, serverFP, identityFP string) *models.Badge {
