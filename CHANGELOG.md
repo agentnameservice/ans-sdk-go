@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.18](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.17...v0.1.18) (2026-06-26)
+
+
+### Miscellaneous
+
+* **deps:** bump actions/checkout from 6.0.3 to 7.0.0 ([#44](https://github.com/agentnameservice/ans-sdk-go/issues/44)) ([8958f55](https://github.com/agentnameservice/ans-sdk-go/commit/8958f55d3e2b468d9579c9ec0c3ee4233d632dfd))
+
 ## [0.1.17](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.16...v0.1.17) (2026-06-23)
 
 
