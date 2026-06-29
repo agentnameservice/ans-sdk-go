@@ -156,15 +156,76 @@ type AgentInfo struct {
 	Version string `json:"version"`
 }
 
-// Attestations contains certificate attestations.
+// Attestations contains the per-event attestations carried in the
+// AGENT_REGISTERED (and other lifecycle) TL events. The struct
+// supports both V1 and V2 envelope shapes:
+//
+//   V1 (legacy): singleton certs (IdentityCert / ServerCert),
+//                no metadataHashes, no dnsRecordsProvisioned.
+//   V2 (current): array certs (IdentityCerts / ServerCerts),
+//                metadataHashes map (carries capabilitiesHash per
+//                ANS_SPEC.md §4.4.2), and dnsRecordsProvisioned[].
+//
+// The deserializer accepts both shapes by pointing optional fields at
+// nil/zero; readers SHOULD prefer the V2 array fields when populated
+// and fall back to the V1 singletons otherwise. Helper methods on
+// Badge present a unified view that hides the choice from callers.
 type Attestations struct {
-	DomainValidation string             `json:"domainValidation"`
-	IdentityCert     *CertAttestationV1 `json:"identityCert,omitempty"`
-	ServerCert       *CertAttestationV1 `json:"serverCert,omitempty"`
+	DomainValidation string `json:"domainValidation"`
+
+	// V1 singleton certs (older envelope shape).
+	IdentityCert *CertAttestationV1 `json:"identityCert,omitempty"`
+	ServerCert   *CertAttestationV1 `json:"serverCert,omitempty"`
+
+	// V2 array certs (current envelope shape).
+	IdentityCerts []CertAttestationV1 `json:"identityCerts,omitempty"`
+	ServerCerts   []CertAttestationV1 `json:"serverCerts,omitempty"`
+
+	// MetadataHashes carries SHA-256 hex-lowercase digests of
+	// artifacts the operator submitted at registration. Reserved
+	// keys (per ANS_SPEC.md §A.1):
+	//   "capabilitiesHash" — SHA-256(JCS(agentCardContent)).
+	// Absent when the operator did not submit agentCardContent.
+	MetadataHashes map[string]string `json:"metadataHashes,omitempty"`
+
+	// DNSRecordsProvisioned attests the records the AHP published
+	// for this registration: one entry per `_ans` TXT, SVCB at the
+	// agent FQDN, `_ans-badge` TXT, TLSA, and HTTPS RR depending on
+	// the registration's dnsRecordStyle. Reuses the request-side
+	// DNSRecord shape; clients can render zone-file fragments
+	// directly from this slice.
+	DNSRecordsProvisioned []DNSRecord `json:"dnsRecordsProvisioned,omitempty"`
 }
 
 // CertAttestationV1 contains certificate fingerprint and type.
 type CertAttestationV1 struct {
 	Fingerprint string `json:"fingerprint"`
 	Type        string `json:"type"`
+}
+
+// MetadataHashKeyCapabilitiesHash is the well-known map key the RA
+// uses for the SHA-256(JCS(agentCardContent)) digest in V2 events.
+// Constant rather than string-literal at call sites so a typo in
+// either the SDK or the RA surfaces as a compile error.
+const MetadataHashKeyCapabilitiesHash = "capabilitiesHash"
+
+// CapabilitiesHash returns the SHA-256 digest (hex-lowercase) the RA
+// sealed for this badge's agentCardContent, or "" when the operator
+// did not submit content (or the badge predates V2 envelope shape).
+//
+// Pair with verify.VerifyCardSHA256 to run the §4.4.2 three-way
+// cross-check against a fetched live Trust Card body and a DNS-side
+// SVCB card-sha256 SvcParam.
+func (b *Badge) CapabilitiesHash() string {
+	if b.Payload.Producer.Event.Attestations.MetadataHashes == nil {
+		return ""
+	}
+	return b.Payload.Producer.Event.Attestations.MetadataHashes[MetadataHashKeyCapabilitiesHash]
+}
+
+// DNSRecordsProvisioned returns the records the RA attested as
+// provisioned for this badge's registration. Empty when the badge
+// predates the V2 envelope shape.
+func (b *Badge) DNSRecordsProvisioned() []DNSRecord {
+	return b.Payload.Producer.Event.Attestations.DNSRecordsProvisioned
 }

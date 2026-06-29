@@ -187,6 +187,55 @@ func (c *Client) SearchAgents(ctx context.Context, opts ...SearchOption) (*model
 	return &result, nil
 }
 
+// ListAgentsV2 paginates the V2 agent list at GET /v2/ans/agents.
+//
+// Distinct from SearchAgents, which targets the V1 lane at /v1/agents
+// and returns AgentSearchResponse (totalCount + offset/limit). The V2
+// endpoint wraps results in AgentListV2Response and uses an opaque
+// cursor for pagination — drive the next page by passing the prior
+// response's NextCursor into WithListV2Cursor and stop when HasMore
+// flips to false.
+//
+// Filters: WithListV2Host (single FQDN), WithListV2Status (one or
+// more lifecycle states; defaults to ACTIVE on the server), and
+// WithListV2Limit (page size). Pass AgentStatusAll via
+// WithListV2Status to see every lifecycle state, including the
+// PENDING_VALIDATION rows §3.2.0 base-only registrations sit in
+// before they reach ACTIVE.
+func (c *Client) ListAgentsV2(ctx context.Context, opts ...ListV2Option) (*models.AgentListV2Response, error) {
+	cfg := &listV2Config{}
+	for _, opt := range opts {
+		if err := opt(cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	params := url.Values{}
+	if cfg.host != "" {
+		params.Set("agentHost", cfg.host)
+	}
+	for _, s := range cfg.statuses {
+		params.Add("status", string(s))
+	}
+	if cfg.cursor != "" {
+		params.Set("cursor", cfg.cursor)
+	}
+	if cfg.limit > 0 {
+		params.Set("limit", strconv.Itoa(cfg.limit))
+	}
+
+	path := "/v2/ans/agents"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
+	var result models.AgentListV2Response
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // GetIdentityCertificates retrieves identity certificates for an agent
 func (c *Client) GetIdentityCertificates(ctx context.Context, agentID string) ([]models.CertificateResponse, error) {
 	if err := validateRequired("agentID", agentID); err != nil {

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -246,4 +247,129 @@ func TestBadge_EventType(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBadge_CapabilitiesHash_Plan_C covers the V2 envelope path: a
+// badge whose AGENT_REGISTERED event was sealed with agentCardContent
+// at registration carries the SHA-256(JCS(content)) digest under
+// attestations.metadataHashes.capabilitiesHash. Badge.CapabilitiesHash
+// surfaces it; absence (V1 envelope or operator omitted content)
+// returns "".
+func TestBadge_CapabilitiesHash_Plan_C(t *testing.T) {
+	const want = "098d650cc6d280dee4c0f47489a75cf17b9bfbbae53051806d4e084108b2ff27"
+
+	t.Run("v2_envelope_with_capabilitiesHash_present", func(t *testing.T) {
+		b := &Badge{
+			Payload: BadgePayload{
+				Producer: Producer{Event: AgentEvent{Attestations: Attestations{
+					MetadataHashes: map[string]string{
+						MetadataHashKeyCapabilitiesHash: want,
+					},
+				}}},
+			},
+		}
+		if got := b.CapabilitiesHash(); got != want {
+			t.Errorf("CapabilitiesHash() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("absent_when_metadataHashes_nil", func(t *testing.T) {
+		b := &Badge{}
+		if got := b.CapabilitiesHash(); got != "" {
+			t.Errorf("CapabilitiesHash() = %q, want empty", got)
+		}
+	})
+
+	t.Run("absent_when_key_missing_from_map", func(t *testing.T) {
+		b := &Badge{
+			Payload: BadgePayload{
+				Producer: Producer{Event: AgentEvent{Attestations: Attestations{
+					MetadataHashes: map[string]string{"someOtherHash": "abc"},
+				}}},
+			},
+		}
+		if got := b.CapabilitiesHash(); got != "" {
+			t.Errorf("CapabilitiesHash() = %q, want empty (key absent)", got)
+		}
+	})
+}
+
+// TestBadge_DNSRecordsProvisioned_PlanD covers V2 envelopes that
+// carry the dnsRecordsProvisioned attestation. Operators inspect
+// the slice to render zone-file fragments matching what the RA
+// computed for the registration's dnsRecordStyle.
+func TestBadge_DNSRecordsProvisioned_PlanD(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "agent.webmesh.ai", Type: DNSRecordTypeSVCB,
+			Value: `1 . alpn=a2a port=443 wk=agent-card.json`,
+			Purpose: "DISCOVERY"},
+		{Name: "_ans-badge.agent.webmesh.ai", Type: DNSRecordTypeTXT,
+			Value: "v=ans-badge1; version=1.0.1; url=...", Purpose: "BADGE"},
+	}
+	b := &Badge{
+		Payload: BadgePayload{
+			Producer: Producer{Event: AgentEvent{Attestations: Attestations{
+				DNSRecordsProvisioned: records,
+			}}},
+		},
+	}
+	got := b.DNSRecordsProvisioned()
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Type != DNSRecordTypeSVCB {
+		t.Errorf("got[0].Type = %q, want SVCB", got[0].Type)
+	}
+}
+
+// TestAttestations_RoundTripV1AndV2 confirms the unified Attestations
+// struct deserializes both V1 (legacy: singleton certs, no metadata
+// hashes) and V2 (current: array certs, metadataHashes populated)
+// envelope shapes without choking. V1 callers continue to read
+// IdentityCert/ServerCert; V2 callers read IdentityCerts/ServerCerts
+// arrays plus MetadataHashes.
+func TestAttestations_RoundTripV1AndV2(t *testing.T) {
+	v1 := []byte(`{
+		"domainValidation": "ACME-DNS-01",
+		"identityCert": {"fingerprint": "SHA256:aaa", "type": "X509-OV-CLIENT"},
+		"serverCert":   {"fingerprint": "SHA256:bbb", "type": "X509-DV-SERVER"}
+	}`)
+	v2 := []byte(`{
+		"domainValidation": "ACME-DNS-01",
+		"identityCerts": [{"fingerprint": "SHA256:ccc", "type": "X509-OV-CLIENT"}],
+		"serverCerts":   [{"fingerprint": "SHA256:ddd", "type": "X509-DV-SERVER"}],
+		"metadataHashes": {"capabilitiesHash": "098d650c..."},
+		"dnsRecordsProvisioned": [
+			{"name": "agent.webmesh.ai", "type": "SVCB", "value": "1 . alpn=a2a port=443"}
+		]
+	}`)
+
+	t.Run("v1", func(t *testing.T) {
+		var a Attestations
+		if err := json.Unmarshal(v1, &a); err != nil {
+			t.Fatalf("v1 unmarshal: %v", err)
+		}
+		if a.IdentityCert == nil || a.IdentityCert.Fingerprint != "SHA256:aaa" {
+			t.Errorf("v1 identityCert lost: %+v", a.IdentityCert)
+		}
+		if len(a.IdentityCerts) != 0 || len(a.MetadataHashes) != 0 {
+			t.Errorf("v1 envelope must not populate v2-only fields; got %+v", a)
+		}
+	})
+
+	t.Run("v2", func(t *testing.T) {
+		var a Attestations
+		if err := json.Unmarshal(v2, &a); err != nil {
+			t.Fatalf("v2 unmarshal: %v", err)
+		}
+		if len(a.IdentityCerts) != 1 || a.IdentityCerts[0].Fingerprint != "SHA256:ccc" {
+			t.Errorf("v2 identityCerts not populated: %+v", a.IdentityCerts)
+		}
+		if got := a.MetadataHashes[MetadataHashKeyCapabilitiesHash]; got != "098d650c..." {
+			t.Errorf("v2 capabilitiesHash = %q, want 098d650c...", got)
+		}
+		if len(a.DNSRecordsProvisioned) != 1 {
+			t.Errorf("v2 dnsRecordsProvisioned len = %d, want 1", len(a.DNSRecordsProvisioned))
+		}
+	})
 }

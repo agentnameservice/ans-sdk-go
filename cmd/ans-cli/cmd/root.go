@@ -73,6 +73,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 		buildSubmitServerCSRCmd(),
 		buildVerifyACMECmd(),
 		buildVerifyDNSCmd(),
+		buildVerifyHashCmd(),
 	)
 
 	return cmd
