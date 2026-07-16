@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,6 +58,27 @@ func TestNewClient(t *testing.T) {
 				WithVerbose(true),
 			},
 			wantErr: false,
+		},
+		{
+			name: "with bearer token",
+			opts: []Option{
+				WithBearerToken("test-token"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "with token source",
+			opts: []Option{
+				WithTokenSource(&fakeTokenSource{tokens: []string{"tok"}}),
+			},
+			wantErr: false,
+		},
+		{
+			name: "with nil token source",
+			opts: []Option{
+				WithTokenSource(nil),
+			},
+			wantErr: true,
 		},
 	}
 
@@ -1403,4 +1425,105 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestClient_BearerTokenHeader(t *testing.T) {
+	var mu sync.Mutex
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&models.AgentDetails{AgentID: "agent-123"})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(WithBaseURL(server.URL), WithBearerToken("tok"))
+	if err != nil {
+		t.Fatalf("NewClient() unexpected error: %v", err)
+	}
+
+	if _, err := client.GetAgentDetails(context.Background(), "agent-123"); err != nil {
+		t.Fatalf("GetAgentDetails() unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotAuth != "Bearer tok" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer tok")
+	}
+}
+
+func TestClient_TokenSourcePerRequest(t *testing.T) {
+	var mu sync.Mutex
+	var gotAuth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&models.AgentDetails{AgentID: "agent-123"})
+	}))
+	defer server.Close()
+
+	source := &fakeTokenSource{tokens: []string{"tok-1", "tok-2"}}
+	client, err := NewClient(WithBaseURL(server.URL), WithTokenSource(source))
+	if err != nil {
+		t.Fatalf("NewClient() unexpected error: %v", err)
+	}
+
+	for i := range 2 {
+		if _, err := client.GetAgentDetails(context.Background(), "agent-123"); err != nil {
+			t.Fatalf("GetAgentDetails() call %d unexpected error: %v", i+1, err)
+		}
+	}
+
+	if calls := source.Calls(); calls != 2 {
+		t.Errorf("token source calls = %d, want 2 (one per request)", calls)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"Bearer tok-1", "Bearer tok-2"}
+	if len(gotAuth) != len(want) {
+		t.Fatalf("recorded %d Authorization headers, want %d", len(gotAuth), len(want))
+	}
+	for i := range want {
+		if gotAuth[i] != want[i] {
+			t.Errorf("request %d Authorization = %q, want %q", i+1, gotAuth[i], want[i])
+		}
+	}
+}
+
+func TestClient_TokenSourceError(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	sourceErr := errors.New("refresh failed")
+	client, err := NewClient(WithBaseURL(server.URL), WithTokenSource(&fakeTokenSource{err: sourceErr}))
+	if err != nil {
+		t.Fatalf("NewClient() unexpected error: %v", err)
+	}
+
+	_, err = client.GetAgentDetails(context.Background(), "agent-123")
+	if err == nil {
+		t.Fatal("GetAgentDetails() expected error, got nil")
+	}
+	if !errors.Is(err, sourceErr) {
+		t.Errorf("GetAgentDetails() error = %v, want errors.Is %v", err, sourceErr)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Errorf("server hits = %d, want 0 (request must abort before HTTP)", hits)
+	}
 }

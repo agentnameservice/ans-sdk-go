@@ -1,6 +1,7 @@
 package ans
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -21,13 +22,60 @@ const (
 // Option is a functional option for configuring ANS clients
 type Option func(*clientConfig) error
 
-// clientConfig holds the configuration for ANS clients
+// TokenSource supplies OAuth 2.0 bearer tokens. Token is called for each
+// outgoing request; implementations should cache and refresh proactively
+// and must be safe for concurrent use. Token must honor ctx cancellation
+// and deadlines — the client's WithTimeout does NOT bound this call.
+// Return the raw token without the "Bearer " prefix, and never embed
+// credentials or raw token-endpoint responses in returned errors.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
+// clientConfig holds the configuration for ANS clients.
+// Invariant: at most one of authHeader/tokenSource is active — every auth
+// option must clear the other field so the last option applied wins.
 type clientConfig struct {
-	baseURL    string
-	httpClient *http.Client
-	authHeader string // Can be "sso-jwt <token>" or "sso-key <key>:<secret>"
-	verbose    bool
-	timeout    time.Duration
+	baseURL     string
+	httpClient  *http.Client
+	authHeader  string // Can be "sso-jwt <token>", "sso-key <key>:<secret>", or "Bearer <token>"
+	tokenSource TokenSource
+	verbose     bool
+	timeout     time.Duration
+}
+
+// authorizationHeader resolves the Authorization value for a single request.
+// Static credentials (WithJWT, WithAPIKey, WithBearerToken) return the
+// pre-formatted header; a TokenSource is invoked per request so refreshed
+// tokens are picked up. Returns "" when no credentials are configured.
+func (c *clientConfig) authorizationHeader(ctx context.Context) (string, error) {
+	if c.tokenSource == nil {
+		return c.authHeader, nil
+	}
+	token, err := c.tokenSource.Token(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to obtain bearer token: %w", err)
+	}
+	if token == "" {
+		return "", fmt.Errorf("%w: token source returned an empty token", models.ErrBadRequest)
+	}
+	if !isValidBearerToken(token) {
+		return "", fmt.Errorf("%w: token source returned a token containing whitespace or control characters", models.ErrBadRequest)
+	}
+	return "Bearer " + token, nil
+}
+
+// isValidBearerToken rejects tokens containing whitespace or control bytes
+// (<= 0x20 or 0x7F) so a malformed or attacker-influenced token can never
+// reach the Authorization header, even through a custom transport that skips
+// net/http's own header validation.
+func isValidBearerToken(token string) bool {
+	for i := range len(token) {
+		if token[i] <= 0x20 || token[i] == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // defaultConfig returns the default client configuration
@@ -54,6 +102,7 @@ func WithBaseURL(baseURL string) Option {
 func WithJWT(jwt string) Option {
 	return func(c *clientConfig) error {
 		c.authHeader = "sso-jwt " + jwt
+		c.tokenSource = nil
 		return nil
 	}
 }
@@ -62,6 +111,43 @@ func WithJWT(jwt string) Option {
 func WithAPIKey(key, secret string) Option {
 	return func(c *clientConfig) error {
 		c.authHeader = "sso-key " + key + ":" + secret
+		c.tokenSource = nil
+		return nil
+	}
+}
+
+// WithBearerToken sets a static OAuth 2.0 access token, sent on every request
+// as "Authorization: Bearer <token>". It is an alternative to WithAPIKey and
+// WithJWT for deployments that authenticate with OAuth 2.0. Tokens containing
+// whitespace or control characters are rejected at construction with
+// models.ErrBadRequest; an empty token is sent as "Bearer " — prefer
+// WithTokenSource for refreshable resolution. TransparencyClient public
+// endpoints never send credentials regardless of this option.
+func WithBearerToken(token string) Option {
+	return func(c *clientConfig) error {
+		if !isValidBearerToken(token) {
+			return fmt.Errorf("%w: bearer token contains whitespace or control characters", models.ErrBadRequest)
+		}
+		c.authHeader = "Bearer " + token
+		c.tokenSource = nil
+		return nil
+	}
+}
+
+// WithTokenSource sets a dynamic OAuth 2.0 bearer-token source. The source's
+// Token method is called for each outgoing request and the result is sent as
+// "Authorization: Bearer <token>", letting callers plug in refreshing
+// credentials (see the README for a golang.org/x/oauth2 adapter). A nil
+// source is rejected at construction with models.ErrBadRequest. Auth
+// options are last-wins: WithTokenSource clears any static credential set by
+// WithJWT, WithAPIKey, or WithBearerToken, and vice versa.
+func WithTokenSource(ts TokenSource) Option {
+	return func(c *clientConfig) error {
+		if ts == nil {
+			return fmt.Errorf("%w: token source cannot be nil", models.ErrBadRequest)
+		}
+		c.tokenSource = ts
+		c.authHeader = ""
 		return nil
 	}
 }

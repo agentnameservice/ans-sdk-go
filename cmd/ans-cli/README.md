@@ -98,10 +98,15 @@ The CLI can be configured using environment variables or command-line flags:
 
 | Environment Variable | Flag | Description | Default |
 |---------------------|------|-------------|---------|
-| `ANS_API_KEY` | `--api-key` | API key for authentication | (required) |
+| `ANS_API_KEY` | `--api-key` | API key for authentication | (required unless `ANS_OAUTH_TOKEN` is set) |
+| `ANS_OAUTH_TOKEN` | `--oauth-token` | OAuth 2.0 bearer token; takes precedence over the API key | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
+
+Prefer the environment variables over the `--api-key`/`--oauth-token` flags — command-line arguments are visible to other local processes (`ps`) and are saved in shell history. When both credentials are configured, the CLI prints a note to stderr saying the OAuth token is being used.
+
+OAuth access tokens expire; for long-lived automation and `events --follow`, prefer `ANS_API_KEY` or refresh the token before each invocation.
 
 ## Commands
 
@@ -453,7 +458,7 @@ ans-cli status <agentId> --json
 
 ## Verbose Mode
 
-Enable verbose output to see HTTP requests and responses:
+Enable verbose output to see diagnostics on stderr, such as which authentication method is in use:
 
 ```bash
 ans-cli register --verbose ...
@@ -465,6 +470,12 @@ ans-cli register --verbose ...
 ```bash
 export ANS_API_KEY="your-api-key"
 ans-cli search --name "Analyzer"
+```
+
+### Authenticate with an OAuth 2.0 bearer token
+```bash
+export ANS_OAUTH_TOKEN="your-oauth-token"
+ans-cli status 550e8400-e29b-41d4-a716-446655440000
 ```
 
 ### Get agent status in JSON format

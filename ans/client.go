@@ -36,10 +36,14 @@ func NewClient(opts ...Option) (*Client, error) {
 
 // doRequest performs an HTTP request with authentication and context
 func (c *Client) doRequest(ctx context.Context, method, path string, body any, result any) error {
+	authHeader, err := c.config.authorizationHeader(ctx)
+	if err != nil {
+		return err
+	}
 	httpCfg := &httputility.ClientConfig{
 		BaseURL:    c.config.baseURL,
 		HTTPClient: c.config.httpClient,
-		AuthHeader: c.config.authHeader,
+		AuthHeader: authHeader,
 	}
 	return httputility.DoRequest(ctx, httpCfg, method, path, body, result)
 }

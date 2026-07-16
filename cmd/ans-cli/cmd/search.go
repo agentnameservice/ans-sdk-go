@@ -59,8 +59,8 @@ func runSearchWithParams(p *searchParams) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
-		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
+	if err := cfg.RequireCredentials(); err != nil {
+		return err
 	}
 
 	if p.name == "" && p.host == "" && p.version == "" && p.protocol == "" && len(p.statuses) == 0 {

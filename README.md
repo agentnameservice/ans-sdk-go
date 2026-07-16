@@ -35,6 +35,14 @@ export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
 ```
 
+Or authenticate with an OAuth 2.0 access token instead of an API key:
+
+```bash
+export ANS_OAUTH_TOKEN="your-oauth-token"
+```
+
+The API key remains the default path; when both are set, the OAuth token takes precedence.
+
 ### Register an agent (end-to-end)
 
 ```bash
@@ -243,6 +251,7 @@ func main() {
 ### Authentication Methods
 - ✅ JWT Bearer Token
 - ✅ API Key (Public gateway endpoints)
+- ✅ OAuth 2.0 Bearer Token (static via `WithBearerToken`, refreshable via `WithTokenSource`)
 - ✅ Custom HTTP Client support
 
 ## Configuration
@@ -268,9 +277,60 @@ client, err := ans.NewClient(
 | `WithBaseURL(url string)` | Set the API base URL | `ans.WithBaseURL("https://api.godaddy.com")` |
 | `WithJWT(token string)` | Set JWT authentication | `ans.WithJWT("eyJhbGciOi...")` |
 | `WithAPIKey(key, secret string)` | Set API key authentication (public gateway) | `ans.WithAPIKey("key", "secret")` |
+| `WithBearerToken(token string)` | Set a static OAuth 2.0 bearer token | `ans.WithBearerToken("your-oauth-token")` |
+| `WithTokenSource(ts ans.TokenSource)` | Set a refreshable OAuth 2.0 token source | `ans.WithTokenSource(mySource)` |
 | `WithTimeout(duration time.Duration)` | Set HTTP client timeout | `ans.WithTimeout(60 * time.Second)` |
 | `WithVerbose(verbose bool)` | Enable verbose logging | `ans.WithVerbose(true)` |
 | `WithHTTPClient(client *http.Client)` | Use custom HTTP client | `ans.WithHTTPClient(myClient)` |
+
+Auth options are last-wins: applying any of `WithJWT`, `WithAPIKey`, `WithBearerToken`, or `WithTokenSource` replaces the previously configured credential.
+
+### OAuth 2.0 Bearer Tokens
+
+For a static access token, use `WithBearerToken` — every request sends `Authorization: Bearer <token>`:
+
+```go
+client, err := ans.NewClient(
+    ans.WithBaseURL("https://api.godaddy.com"),
+    ans.WithBearerToken(os.Getenv("ANS_OAUTH_TOKEN")),
+)
+```
+
+For tokens that need refreshing, implement the SDK's small `TokenSource` interface. `Token` is called for each outgoing request, so implementations should cache and refresh proactively, must be safe for concurrent use, and must honor `ctx` cancellation — the client's `WithTimeout` does **not** bound the token fetch:
+
+```go
+type TokenSource interface {
+    Token(ctx context.Context) (string, error)
+}
+```
+
+The SDK deliberately has no `golang.org/x/oauth2` dependency. If you already use that package, a four-line adapter bridges it — and because `oauth2.Config`/`clientcredentials.Config` token sources wrap `ReuseTokenSource`, the adapter below caches automatically instead of hitting your identity provider on every call (avoid writing a source that fetches per request):
+
+```go
+type oauth2Adapter struct{ src oauth2.TokenSource }
+
+func (a oauth2Adapter) Token(_ context.Context) (string, error) {
+    t, err := a.src.Token()
+    if err != nil {
+        return "", err // never embed credentials or raw token-endpoint responses in errors
+    }
+    return t.AccessToken, nil
+}
+
+// x/oauth2 sources capture their context at construction and cannot honor the
+// per-request ctx, so bound the token fetch here — otherwise a hung identity
+// provider stalls every SDK call indefinitely.
+srcCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: 10 * time.Second})
+src := clientCredentialsConfig.TokenSource(srcCtx) // caching, auto-refreshing
+client, err := ans.NewClient(ans.WithTokenSource(oauth2Adapter{src: src}))
+```
+
+Notes:
+
+- Only use bearer tokens over `https` base URLs — RFC 6750 requires TLS, and a token sent over plain HTTP is trivially stolen and replayable.
+- The SDK does not retry or refresh on `401`; sources should refresh ahead of expiry. A token revoked before expiry fails with `401` until the source refreshes.
+- Failure signatures: an error from the token source is returned with the `failed to obtain bearer token` prefix; a source that returns an empty or malformed token fails with `models.ErrBadRequest`. In both cases no HTTP call is made. A server rejection is a `*models.ResponseError` with `StatusCode: 401`.
+- `TransparencyClient` public endpoints (checkpoint, audit, schema) never send credentials; only `GetAgentTransparencyLog` authenticates when a credential is configured.
 
 ### Environment URLs
 
