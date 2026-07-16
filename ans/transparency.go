@@ -66,6 +66,13 @@ func (c *TransparencyClient) GetAgentTransparencyLog(ctx context.Context, agentI
 
 // doRequestWithSchemaVersion performs an HTTP request and captures the schema version header
 func (c *TransparencyClient) doRequestWithSchemaVersion(ctx context.Context, method, path string, body any) (*models.TransparencyLog, error) {
+	// Resolve credentials before any HTTP work; a failing token source
+	// aborts the request rather than silently downgrading to unauthenticated.
+	authHeader, err := c.config.authorizationHeader(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// Prepare request body if needed
 	var reqBody io.Reader
 	if body != nil {
@@ -83,9 +90,9 @@ func (c *TransparencyClient) doRequestWithSchemaVersion(ctx context.Context, met
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers
-	if c.config.authHeader != "" {
-		req.Header.Set("Authorization", c.config.authHeader)
+	// Set headers; unauthenticated requests must not send an empty Authorization header
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")

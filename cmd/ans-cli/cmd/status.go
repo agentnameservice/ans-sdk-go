@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -31,8 +30,8 @@ func runStatus(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
-		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
+	if err := cfg.RequireCredentials(); err != nil {
+		return err
 	}
 
 	// Create client and get agent details

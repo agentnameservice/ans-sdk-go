@@ -68,8 +68,8 @@ func runEventsWithParams(limit int, providerID, lastLogID string, follow bool, p
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
-		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
+	if err := cfg.RequireCredentials(); err != nil {
+		return err
 	}
 
 	params := &eventsParams{

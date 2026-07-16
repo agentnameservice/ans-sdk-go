@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 func TestBuildRootCmd(t *testing.T) {
@@ -49,7 +51,7 @@ func TestBuildRootCmd(t *testing.T) {
 	}
 
 	// Verify persistent flags exist
-	persistentFlags := []string{"api-key", "base-url", "verbose", "json"}
+	persistentFlags := []string{"api-key", "oauth-token", "base-url", "verbose", "json"}
 	for _, flagName := range persistentFlags {
 		if cmd.PersistentFlags().Lookup(flagName) == nil {
 			t.Errorf("missing persistent flag %q", flagName)
@@ -57,8 +59,11 @@ func TestBuildRootCmd(t *testing.T) {
 	}
 }
 
-func TestInitConfig(_ *testing.T) {
-	// initConfig should not panic
+func TestInitConfig(t *testing.T) {
+	// initConfig should not panic; reset viper so the env bindings it
+	// registers don't leak a developer's exported ANS_* values into
+	// later tests.
+	t.Cleanup(func() { viper.Reset() })
 	initConfig()
 }
 

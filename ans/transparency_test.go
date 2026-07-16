@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -1324,5 +1325,145 @@ func TestDoRequestWithSchemaVersion_HTTPClientFailure(t *testing.T) {
 				t.Fatal("expected error for connection failure")
 			}
 		})
+	}
+}
+
+func TestTransparencyClient_AuthenticatedLogRetrieval(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     []Option
+		wantAuth string
+	}{
+		{
+			name:     "static bearer token sent on inline request path",
+			opts:     []Option{WithBearerToken("tok")},
+			wantAuth: "Bearer tok",
+		},
+		{
+			name:     "token source resolved per request on inline request path",
+			opts:     []Option{WithTokenSource(&fakeTokenSource{tokens: []string{"dyn"}})},
+			wantAuth: "Bearer dyn",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var gotAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				gotAuth = r.Header.Get("Authorization")
+				mu.Unlock()
+				json.NewEncoder(w).Encode(&models.TransparencyLog{Status: "ACTIVE"})
+			}))
+			defer server.Close()
+
+			client, err := NewTransparencyClient(append([]Option{WithBaseURL(server.URL)}, tt.opts...)...)
+			if err != nil {
+				t.Fatalf("NewTransparencyClient() unexpected error: %v", err)
+			}
+
+			if _, err := client.GetAgentTransparencyLog(context.Background(), "agent-123"); err != nil {
+				t.Fatalf("GetAgentTransparencyLog() unexpected error: %v", err)
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			if gotAuth != tt.wantAuth {
+				t.Errorf("Authorization header = %q, want %q", gotAuth, tt.wantAuth)
+			}
+		})
+	}
+}
+
+// TestTransparencyClient_TokenSourceError pins the fail-closed contract: a
+// broken token source aborts the request even though the endpoint could have
+// served it unauthenticated — the SDK never silently downgrades to no auth.
+func TestTransparencyClient_TokenSourceError(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		json.NewEncoder(w).Encode(&models.TransparencyLog{Status: "ACTIVE"})
+	}))
+	defer server.Close()
+
+	sourceErr := errors.New("refresh failed")
+	client, err := NewTransparencyClient(WithBaseURL(server.URL), WithTokenSource(&fakeTokenSource{err: sourceErr}))
+	if err != nil {
+		t.Fatalf("NewTransparencyClient() unexpected error: %v", err)
+	}
+
+	_, err = client.GetAgentTransparencyLog(context.Background(), "agent-123")
+	if err == nil {
+		t.Fatal("GetAgentTransparencyLog() expected error, got nil")
+	}
+	if !errors.Is(err, sourceErr) {
+		t.Errorf("GetAgentTransparencyLog() error = %v, want errors.Is %v", err, sourceErr)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Errorf("server hits = %d, want 0 (request must abort before HTTP)", hits)
+	}
+}
+
+func TestTransparencyClient_NoCredentials_NoAuthorizationHeader(t *testing.T) {
+	var mu sync.Mutex
+	authValues := -1
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		authValues = len(r.Header.Values("Authorization"))
+		mu.Unlock()
+		json.NewEncoder(w).Encode(&models.TransparencyLog{Status: "ACTIVE"})
+	}))
+	defer server.Close()
+
+	client, err := NewTransparencyClient(WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("NewTransparencyClient() unexpected error: %v", err)
+	}
+
+	if _, err := client.GetAgentTransparencyLog(context.Background(), "agent-123"); err != nil {
+		t.Fatalf("GetAgentTransparencyLog() unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if authValues != 0 {
+		t.Errorf("Authorization header values = %d, want 0 (header must be absent, not empty)", authValues)
+	}
+}
+
+// TestTransparencyClient_PublicEndpointsIgnoreCredentials pins doGet's
+// behavior: checkpoint/audit/schema endpoints are public and never send
+// credentials, even when the client is configured with one.
+func TestTransparencyClient_PublicEndpointsIgnoreCredentials(t *testing.T) {
+	var mu sync.Mutex
+	gotAuth := "unset"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		mu.Unlock()
+		json.NewEncoder(w).Encode(&models.CheckpointResponse{LogSize: 1})
+	}))
+	defer server.Close()
+
+	client, err := NewTransparencyClient(WithBaseURL(server.URL), WithBearerToken("tok"))
+	if err != nil {
+		t.Fatalf("NewTransparencyClient() unexpected error: %v", err)
+	}
+
+	if _, err := client.GetCheckpoint(context.Background()); err != nil {
+		t.Fatalf("GetCheckpoint() unexpected error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotAuth != "" {
+		t.Errorf("Authorization header = %q, want empty (public endpoint)", gotAuth)
 	}
 }
