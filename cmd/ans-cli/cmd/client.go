@@ -39,6 +39,13 @@ func createClient(cfg *config.Config) (*ans.Client, error) {
 		authOpt,
 	}
 
+	// Empty means "flag default" (config tests bypass flag binding);
+	// anything else is validated by the SDK option so an unknown value
+	// fails fast with guidance instead of silently using the V1 lane.
+	if cfg.APIVersion != "" {
+		opts = append(opts, ans.WithAPIVersion(ans.APIVersion(cfg.APIVersion)))
+	}
+
 	return ans.NewClient(opts...)
 }
 

@@ -48,6 +48,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	cmd.PersistentFlags().String("api-key", "", "API key for authentication (env: ANS_API_KEY; ignored when --oauth-token or ANS_OAUTH_TOKEN is set)")
 	cmd.PersistentFlags().String("oauth-token", "", "OAuth 2.0 bearer token for authentication (prefer env: ANS_OAUTH_TOKEN; takes precedence over --api-key)")
 	cmd.PersistentFlags().String("base-url", "https://api.ote-godaddy.com", "API base URL (env: ANS_BASE_URL)")
+	cmd.PersistentFlags().String("api-version", "v1", "RA API lane for agent lifecycle routes: v1 or v2 (env: ANS_API_VERSION; discovery profiles require v2)")
 	cmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 	cmd.PersistentFlags().BoolP("json", "j", false, "Output in JSON format")
 
@@ -55,6 +56,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	_ = viper.BindPFlag("api-key", cmd.PersistentFlags().Lookup("api-key"))
 	_ = viper.BindPFlag("oauth-token", cmd.PersistentFlags().Lookup("oauth-token"))
 	_ = viper.BindPFlag("base-url", cmd.PersistentFlags().Lookup("base-url"))
+	_ = viper.BindPFlag("api-version", cmd.PersistentFlags().Lookup("api-version"))
 	_ = viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
 	_ = viper.BindPFlag("json", cmd.PersistentFlags().Lookup("json"))
 
@@ -88,6 +90,7 @@ func initConfig() {
 	_ = viper.BindEnv("api-key", "ANS_API_KEY")
 	_ = viper.BindEnv("oauth-token", "ANS_OAUTH_TOKEN")
 	_ = viper.BindEnv("base-url", "ANS_BASE_URL")
+	_ = viper.BindEnv("api-version", "ANS_API_VERSION")
 
 	viper.AutomaticEnv()
 }

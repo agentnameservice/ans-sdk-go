@@ -158,3 +158,29 @@ func TestIsValidAgentProtocol(t *testing.T) {
 		})
 	}
 }
+
+// TestIsValidDiscoveryProfile pins the recognised discovery-profile
+// enum. Values are CONSTANT_CASE on the wire, matching the V2 register
+// schema; anything else — including lowercase — is rejected so a typo'd
+// profile fails client-side instead of round-tripping to a server 422.
+func TestIsValidDiscoveryProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile DiscoveryProfile
+		want    bool
+	}{
+		{"ans_dnsaid", DiscoveryProfileANSDNSAID, true},
+		{"ans_txt", DiscoveryProfileANSTXT, true},
+		{"empty string", DiscoveryProfile(""), false},
+		{"unknown value", DiscoveryProfile("ANS_SVCB"), false},
+		{"lowercase rejected", DiscoveryProfile("ans_dnsaid"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsValidDiscoveryProfile(tt.profile); got != tt.want {
+				t.Errorf("IsValidDiscoveryProfile(%q) = %v, want %v", tt.profile, got, tt.want)
+			}
+		})
+	}
+}

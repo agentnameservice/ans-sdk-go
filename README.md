@@ -282,8 +282,13 @@ client, err := ans.NewClient(
 | `WithTimeout(duration time.Duration)` | Set HTTP client timeout | `ans.WithTimeout(60 * time.Second)` |
 | `WithVerbose(verbose bool)` | Enable verbose logging | `ans.WithVerbose(true)` |
 | `WithHTTPClient(client *http.Client)` | Use custom HTTP client | `ans.WithHTTPClient(myClient)` |
+| `WithAPIVersion(v ans.APIVersion)` | Select the RA API lane for agent lifecycle routes (`ans.APIVersionV1` default, `ans.APIVersionV2`) | `ans.WithAPIVersion(ans.APIVersionV2)` |
 
 Auth options are last-wins: applying any of `WithJWT`, `WithAPIKey`, `WithBearerToken`, or `WithTokenSource` replaces the previously configured credential.
+
+### API Versions and Discovery Profiles
+
+`WithAPIVersion(ans.APIVersionV2)` routes the agent-lifecycle and certificate methods through the RA's V2 lane (`/v2/ans/agents/...`). The request/response shapes are identical to V1; the lane matters because **DNS discovery profiles** are a V2 feature: on V2 the `AgentRegistrationRequest.DiscoveryProfiles` field selects which DNS record families the RA asks the operator to publish (`models.DiscoveryProfileANSDNSAID` — RFC 9460 SVCB records, the server default — and/or `models.DiscoveryProfileANSTXT`, the legacy `_ans` TXT shape). The V1 lane ignores the field and always emits the ANS_TXT family. The equivalent CLI switches are `--api-version v2` (also `ANS_API_VERSION`) and `register --discovery-profiles ANS_DNSAID,ANS_TXT`.
 
 ### OAuth 2.0 Bearer Tokens
 

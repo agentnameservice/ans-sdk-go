@@ -934,7 +934,7 @@ func TestRunRegisterWithParams_NoAPIKey(t *testing.T) {
 	t.Cleanup(func() { viper.Reset() })
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		"/nonexistent/id.csr", "", "", "https://example.com", "", "MCP", nil, nil)
+		"/nonexistent/id.csr", "", "", "https://example.com", "", "MCP", nil, nil, nil)
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for missing API key")
 	}
@@ -944,7 +944,7 @@ func TestRunRegisterWithParams_BadIdentityCSR(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		"/nonexistent/id.csr", "", "", "https://example.com", "", "MCP", nil, nil)
+		"/nonexistent/id.csr", "", "", "https://example.com", "", "MCP", nil, nil, nil)
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for bad identity CSR file")
 	}
@@ -958,7 +958,7 @@ func TestRunRegisterWithParams_BadServerCSR(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "/nonexistent/server.csr", "", "https://example.com", "", "MCP", nil, nil)
+		identityCSR, "/nonexistent/server.csr", "", "https://example.com", "", "MCP", nil, nil, nil)
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for bad server CSR file")
 	}
@@ -972,7 +972,7 @@ func TestRunRegisterWithParams_BadServerCert(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "/nonexistent/server.cert", "https://example.com", "", "MCP", nil, nil)
+		identityCSR, "", "/nonexistent/server.cert", "https://example.com", "", "MCP", nil, nil, nil)
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for bad server cert file")
 	}
@@ -986,7 +986,7 @@ func TestRunRegisterWithParams_InvalidFunctions(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "", "https://example.com", "", "MCP", nil, []string{"invalid"})
+		identityCSR, "", "", "https://example.com", "", "MCP", nil, []string{"invalid"}, nil)
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for invalid function flags")
 	}
@@ -1011,7 +1011,7 @@ func TestRunRegisterWithParams_Success(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil)
+		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() error = %v", err)
 	}
@@ -1037,7 +1037,7 @@ func TestRunRegisterWithParams_JSONMode(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil)
+		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() JSON mode error = %v", err)
 	}
@@ -1064,7 +1064,7 @@ func TestRunRegisterWithParams_WithServerCSR(t *testing.T) {
 	os.WriteFile(serverCSR, []byte("SRV-CSR"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, serverCSR, "", "https://example.com", "", "MCP", nil, nil)
+		identityCSR, serverCSR, "", "https://example.com", "", "MCP", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() with server CSR error = %v", err)
 	}
@@ -1091,7 +1091,7 @@ func TestRunRegisterWithParams_WithServerCert(t *testing.T) {
 	os.WriteFile(serverCert, []byte("CERT"), 0600)
 
 	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", serverCert, "https://example.com", "", "MCP", nil, nil)
+		identityCSR, "", serverCert, "https://example.com", "", "MCP", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() with server cert error = %v", err)
 	}

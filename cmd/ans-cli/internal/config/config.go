@@ -12,6 +12,7 @@ type Config struct {
 	BaseURL    string
 	APIKey     string //nolint:gosec // G117 - config struct field definition, not logged
 	OAuthToken string //nolint:gosec // G117 - config struct field definition, not logged
+	APIVersion string
 	Verbose    bool
 	JSON       bool
 }
@@ -24,6 +25,12 @@ func Load() (*Config, error) {
 		// Trimmed at the boundary so a padded or whitespace-only token from
 		// env plumbing is treated as unset and never wins precedence.
 		OAuthToken: strings.TrimSpace(viper.GetString("oauth-token")),
+		// Normalized here so "V2" from env plumbing selects the lane;
+		// value validation happens in cmd.createClient where the SDK
+		// option can reject with proper guidance. Empty means the flag
+		// default ("v1") — viper returns "" only in tests that bypass
+		// flag binding.
+		APIVersion: strings.ToLower(strings.TrimSpace(viper.GetString("api-version"))),
 		Verbose:    viper.GetBool("verbose"),
 		JSON:       viper.GetBool("json"),
 	}

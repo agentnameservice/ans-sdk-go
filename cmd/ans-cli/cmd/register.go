@@ -14,18 +14,19 @@ import (
 
 func buildRegisterCmd() *cobra.Command {
 	var (
-		regName          string
-		regHost          string
-		regVersion       string
-		regDescription   string
-		regIdentityCSR   string
-		regServerCSR     string
-		regServerCert    string
-		regEndpointURL   string
-		regMetaDataURL   string
-		regEndpointProto string
-		regEndpointTrans []string
-		regFunctions     []string
+		regName              string
+		regHost              string
+		regVersion           string
+		regDescription       string
+		regIdentityCSR       string
+		regServerCSR         string
+		regServerCert        string
+		regEndpointURL       string
+		regMetaDataURL       string
+		regEndpointProto     string
+		regEndpointTrans     []string
+		regFunctions         []string
+		regDiscoveryProfiles []string
 	)
 
 	cmd := &cobra.Command{
@@ -36,7 +37,8 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runRegisterWithParams(regName, regHost, regVersion, regDescription,
 				regIdentityCSR, regServerCSR, regServerCert,
-				regEndpointURL, regMetaDataURL, regEndpointProto, regEndpointTrans, regFunctions)
+				regEndpointURL, regMetaDataURL, regEndpointProto, regEndpointTrans, regFunctions,
+				regDiscoveryProfiles)
 		},
 	}
 
@@ -52,6 +54,8 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	cmd.Flags().StringVar(&regEndpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
 	cmd.Flags().StringSliceVar(&regEndpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
 	cmd.Flags().StringArrayVar(&regFunctions, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
+	cmd.Flags().StringSliceVar(&regDiscoveryProfiles, "discovery-profiles", nil,
+		"DNS record families the RA asks the operator to publish: ANS_DNSAID, ANS_TXT, or both (requires --api-version v2; omitted = server default ANS_DNSAID)")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("host")
@@ -62,7 +66,7 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	return cmd
 }
 
-func runRegisterWithParams(name, host, version, description, identityCSR, serverCSR, serverCert, endpointURL, metaDataURL, endpointProto string, endpointTrans, functionFlags []string) error {
+func runRegisterWithParams(name, host, version, description, identityCSR, serverCSR, serverCert, endpointURL, metaDataURL, endpointProto string, endpointTrans, functionFlags, discoveryProfiles []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -103,6 +107,20 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 		return fmt.Errorf("invalid function specification: %w", err)
 	}
 
+	// Validate discovery profiles client-side so a typo fails fast with
+	// the valid set instead of round-tripping to a server 422. The
+	// values only take effect on the V2 lane (--api-version v2); the V1
+	// lane ignores them server-side and always emits ANS_TXT.
+	profiles := make([]models.DiscoveryProfile, 0, len(discoveryProfiles))
+	for _, p := range discoveryProfiles {
+		profile := models.DiscoveryProfile(strings.ToUpper(strings.TrimSpace(p)))
+		if !models.IsValidDiscoveryProfile(profile) {
+			return fmt.Errorf("invalid discovery profile %q (valid: %s, %s)",
+				p, models.DiscoveryProfileANSDNSAID, models.DiscoveryProfileANSTXT)
+		}
+		profiles = append(profiles, profile)
+	}
+
 	// Build registration request
 	req := &models.AgentRegistrationRequest{
 		AgentDisplayName: name,
@@ -125,6 +143,9 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 		req.ServerCertificatePEM = string(serverCertData)
 	} else if len(serverCSRData) > 0 {
 		req.ServerCSRPEM = string(serverCSRData)
+	}
+	if len(profiles) > 0 {
+		req.DiscoveryProfiles = profiles
 	}
 
 	// Register the agent

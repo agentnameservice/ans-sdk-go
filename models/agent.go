@@ -67,6 +67,35 @@ type AgentFunction struct {
 	Tags []string `json:"tags,omitempty"`
 }
 
+// DiscoveryProfile names one DNS record family the Registration
+// Authority tells the operator to publish for an agent registration.
+// Values are the V2 register schema's CONSTANT_CASE enum.
+type DiscoveryProfile string
+
+const (
+	// DiscoveryProfileANSDNSAID is the DNS-AID-aligned Consolidated
+	// Approach (RFC 9460): one SVCB row per protocol endpoint at the
+	// bare FQDN plus the `_ans-badge` TXT and TLSA trust records. The
+	// server default when discoveryProfiles is omitted.
+	DiscoveryProfileANSDNSAID DiscoveryProfile = "ANS_DNSAID"
+	// DiscoveryProfileANSTXT is the original `_ans` TXT shape (one row
+	// per protocol at `_ans.{fqdn}`) plus an HTTPS RR at the bare FQDN
+	// and the same trust records. Opt-in for operators with zone-edit
+	// tooling that targets `_ans.{fqdn}`.
+	DiscoveryProfileANSTXT DiscoveryProfile = "ANS_TXT"
+)
+
+// IsValidDiscoveryProfile reports whether p is a recognised discovery
+// profile value.
+func IsValidDiscoveryProfile(p DiscoveryProfile) bool {
+	switch p {
+	case DiscoveryProfileANSDNSAID, DiscoveryProfileANSTXT:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentRegistrationRequest represents a registration request
 type AgentRegistrationRequest struct {
 	AgentDisplayName          string          `json:"agentDisplayName"`
@@ -78,6 +107,12 @@ type AgentRegistrationRequest struct {
 	ServerCSRPEM              string          `json:"serverCsrPEM,omitempty"`
 	Version                   string          `json:"version"`
 	Endpoints                 []AgentEndpoint `json:"endpoints"`
+	// DiscoveryProfiles is the set of DNS record families the RA tells
+	// the operator to publish (V2 API only; the V1 lane ignores the
+	// field server-side and always emits the ANS_TXT family). Omitted
+	// or empty falls back to the server default (ANS_DNSAID). Send
+	// both values to publish the union during a transition.
+	DiscoveryProfiles []DiscoveryProfile `json:"discoveryProfiles,omitempty"`
 }
 
 // RegistrationPending represents a pending registration response

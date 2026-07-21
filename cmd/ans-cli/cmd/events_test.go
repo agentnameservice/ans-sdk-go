@@ -666,7 +666,7 @@ func TestRunRegisterWithParams(t *testing.T) {
 
 			err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
 				identityCSR, "", "", "https://example.com", "", "MCP",
-				tt.transports, tt.functions)
+				tt.transports, tt.functions, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runRegisterWithParams() error = %v, wantErr %v", err, tt.wantErr)
 			}
