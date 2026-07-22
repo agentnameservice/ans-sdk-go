@@ -67,6 +67,38 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	return cmd
 }
 
+// parseDiscoveryProfiles validates the raw --discovery-profiles values
+// client-side so a typo fails fast with the valid set instead of
+// round-tripping to a server 422, then enforces the lane requirement:
+// discovery profiles only take effect on the V2 lane — the V1 lane
+// ignores the field server-side and always emits ANS_TXT — so the CLI
+// rejects the combination instead of letting a V1 registration
+// silently drop the operator's explicit choice. Values are validated
+// before the lane check so a typo reports the valid set rather than
+// the lane error. Empty apiVersion means the flag default (v1) —
+// config tests bypass flag binding.
+func parseDiscoveryProfiles(raw []string, apiVersion string) ([]models.DiscoveryProfile, error) {
+	profiles := make([]models.DiscoveryProfile, 0, len(raw))
+	for _, p := range raw {
+		profile := models.DiscoveryProfile(strings.ToUpper(strings.TrimSpace(p)))
+		if !models.IsValidDiscoveryProfile(profile) {
+			return nil, fmt.Errorf("invalid discovery profile %q (valid: %s, %s)",
+				p, models.DiscoveryProfileANSDNSAID, models.DiscoveryProfileANSTXT)
+		}
+		profiles = append(profiles, profile)
+	}
+	if len(profiles) == 0 {
+		return profiles, nil
+	}
+	if apiVersion == "" {
+		apiVersion = string(ans.APIVersionV1)
+	}
+	if apiVersion != string(ans.APIVersionV2) {
+		return nil, fmt.Errorf("--discovery-profiles requires --api-version v2 (current: %q)", apiVersion)
+	}
+	return profiles, nil
+}
+
 func runRegisterWithParams(name, host, version, description, identityCSR, serverCSR, serverCert, endpointURL, metaDataURL, endpointProto string, endpointTrans, functionFlags, discoveryProfiles []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -108,30 +140,9 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 		return fmt.Errorf("invalid function specification: %w", err)
 	}
 
-	// Validate discovery profiles client-side so a typo fails fast with
-	// the valid set instead of round-tripping to a server 422.
-	profiles := make([]models.DiscoveryProfile, 0, len(discoveryProfiles))
-	for _, p := range discoveryProfiles {
-		profile := models.DiscoveryProfile(strings.ToUpper(strings.TrimSpace(p)))
-		if !models.IsValidDiscoveryProfile(profile) {
-			return fmt.Errorf("invalid discovery profile %q (valid: %s, %s)",
-				p, models.DiscoveryProfileANSDNSAID, models.DiscoveryProfileANSTXT)
-		}
-		profiles = append(profiles, profile)
-	}
-	// Discovery profiles only take effect on the V2 lane; the V1 lane
-	// ignores the field server-side and always emits ANS_TXT. Reject
-	// the combination instead of letting a V1 registration silently
-	// drop the operator's explicit choice. Empty cfg.APIVersion means
-	// the flag default (v1) — config tests bypass flag binding.
-	if len(profiles) > 0 {
-		apiVersion := cfg.APIVersion
-		if apiVersion == "" {
-			apiVersion = string(ans.APIVersionV1)
-		}
-		if apiVersion != string(ans.APIVersionV2) {
-			return fmt.Errorf("--discovery-profiles requires --api-version v2 (current: %q)", apiVersion)
-		}
+	profiles, err := parseDiscoveryProfiles(discoveryProfiles, cfg.APIVersion)
+	if err != nil {
+		return err
 	}
 
 	// Build registration request
