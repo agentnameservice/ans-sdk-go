@@ -108,10 +108,12 @@ type AgentRegistrationRequest struct {
 	Version                   string          `json:"version"`
 	Endpoints                 []AgentEndpoint `json:"endpoints"`
 	// DiscoveryProfiles is the set of DNS record families the RA tells
-	// the operator to publish (V2 API only; the V1 lane ignores the
-	// field server-side and always emits the ANS_TXT family). Omitted
-	// or empty falls back to the server default (ANS_DNSAID). Send
-	// both values to publish the union during a transition.
+	// the operator to publish. V2 API only: the V1 lane ignores the
+	// field server-side and always emits the ANS_TXT family, so
+	// Client.RegisterAgent rejects a non-empty value on a V1-lane
+	// client with ErrBadRequest rather than silently dropping it.
+	// Omitted or empty falls back to the server default (ANS_DNSAID).
+	// Send both values to publish the union during a transition.
 	DiscoveryProfiles []DiscoveryProfile `json:"discoveryProfiles,omitempty"`
 }
 

@@ -3,6 +3,7 @@ package ans
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -36,10 +37,11 @@ func TestWithAPIVersion_Validation(t *testing.T) {
 }
 
 // TestAPIVersion_PathRouting pins the exact path every lane-routed
-// method targets on each API version, plus the V1-pinned methods whose
-// paths must NOT move when the client is built for the V2 lane. The two
-// lanes serve identical request/response shapes for the mapped routes,
-// so the path is the entire behavioral difference under test.
+// method targets on each API version — both lanes, so the V1 paths the
+// agentPath refactor rewrote stay pinned for existing users — plus the
+// V1-pinned methods whose paths must NOT move when the client is built
+// for the V2 lane. The client decodes the shared subset of both lanes'
+// response shapes, so the path is the behavioral difference under test.
 func TestAPIVersion_PathRouting(t *testing.T) {
 	const agentID = "11111111-2222-3333-4444-555555555555"
 
@@ -89,6 +91,48 @@ func TestAPIVersion_PathRouting(t *testing.T) {
 			wantMethod: http.MethodPost, wantPath: "/v1/agents/" + agentID + "/revoke",
 			call: func(ctx context.Context, c *Client) error {
 				_, err := c.RevokeAgent(ctx, agentID, models.RevocationReasonCessationOfOperation, "")
+				return err
+			},
+		},
+		{
+			name: "identity certs v1", version: APIVersionV1,
+			wantMethod: http.MethodGet, wantPath: "/v1/agents/" + agentID + "/certificates/identity",
+			body: "[]",
+			call: func(ctx context.Context, c *Client) error {
+				_, err := c.GetIdentityCertificates(ctx, agentID)
+				return err
+			},
+		},
+		{
+			name: "server certs v1", version: APIVersionV1,
+			wantMethod: http.MethodGet, wantPath: "/v1/agents/" + agentID + "/certificates/server",
+			body: "[]",
+			call: func(ctx context.Context, c *Client) error {
+				_, err := c.GetServerCertificates(ctx, agentID)
+				return err
+			},
+		},
+		{
+			name: "submit identity csr v1", version: APIVersionV1,
+			wantMethod: http.MethodPost, wantPath: "/v1/agents/" + agentID + "/certificates/identity",
+			call: func(ctx context.Context, c *Client) error {
+				_, err := c.SubmitIdentityCSR(ctx, agentID, "csr-pem")
+				return err
+			},
+		},
+		{
+			name: "submit server csr v1", version: APIVersionV1,
+			wantMethod: http.MethodPost, wantPath: "/v1/agents/" + agentID + "/certificates/server",
+			call: func(ctx context.Context, c *Client) error {
+				_, err := c.SubmitServerCSR(ctx, agentID, "csr-pem")
+				return err
+			},
+		},
+		{
+			name: "csr status v1", version: APIVersionV1,
+			wantMethod: http.MethodGet, wantPath: "/v1/agents/" + agentID + "/csrs/csr-1/status",
+			call: func(ctx context.Context, c *Client) error {
+				_, err := c.GetCSRStatus(ctx, agentID, "csr-1")
 				return err
 			},
 		},
@@ -315,5 +359,31 @@ func TestRegisterAgent_DiscoveryProfilesSerialization(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRegisterAgent_DiscoveryProfilesRejectedOnV1 pins the SDK-level
+// lane guard: DiscoveryProfiles on a V1-lane client is a client-side
+// models.ErrBadRequest before any request is sent — the V1 lane would
+// ignore the field server-side and silently drop an explicit choice.
+func TestRegisterAgent_DiscoveryProfilesRejectedOnV1(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("no HTTP request should be sent when the lane guard rejects")
+	}))
+	defer server.Close()
+
+	client, err := NewClient(WithBaseURL(server.URL), WithJWT("test-token")) // default V1 lane
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	req := &models.AgentRegistrationRequest{
+		AgentDisplayName:  "test",
+		AgentHost:         "agent.example.com",
+		Version:           "1.0.0",
+		DiscoveryProfiles: []models.DiscoveryProfile{models.DiscoveryProfileANSDNSAID},
+	}
+	_, err = client.RegisterAgent(context.Background(), req)
+	if !errors.Is(err, models.ErrBadRequest) {
+		t.Fatalf("expected models.ErrBadRequest, got %v", err)
 	}
 }

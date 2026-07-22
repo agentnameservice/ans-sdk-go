@@ -51,8 +51,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any, r
 
 // agentsCollectionPath returns the lane-specific agents collection path:
 // "/v1/agents" on the default V1 lane, "/v2/ans/agents" when the client
-// was built WithAPIVersion(APIVersionV2). Both lanes serve the same
-// request/response shapes on every route the client maps.
+// was built WithAPIVersion(APIVersionV2). The client decodes the shared
+// subset of both lanes' response shapes; V2-only response fields (e.g.
+// the detail response's identities[]) are ignored until modeled here.
 func (c *Client) agentsCollectionPath() string {
 	if c.config.apiVersion == APIVersionV2 {
 		return "/v2/ans/agents"
@@ -80,11 +81,18 @@ func (c *Client) agentPath(agentID string, segments ...string) string {
 
 // RegisterAgent registers a new agent. On the V2 lane the request's
 // DiscoveryProfiles field selects which DNS record families the RA asks
-// the operator to publish (omitted → the server default, ANS_DNSAID);
-// the V1 lane ignores the field and always emits the ANS_TXT family.
+// the operator to publish (omitted → the server default, ANS_DNSAID).
+// Setting DiscoveryProfiles on the V1 lane is rejected with
+// models.ErrBadRequest: the V1 lane ignores the field server-side and
+// always emits the ANS_TXT family, so forwarding it would silently
+// drop an explicit choice — the registration would succeed with TXT
+// records and no signal anywhere.
 func (c *Client) RegisterAgent(ctx context.Context, req *models.AgentRegistrationRequest) (*models.RegistrationPending, error) {
 	if req == nil {
 		return nil, fmt.Errorf("%w: request cannot be nil", models.ErrBadRequest)
+	}
+	if len(req.DiscoveryProfiles) > 0 && c.config.apiVersion != APIVersionV2 {
+		return nil, fmt.Errorf("%w: DiscoveryProfiles requires WithAPIVersion(APIVersionV2); the V1 lane ignores the field", models.ErrBadRequest)
 	}
 	var result models.RegistrationPending
 	err := c.doRequest(ctx, http.MethodPost, c.registerPath(), req, &result)

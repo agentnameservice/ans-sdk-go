@@ -13,22 +13,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// registerParams carries the register command's flag values. A struct
+// (matching searchParams/eventsParams) rather than positional
+// parameters: the three []string flags are compile-time
+// interchangeable, so positional passing let a transposed pair build a
+// wrong request body with no compiler complaint — and every new flag
+// rewrote every call site.
+type registerParams struct {
+	name, host, version, description        string
+	identityCSR, serverCSR, serverCert      string
+	endpointURL, metaDataURL, endpointProto string
+	endpointTrans                           []string
+	functionFlags                           []string
+	discoveryProfiles                       []string
+}
+
 func buildRegisterCmd() *cobra.Command {
-	var (
-		regName              string
-		regHost              string
-		regVersion           string
-		regDescription       string
-		regIdentityCSR       string
-		regServerCSR         string
-		regServerCert        string
-		regEndpointURL       string
-		regMetaDataURL       string
-		regEndpointProto     string
-		regEndpointTrans     []string
-		regFunctions         []string
-		regDiscoveryProfiles []string
-	)
+	var p registerParams
 
 	cmd := &cobra.Command{
 		Use:   "register",
@@ -36,26 +37,23 @@ func buildRegisterCmd() *cobra.Command {
 		Long: `Register a new agent with the Agent Name Service by providing agent details,
 CSRs for identity and server certificates, and endpoint configuration.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runRegisterWithParams(regName, regHost, regVersion, regDescription,
-				regIdentityCSR, regServerCSR, regServerCert,
-				regEndpointURL, regMetaDataURL, regEndpointProto, regEndpointTrans, regFunctions,
-				regDiscoveryProfiles)
+			return runRegisterWithParams(&p)
 		},
 	}
 
-	cmd.Flags().StringVar(&regName, "name", "", "Agent display name (required)")
-	cmd.Flags().StringVar(&regHost, "host", "", "Agent host domain (required)")
-	cmd.Flags().StringVar(&regVersion, "version", "", "Agent version in semver format (required)")
-	cmd.Flags().StringVar(&regDescription, "description", "", "Agent description")
-	cmd.Flags().StringVar(&regIdentityCSR, "identity-csr", "", "Path to identity CSR PEM file (required)")
-	cmd.Flags().StringVar(&regServerCSR, "server-csr", "", "Path to server CSR PEM file")
-	cmd.Flags().StringVar(&regServerCert, "server-cert", "", "Path to server certificate PEM file (BYOC)")
-	cmd.Flags().StringVar(&regEndpointURL, "endpoint-url", "", "Agent endpoint URL (required)")
-	cmd.Flags().StringVar(&regMetaDataURL, "metadata-url", "", "Agent metadata URL (e.g., /.well-known/agent-card.json)")
-	cmd.Flags().StringVar(&regEndpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
-	cmd.Flags().StringSliceVar(&regEndpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
-	cmd.Flags().StringArrayVar(&regFunctions, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
-	cmd.Flags().StringSliceVar(&regDiscoveryProfiles, "discovery-profiles", nil,
+	cmd.Flags().StringVar(&p.name, "name", "", "Agent display name (required)")
+	cmd.Flags().StringVar(&p.host, "host", "", "Agent host domain (required)")
+	cmd.Flags().StringVar(&p.version, "version", "", "Agent version in semver format (required)")
+	cmd.Flags().StringVar(&p.description, "description", "", "Agent description")
+	cmd.Flags().StringVar(&p.identityCSR, "identity-csr", "", "Path to identity CSR PEM file (required)")
+	cmd.Flags().StringVar(&p.serverCSR, "server-csr", "", "Path to server CSR PEM file")
+	cmd.Flags().StringVar(&p.serverCert, "server-cert", "", "Path to server certificate PEM file (BYOC)")
+	cmd.Flags().StringVar(&p.endpointURL, "endpoint-url", "", "Agent endpoint URL (required)")
+	cmd.Flags().StringVar(&p.metaDataURL, "metadata-url", "", "Agent metadata URL (e.g., /.well-known/agent-card.json)")
+	cmd.Flags().StringVar(&p.endpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
+	cmd.Flags().StringSliceVar(&p.endpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
+	cmd.Flags().StringArrayVar(&p.functionFlags, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
+	cmd.Flags().StringSliceVar(&p.discoveryProfiles, "discovery-profiles", nil,
 		"DNS record families the RA asks the operator to publish: ANS_DNSAID, ANS_TXT, or both (requires --api-version v2; omitted = server default ANS_DNSAID)")
 
 	_ = cmd.MarkFlagRequired("name")
@@ -75,8 +73,7 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 // rejects the combination instead of letting a V1 registration
 // silently drop the operator's explicit choice. Values are validated
 // before the lane check so a typo reports the valid set rather than
-// the lane error. Empty apiVersion means the flag default (v1) —
-// config tests bypass flag binding.
+// the lane error. apiVersion is never empty: config.Load defaults it.
 func parseDiscoveryProfiles(raw []string, apiVersion string) ([]models.DiscoveryProfile, error) {
 	profiles := make([]models.DiscoveryProfile, 0, len(raw))
 	for _, p := range raw {
@@ -87,19 +84,13 @@ func parseDiscoveryProfiles(raw []string, apiVersion string) ([]models.Discovery
 		}
 		profiles = append(profiles, profile)
 	}
-	if len(profiles) == 0 {
-		return profiles, nil
-	}
-	if apiVersion == "" {
-		apiVersion = string(ans.APIVersionV1)
-	}
-	if apiVersion != string(ans.APIVersionV2) {
+	if len(profiles) > 0 && apiVersion != string(ans.APIVersionV2) {
 		return nil, fmt.Errorf("--discovery-profiles requires --api-version v2 (current: %q)", apiVersion)
 	}
 	return profiles, nil
 }
 
-func runRegisterWithParams(name, host, version, description, identityCSR, serverCSR, serverCert, endpointURL, metaDataURL, endpointProto string, endpointTrans, functionFlags, discoveryProfiles []string) error {
+func runRegisterWithParams(p *registerParams) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -115,49 +106,49 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 	}
 
 	// Read identity CSR
-	identityCSRData, err := os.ReadFile(identityCSR)
+	identityCSRData, err := os.ReadFile(p.identityCSR)
 	if err != nil {
 		return fmt.Errorf("failed to read identity CSR file: %w", err)
 	}
 
 	// Read server CSR or certificate
 	var serverCSRData, serverCertData []byte
-	if serverCert != "" {
-		serverCertData, err = os.ReadFile(serverCert)
+	if p.serverCert != "" {
+		serverCertData, err = os.ReadFile(p.serverCert)
 		if err != nil {
 			return fmt.Errorf("failed to read server certificate file: %w", err)
 		}
-	} else if serverCSR != "" {
-		serverCSRData, err = os.ReadFile(serverCSR)
+	} else if p.serverCSR != "" {
+		serverCSRData, err = os.ReadFile(p.serverCSR)
 		if err != nil {
 			return fmt.Errorf("failed to read server CSR file: %w", err)
 		}
 	}
 
 	// Parse and validate functions
-	functions, err := ParseFunctionFlags(functionFlags)
+	functions, err := ParseFunctionFlags(p.functionFlags)
 	if err != nil {
 		return fmt.Errorf("invalid function specification: %w", err)
 	}
 
-	profiles, err := parseDiscoveryProfiles(discoveryProfiles, cfg.APIVersion)
+	profiles, err := parseDiscoveryProfiles(p.discoveryProfiles, cfg.APIVersion)
 	if err != nil {
 		return err
 	}
 
 	// Build registration request
 	req := &models.AgentRegistrationRequest{
-		AgentDisplayName: name,
-		AgentHost:        host,
-		AgentDescription: description,
-		Version:          version,
+		AgentDisplayName: p.name,
+		AgentHost:        p.host,
+		AgentDescription: p.description,
+		Version:          p.version,
 		IdentityCSRPEM:   string(identityCSRData),
 		Endpoints: []models.AgentEndpoint{
 			{
-				AgentURL:    endpointURL,
-				MetaDataURL: metaDataURL,
-				Protocol:    endpointProto,
-				Transports:  endpointTrans,
+				AgentURL:    p.endpointURL,
+				MetaDataURL: p.metaDataURL,
+				Protocol:    p.endpointProto,
+				Transports:  p.endpointTrans,
 				Functions:   functions,
 			},
 		},

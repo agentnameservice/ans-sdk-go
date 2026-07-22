@@ -293,9 +293,10 @@ func TestCreateClient_Additional(t *testing.T) {
 		{
 			name: "valid config creates client",
 			cfg: &config.Config{
-				APIKey:  "key:secret",
-				BaseURL: "https://api.test.example.com",
-				Verbose: true,
+				APIVersion: "v1",
+				APIKey:     "key:secret",
+				BaseURL:    "https://api.test.example.com",
+				Verbose:    true,
 			},
 			wantErr: false,
 		},
