@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
@@ -108,9 +109,7 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 	}
 
 	// Validate discovery profiles client-side so a typo fails fast with
-	// the valid set instead of round-tripping to a server 422. The
-	// values only take effect on the V2 lane (--api-version v2); the V1
-	// lane ignores them server-side and always emits ANS_TXT.
+	// the valid set instead of round-tripping to a server 422.
 	profiles := make([]models.DiscoveryProfile, 0, len(discoveryProfiles))
 	for _, p := range discoveryProfiles {
 		profile := models.DiscoveryProfile(strings.ToUpper(strings.TrimSpace(p)))
@@ -119,6 +118,20 @@ func runRegisterWithParams(name, host, version, description, identityCSR, server
 				p, models.DiscoveryProfileANSDNSAID, models.DiscoveryProfileANSTXT)
 		}
 		profiles = append(profiles, profile)
+	}
+	// Discovery profiles only take effect on the V2 lane; the V1 lane
+	// ignores the field server-side and always emits ANS_TXT. Reject
+	// the combination instead of letting a V1 registration silently
+	// drop the operator's explicit choice. Empty cfg.APIVersion means
+	// the flag default (v1) — config tests bypass flag binding.
+	if len(profiles) > 0 {
+		apiVersion := cfg.APIVersion
+		if apiVersion == "" {
+			apiVersion = string(ans.APIVersionV1)
+		}
+		if apiVersion != string(ans.APIVersionV2) {
+			return fmt.Errorf("--discovery-profiles requires --api-version v2 (current: %q)", apiVersion)
+		}
 	}
 
 	// Build registration request

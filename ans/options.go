@@ -39,8 +39,10 @@ const (
 	APIVersionV2 APIVersion = "v2"
 )
 
-// IsValidAPIVersion reports whether v is a recognised API version.
-func IsValidAPIVersion(v APIVersion) bool {
+// isValidAPIVersion reports whether v is a recognised API version.
+// Unexported: WithAPIVersion validates at construction, so callers
+// never need to pre-check a version themselves.
+func isValidAPIVersion(v APIVersion) bool {
 	return v == APIVersionV1 || v == APIVersionV2
 }
 
@@ -188,7 +190,7 @@ func WithTokenSource(ts TokenSource) Option {
 // models.ErrBadRequest.
 func WithAPIVersion(v APIVersion) Option {
 	return func(c *clientConfig) error {
-		if !IsValidAPIVersion(v) {
+		if !isValidAPIVersion(v) {
 			return fmt.Errorf("%w: invalid API version %q (want %q or %q)",
 				models.ErrBadRequest, v, APIVersionV1, APIVersionV2)
 		}

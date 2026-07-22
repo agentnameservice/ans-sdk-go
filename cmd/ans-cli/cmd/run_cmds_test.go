@@ -1299,3 +1299,84 @@ func TestInitConfig_OAuthTokenEnv(t *testing.T) {
 		t.Errorf("viper oauth-token = %q, want %q (ANS_OAUTH_TOKEN env binding)", got, "env-tok")
 	}
 }
+
+// TestRunRegisterWithParams_InvalidDiscoveryProfile verifies the CLI
+// wiring actually invokes the profile validation and surfaces the
+// error: models.IsValidDiscoveryProfile is unit-tested in the models
+// package, but this is the layer a user's typo actually hits.
+func TestRunRegisterWithParams_InvalidDiscoveryProfile(t *testing.T) {
+	setupViperForTest(t, "http://localhost")
+	viper.Set("api-version", "v2")
+
+	tmpDir := t.TempDir()
+	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+
+	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
+		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil, []string{"ANS_BOGUS"})
+	if err == nil || !strings.Contains(err.Error(), "invalid discovery profile") {
+		t.Fatalf("expected invalid-discovery-profile error, got %v", err)
+	}
+}
+
+// TestRunRegisterWithParams_DiscoveryProfilesRequireV2 pins the lane
+// guard: profiles on the default V1 lane would be silently ignored
+// server-side, so the CLI must reject the combination up front.
+func TestRunRegisterWithParams_DiscoveryProfilesRequireV2(t *testing.T) {
+	setupViperForTest(t, "http://localhost") // api-version unset → flag default v1
+
+	tmpDir := t.TempDir()
+	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+
+	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
+		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil, []string{"ANS_DNSAID"})
+	if err == nil || !strings.Contains(err.Error(), "requires --api-version v2") {
+		t.Fatalf("expected v2-lane guard error, got %v", err)
+	}
+}
+
+// TestRunRegisterWithParams_DiscoveryProfilesV2Success drives the
+// happy path end-to-end at the CLI layer: --api-version v2 routes the
+// request to the V2 collection and the validated profiles reach the
+// wire verbatim.
+func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
+	result := &models.RegistrationPending{
+		Status:  "PENDING",
+		ANSName: "ans://v1.0.0.test.example.com",
+	}
+
+	var gotPath string
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	setupViperForTest(t, server.URL)
+	viper.Set("api-version", "v2")
+
+	tmpDir := t.TempDir()
+	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+
+	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
+		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil, []string{"ans_dnsaid"})
+	if err != nil {
+		t.Fatalf("runRegisterWithParams() error = %v", err)
+	}
+	if gotPath != "/v2/ans/agents" {
+		t.Errorf("path: got %q, want /v2/ans/agents", gotPath)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	profiles, ok := body["discoveryProfiles"].([]any)
+	if !ok || len(profiles) != 1 || profiles[0] != "ANS_DNSAID" {
+		t.Errorf("discoveryProfiles: got %v, want [ANS_DNSAID] (input normalized to upper case)", body["discoveryProfiles"])
+	}
+}
