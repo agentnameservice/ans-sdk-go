@@ -17,16 +17,18 @@ func TestCreateClient(t *testing.T) {
 		{
 			name: "valid API key",
 			cfg: &config.Config{
-				BaseURL: "https://api.example.com",
-				APIKey:  "mykey:mysecret",
+				APIVersion: "v1",
+				BaseURL:    "https://api.example.com",
+				APIKey:     "mykey:mysecret",
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid API key format - no colon",
 			cfg: &config.Config{
-				BaseURL: "https://api.example.com",
-				APIKey:  "invalidkey",
+				APIVersion: "v1",
+				BaseURL:    "https://api.example.com",
+				APIKey:     "invalidkey",
 			},
 			wantErr:   true,
 			errSubstr: "invalid API key format",
@@ -34,8 +36,9 @@ func TestCreateClient(t *testing.T) {
 		{
 			name: "no credentials at all",
 			cfg: &config.Config{
-				BaseURL: "https://api.example.com",
-				APIKey:  "",
+				APIVersion: "v1",
+				BaseURL:    "https://api.example.com",
+				APIKey:     "",
 			},
 			wantErr:   true,
 			errSubstr: "OAuth token or API key is required",
@@ -43,15 +46,17 @@ func TestCreateClient(t *testing.T) {
 		{
 			name: "valid API key with verbose",
 			cfg: &config.Config{
-				BaseURL: "https://api.example.com",
-				APIKey:  "key:secret",
-				Verbose: true,
+				APIVersion: "v1",
+				BaseURL:    "https://api.example.com",
+				APIKey:     "key:secret",
+				Verbose:    true,
 			},
 			wantErr: false,
 		},
 		{
 			name: "OAuth token only",
 			cfg: &config.Config{
+				APIVersion: "v1",
 				BaseURL:    "https://api.example.com",
 				OAuthToken: "tok",
 			},
@@ -60,6 +65,7 @@ func TestCreateClient(t *testing.T) {
 		{
 			name: "OAuth token wins over malformed API key",
 			cfg: &config.Config{
+				APIVersion: "v1",
 				BaseURL:    "https://api.example.com",
 				APIKey:     "no-colon-here",
 				OAuthToken: "tok",
@@ -69,6 +75,7 @@ func TestCreateClient(t *testing.T) {
 		{
 			name: "OAuth token with verbose",
 			cfg: &config.Config{
+				APIVersion: "v1",
 				BaseURL:    "https://api.example.com",
 				OAuthToken: "tok",
 				Verbose:    true,

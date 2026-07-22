@@ -33,9 +33,13 @@ func createClient(cfg *config.Config) (*ans.Client, error) {
 		fmt.Fprintf(os.Stderr, "Using %s authentication\n", method)
 	}
 
+	// cfg.APIVersion is never empty (config.Load defaults it to "v1"),
+	// so the SDK option validates every value — an unknown version
+	// fails fast with guidance instead of silently using the V1 lane.
 	opts := []ans.Option{
 		ans.WithBaseURL(cfg.BaseURL),
 		ans.WithVerbose(cfg.Verbose),
+		ans.WithAPIVersion(ans.APIVersion(cfg.APIVersion)),
 		authOpt,
 	}
 

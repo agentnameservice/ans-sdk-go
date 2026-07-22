@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/agentnameservice/ans-sdk-go/internal/httputility"
 	"github.com/agentnameservice/ans-sdk-go/models"
@@ -48,13 +49,53 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any, r
 	return httputility.DoRequest(ctx, httpCfg, method, path, body, result)
 }
 
-// RegisterAgent registers a new agent
+// agentsCollectionPath returns the lane-specific agents collection path:
+// "/v1/agents" on the default V1 lane, "/v2/ans/agents" when the client
+// was built WithAPIVersion(APIVersionV2). The client decodes the shared
+// subset of both lanes' response shapes; V2-only response fields (e.g.
+// the detail response's identities[]) are ignored until modeled here.
+func (c *Client) agentsCollectionPath() string {
+	if c.config.apiVersion == APIVersionV2 {
+		return "/v2/ans/agents"
+	}
+	return "/v1/agents"
+}
+
+// registerPath returns the lane-specific registration route: the V1 lane
+// registers at POST /v1/agents/register, the V2 lane at the collection
+// itself (POST /v2/ans/agents).
+func (c *Client) registerPath() string {
+	if c.config.apiVersion == APIVersionV2 {
+		return "/v2/ans/agents"
+	}
+	return "/v1/agents/register"
+}
+
+// agentPath returns the lane-specific path for one agent with optional
+// trailing segments. agentID is URL-escaped here; callers escape any
+// segment that carries user input (e.g. a csrID).
+func (c *Client) agentPath(agentID string, segments ...string) string {
+	parts := append([]string{c.agentsCollectionPath(), url.PathEscape(agentID)}, segments...)
+	return strings.Join(parts, "/")
+}
+
+// RegisterAgent registers a new agent. On the V2 lane the request's
+// DiscoveryProfiles field selects which DNS record families the RA asks
+// the operator to publish (omitted → the server default, ANS_DNSAID).
+// Setting DiscoveryProfiles on the V1 lane is rejected with
+// models.ErrBadRequest: the V1 lane ignores the field server-side and
+// always emits the ANS_TXT family, so forwarding it would silently
+// drop an explicit choice — the registration would succeed with TXT
+// records and no signal anywhere.
 func (c *Client) RegisterAgent(ctx context.Context, req *models.AgentRegistrationRequest) (*models.RegistrationPending, error) {
 	if req == nil {
 		return nil, fmt.Errorf("%w: request cannot be nil", models.ErrBadRequest)
 	}
+	if len(req.DiscoveryProfiles) > 0 && c.config.apiVersion != APIVersionV2 {
+		return nil, fmt.Errorf("%w: DiscoveryProfiles requires WithAPIVersion(APIVersionV2); the V1 lane ignores the field", models.ErrBadRequest)
+	}
 	var result models.RegistrationPending
-	err := c.doRequest(ctx, http.MethodPost, "/v1/agents/register", req, &result)
+	err := c.doRequest(ctx, http.MethodPost, c.registerPath(), req, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -67,15 +108,17 @@ func (c *Client) GetAgentDetails(ctx context.Context, agentID string) (*models.A
 		return nil, err
 	}
 	var result models.AgentDetails
-	path := fmt.Sprintf("/v1/agents/%s", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodGet, path, nil, &result)
+	err := c.doRequest(ctx, http.MethodGet, c.agentPath(agentID), nil, &result)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetChallengeDetails retrieves challenge details for an agent
+// GetChallengeDetails retrieves challenge details for an agent.
+// This route only exists on the V1 surface, so the path is not affected
+// by WithAPIVersion; on either lane the pending challenges are also
+// available via GetAgentDetails' RegistrationPending.Challenges.
 func (c *Client) GetChallengeDetails(ctx context.Context, agentID string) (*models.ChallengeDetails, error) {
 	if err := validateRequired("agentID", agentID); err != nil {
 		return nil, err
@@ -95,8 +138,7 @@ func (c *Client) VerifyACME(ctx context.Context, agentID string) (*models.AgentS
 		return nil, err
 	}
 	var result models.AgentStatus
-	path := fmt.Sprintf("/v1/agents/%s/verify-acme", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodPost, path, nil, &result)
+	err := c.doRequest(ctx, http.MethodPost, c.agentPath(agentID, "verify-acme"), nil, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +155,7 @@ func (c *Client) VerifyDNS(ctx context.Context, agentID string) (*models.AgentSt
 		return nil, err
 	}
 	var result models.AgentStatus
-	path := fmt.Sprintf("/v1/agents/%s/verify-dns", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodPost, path, nil, &result)
+	err := c.doRequest(ctx, http.MethodPost, c.agentPath(agentID, "verify-dns"), nil, &result)
 	if err != nil {
 		return nil, asDNSVerificationError(err)
 	}
@@ -147,6 +188,9 @@ func asDNSVerificationError(err error) error {
 // By default the API returns only ACTIVE agents; use WithSearchStatus to
 // include other lifecycle states (for example, AgentStatusPendingDNS to list
 // registrations still completing DNS validation).
+//
+// This search surface (its filter set and response shape) only exists on
+// the V1 lane, so the path is not affected by WithAPIVersion.
 func (c *Client) SearchAgents(ctx context.Context, opts ...SearchOption) (*models.AgentSearchResponse, error) {
 	cfg := &searchConfig{}
 	for _, opt := range opts {
@@ -197,8 +241,7 @@ func (c *Client) GetIdentityCertificates(ctx context.Context, agentID string) ([
 		return nil, err
 	}
 	var result []models.CertificateResponse
-	path := fmt.Sprintf("/v1/agents/%s/certificates/identity", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodGet, path, nil, &result)
+	err := c.doRequest(ctx, http.MethodGet, c.agentPath(agentID, "certificates", "identity"), nil, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -211,8 +254,7 @@ func (c *Client) GetServerCertificates(ctx context.Context, agentID string) ([]m
 		return nil, err
 	}
 	var result []models.CertificateResponse
-	path := fmt.Sprintf("/v1/agents/%s/certificates/server", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodGet, path, nil, &result)
+	err := c.doRequest(ctx, http.MethodGet, c.agentPath(agentID, "certificates", "server"), nil, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -229,8 +271,7 @@ func (c *Client) SubmitIdentityCSR(ctx context.Context, agentID, csrPEM string) 
 	}
 	req := &models.CsrSubmissionRequest{CsrPEM: csrPEM}
 	var result models.CsrSubmissionResponse
-	path := fmt.Sprintf("/v1/agents/%s/certificates/identity", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodPost, path, req, &result)
+	err := c.doRequest(ctx, http.MethodPost, c.agentPath(agentID, "certificates", "identity"), req, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +288,7 @@ func (c *Client) SubmitServerCSR(ctx context.Context, agentID, csrPEM string) (*
 	}
 	req := &models.CsrSubmissionRequest{CsrPEM: csrPEM}
 	var result models.CsrSubmissionResponse
-	path := fmt.Sprintf("/v1/agents/%s/certificates/server", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodPost, path, req, &result)
+	err := c.doRequest(ctx, http.MethodPost, c.agentPath(agentID, "certificates", "server"), req, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -264,15 +304,16 @@ func (c *Client) GetCSRStatus(ctx context.Context, agentID, csrID string) (*mode
 		return nil, err
 	}
 	var result models.CsrStatusResponse
-	path := fmt.Sprintf("/v1/agents/%s/csrs/%s/status", url.PathEscape(agentID), url.PathEscape(csrID))
-	err := c.doRequest(ctx, http.MethodGet, path, nil, &result)
+	err := c.doRequest(ctx, http.MethodGet, c.agentPath(agentID, "csrs", url.PathEscape(csrID), "status"), nil, &result)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetAgentEvents retrieves paginated events using safe URL encoding
+// GetAgentEvents retrieves paginated events using safe URL encoding.
+// The events feed is a lane-neutral route served at /v1/agents/events
+// regardless of WithAPIVersion.
 func (c *Client) GetAgentEvents(ctx context.Context, limit int, providerID, lastLogID string) (*models.EventPageResponse, error) {
 	params := url.Values{}
 
@@ -300,7 +341,9 @@ func (c *Client) GetAgentEvents(ctx context.Context, limit int, providerID, last
 }
 
 // ResolveAgent resolves an agent by host and version pattern
-// The version parameter supports semver patterns: "*" (any), "^1.0.0" (compatible), "~1.2.3" (patch), or exact "1.0.0"
+// The version parameter supports semver patterns: "*" (any), "^1.0.0" (compatible), "~1.2.3" (patch), or exact "1.0.0".
+// This route only exists on the V1 surface, so the path is not affected
+// by WithAPIVersion.
 func (c *Client) ResolveAgent(ctx context.Context, host, version string) (*models.AgentCapabilityResponse, error) {
 	if err := validateRequired("host", host); err != nil {
 		return nil, err
@@ -327,8 +370,7 @@ func (c *Client) RevokeAgent(ctx context.Context, agentID string, reason models.
 		Comments: comments,
 	}
 	var result models.AgentRevocationResponse
-	path := fmt.Sprintf("/v1/agents/%s/revoke", url.PathEscape(agentID))
-	err := c.doRequest(ctx, http.MethodPost, path, req, &result)
+	err := c.doRequest(ctx, http.MethodPost, c.agentPath(agentID, "revoke"), req, &result)
 	if err != nil {
 		return nil, err
 	}

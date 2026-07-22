@@ -25,6 +25,7 @@ func setupViperForTest(t *testing.T, serverURL string) {
 	viper.Set("api-key", "testkey:testsecret")
 	viper.Set("oauth-token", "")
 	viper.Set("base-url", serverURL)
+	viper.Set("api-version", "v1")
 	viper.Set("verbose", false)
 	viper.Set("json", false)
 	t.Cleanup(func() {
@@ -933,8 +934,15 @@ func TestRunRegisterWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		"/nonexistent/id.csr", "", "", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   "/nonexistent/id.csr",
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for missing API key")
 	}
@@ -943,8 +951,15 @@ func TestRunRegisterWithParams_NoAPIKey(t *testing.T) {
 func TestRunRegisterWithParams_BadIdentityCSR(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		"/nonexistent/id.csr", "", "", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   "/nonexistent/id.csr",
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for bad identity CSR file")
 	}
@@ -957,8 +972,16 @@ func TestRunRegisterWithParams_BadServerCSR(t *testing.T) {
 	identityCSR := filepath.Join(tmpDir, "identity.csr")
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "/nonexistent/server.csr", "", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		serverCSR:     "/nonexistent/server.csr",
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for bad server CSR file")
 	}
@@ -971,8 +994,16 @@ func TestRunRegisterWithParams_BadServerCert(t *testing.T) {
 	identityCSR := filepath.Join(tmpDir, "identity.csr")
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "/nonexistent/server.cert", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		serverCert:    "/nonexistent/server.cert",
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for bad server cert file")
 	}
@@ -985,8 +1016,16 @@ func TestRunRegisterWithParams_InvalidFunctions(t *testing.T) {
 	identityCSR := filepath.Join(tmpDir, "identity.csr")
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "", "https://example.com", "", "MCP", nil, []string{"invalid"})
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+		functionFlags: []string{"invalid"},
+	})
 	if err == nil {
 		t.Fatal("runRegisterWithParams() expected error for invalid function flags")
 	}
@@ -1010,8 +1049,15 @@ func TestRunRegisterWithParams_Success(t *testing.T) {
 	identityCSR := filepath.Join(tmpDir, "identity.csr")
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() error = %v", err)
 	}
@@ -1036,8 +1082,15 @@ func TestRunRegisterWithParams_JSONMode(t *testing.T) {
 	identityCSR := filepath.Join(tmpDir, "identity.csr")
 	os.WriteFile(identityCSR, []byte("CSR"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", "", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() JSON mode error = %v", err)
 	}
@@ -1063,8 +1116,16 @@ func TestRunRegisterWithParams_WithServerCSR(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("ID-CSR"), 0600)
 	os.WriteFile(serverCSR, []byte("SRV-CSR"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, serverCSR, "", "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		serverCSR:     serverCSR,
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() with server CSR error = %v", err)
 	}
@@ -1090,8 +1151,16 @@ func TestRunRegisterWithParams_WithServerCert(t *testing.T) {
 	os.WriteFile(identityCSR, []byte("ID-CSR"), 0600)
 	os.WriteFile(serverCert, []byte("CERT"), 0600)
 
-	err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-		identityCSR, "", serverCert, "https://example.com", "", "MCP", nil, nil)
+	err := runRegisterWithParams(&registerParams{
+		name:          "name",
+		host:          "host",
+		version:       "v1.0.0",
+		description:   "desc",
+		identityCSR:   identityCSR,
+		serverCert:    serverCert,
+		endpointURL:   "https://example.com",
+		endpointProto: "MCP",
+	})
 	if err != nil {
 		t.Fatalf("runRegisterWithParams() with server cert error = %v", err)
 	}
@@ -1297,5 +1366,118 @@ func TestInitConfig_OAuthTokenEnv(t *testing.T) {
 
 	if got := viper.GetString("oauth-token"); got != "env-tok" {
 		t.Errorf("viper oauth-token = %q, want %q (ANS_OAUTH_TOKEN env binding)", got, "env-tok")
+	}
+}
+
+// TestRunRegisterWithParams_InvalidDiscoveryProfile verifies the CLI
+// wiring actually invokes the profile validation and surfaces the
+// error: models.IsValidDiscoveryProfile is unit-tested in the models
+// package, but this is the layer a user's typo actually hits.
+func TestRunRegisterWithParams_InvalidDiscoveryProfile(t *testing.T) {
+	setupViperForTest(t, "http://localhost")
+	viper.Set("api-version", "v2")
+
+	tmpDir := t.TempDir()
+	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+
+	err := runRegisterWithParams(&registerParams{
+		name:              "name",
+		host:              "host",
+		version:           "v1.0.0",
+		description:       "desc",
+		identityCSR:       identityCSR,
+		endpointURL:       "https://example.com",
+		endpointProto:     "MCP",
+		discoveryProfiles: []string{"ANS_BOGUS"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid discovery profile") {
+		t.Fatalf("expected invalid-discovery-profile error, got %v", err)
+	}
+}
+
+// TestRunRegisterWithParams_DiscoveryProfilesRequireV2 pins the lane
+// guard: profiles on the default V1 lane would be silently ignored
+// server-side, so the CLI must reject the combination up front.
+func TestRunRegisterWithParams_DiscoveryProfilesRequireV2(t *testing.T) {
+	setupViperForTest(t, "http://localhost") // api-version unset → flag default v1
+
+	tmpDir := t.TempDir()
+	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+
+	err := runRegisterWithParams(&registerParams{
+		name:              "name",
+		host:              "host",
+		version:           "v1.0.0",
+		description:       "desc",
+		identityCSR:       identityCSR,
+		endpointURL:       "https://example.com",
+		endpointProto:     "MCP",
+		discoveryProfiles: []string{"ANS_DNSAID"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires --api-version v2") {
+		t.Fatalf("expected v2-lane guard error, got %v", err)
+	}
+}
+
+// TestRunRegisterWithParams_DiscoveryProfilesV2Success drives the
+// happy path end-to-end at the CLI layer: --api-version v2 routes the
+// request to the V2 collection and the validated profiles reach the
+// wire verbatim.
+func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
+	result := &models.RegistrationPending{
+		Status:  "PENDING",
+		ANSName: "ans://v1.0.0.test.example.com",
+	}
+
+	// Captures are written in the handler goroutine and read from the
+	// test goroutine; the mutex is the happens-before edge (mirrors
+	// TestRunStatus_OAuthToken).
+	var mu sync.Mutex
+	var gotPath string
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	setupViperForTest(t, server.URL)
+	viper.Set("api-version", "v2")
+
+	tmpDir := t.TempDir()
+	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+
+	err := runRegisterWithParams(&registerParams{
+		name:              "name",
+		host:              "host",
+		version:           "v1.0.0",
+		description:       "desc",
+		identityCSR:       identityCSR,
+		endpointURL:       "https://example.com",
+		endpointProto:     "MCP",
+		discoveryProfiles: []string{"ans_dnsaid"},
+	})
+	if err != nil {
+		t.Fatalf("runRegisterWithParams() error = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotPath != "/v2/ans/agents" {
+		t.Errorf("path: got %q, want /v2/ans/agents", gotPath)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(gotBody, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	profiles, ok := body["discoveryProfiles"].([]any)
+	if !ok || len(profiles) != 1 || profiles[0] != "ANS_DNSAID" {
+		t.Errorf("discoveryProfiles: got %v, want [ANS_DNSAID] (input normalized to upper case)", body["discoveryProfiles"])
 	}
 }

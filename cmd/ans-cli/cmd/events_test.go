@@ -664,9 +664,17 @@ func TestRunRegisterWithParams(t *testing.T) {
 			identityCSR := filepath.Join(tmpDir, "identity.csr")
 			os.WriteFile(identityCSR, []byte("CSR-DATA"), 0600)
 
-			err := runRegisterWithParams("name", "host", "v1.0.0", "desc",
-				identityCSR, "", "", "https://example.com", "", "MCP",
-				tt.transports, tt.functions)
+			err := runRegisterWithParams(&registerParams{
+				name:          "name",
+				host:          "host",
+				version:       "v1.0.0",
+				description:   "desc",
+				identityCSR:   identityCSR,
+				endpointURL:   "https://example.com",
+				endpointProto: "MCP",
+				endpointTrans: tt.transports,
+				functionFlags: tt.functions,
+			})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runRegisterWithParams() error = %v, wantErr %v", err, tt.wantErr)
 			}

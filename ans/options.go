@@ -22,6 +22,30 @@ const (
 // Option is a functional option for configuring ANS clients
 type Option func(*clientConfig) error
 
+// APIVersion selects which Registration Authority API lane the client's
+// agent-lifecycle and certificate methods target. The two lanes expose
+// the same request/response shapes for those routes; they differ in path
+// (`/v1/agents/...` vs `/v2/ans/agents/...`) and in which features the
+// server enables — discovery profiles (AgentRegistrationRequest.
+// DiscoveryProfiles) only take effect on the V2 lane, where the server
+// default is the DNS-AID SVCB family (ANS_DNSAID); the V1 lane is pinned
+// to the legacy ANS_TXT family.
+type APIVersion string
+
+const (
+	// APIVersionV1 targets the original `/v1/agents` lane (default).
+	APIVersionV1 APIVersion = "v1"
+	// APIVersionV2 targets the `/v2/ans/agents` lane.
+	APIVersionV2 APIVersion = "v2"
+)
+
+// isValidAPIVersion reports whether v is a recognised API version.
+// Unexported: WithAPIVersion validates at construction, so callers
+// never need to pre-check a version themselves.
+func isValidAPIVersion(v APIVersion) bool {
+	return v == APIVersionV1 || v == APIVersionV2
+}
+
 // TokenSource supplies OAuth 2.0 bearer tokens. Token is called for each
 // outgoing request; implementations should cache and refresh proactively
 // and must be safe for concurrent use. Token must honor ctx cancellation
@@ -42,6 +66,7 @@ type clientConfig struct {
 	tokenSource TokenSource
 	verbose     bool
 	timeout     time.Duration
+	apiVersion  APIVersion
 }
 
 // authorizationHeader resolves the Authorization value for a single request.
@@ -85,8 +110,9 @@ func defaultConfig() *clientConfig {
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
-		verbose: false,
-		timeout: DefaultTimeout,
+		verbose:    false,
+		timeout:    DefaultTimeout,
+		apiVersion: APIVersionV1,
 	}
 }
 
@@ -148,6 +174,27 @@ func WithTokenSource(ts TokenSource) Option {
 		}
 		c.tokenSource = ts
 		c.authHeader = ""
+		return nil
+	}
+}
+
+// WithAPIVersion selects the RA API lane for the agent-lifecycle and
+// certificate methods: RegisterAgent, GetAgentDetails, VerifyACME,
+// VerifyDNS, GetIdentityCertificates, GetServerCertificates,
+// SubmitIdentityCSR, SubmitServerCSR, GetCSRStatus, and RevokeAgent.
+// Defaults to APIVersionV1. Methods without a V2 twin on the server
+// (GetChallengeDetails, SearchAgents, GetAgentEvents, ResolveAgent)
+// keep their existing paths regardless of this option, so enabling V2
+// never changes the behavior of a route that only exists on V1. An
+// unrecognised version is rejected at construction with
+// models.ErrBadRequest.
+func WithAPIVersion(v APIVersion) Option {
+	return func(c *clientConfig) error {
+		if !isValidAPIVersion(v) {
+			return fmt.Errorf("%w: invalid API version %q (want %q or %q)",
+				models.ErrBadRequest, v, APIVersionV1, APIVersionV2)
+		}
+		c.apiVersion = v
 		return nil
 	}
 }
