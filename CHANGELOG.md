@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.18](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.17...v0.1.18) (2026-07-22)
+
+
+### Features
+
+* **auth:** add OAuth 2.0 bearer token support to SDK and CLI ([#60](https://github.com/agentnameservice/ans-sdk-go/issues/60)) ([92a3dd4](https://github.com/agentnameservice/ans-sdk-go/commit/92a3dd4bbbc63502b9974ce586f4de7cbd903c50))
+* **client:** add V2 API lane and DNS discovery profiles support ([#63](https://github.com/agentnameservice/ans-sdk-go/issues/63)) ([e14cc03](https://github.com/agentnameservice/ans-sdk-go/commit/e14cc03c1012d6d0013087f5b9de50f1b63a0fc4))
+
+
+### Documentation
+
+* adopt DCO and AI-disclosure contribution policy ([#59](https://github.com/agentnameservice/ans-sdk-go/issues/59)) ([7d1fc17](https://github.com/agentnameservice/ans-sdk-go/commit/7d1fc1775bcab41fb45a7a1f3ce34b7bf7af9fb9))
+
+
+### Miscellaneous
+
+* **deps:** bump actions/checkout from 6.0.3 to 7.0.0 ([#44](https://github.com/agentnameservice/ans-sdk-go/issues/44)) ([8958f55](https://github.com/agentnameservice/ans-sdk-go/commit/8958f55d3e2b468d9579c9ec0c3ee4233d632dfd))
+* **deps:** bump actions/checkout from 7.0.0 to 7.0.1 ([#61](https://github.com/agentnameservice/ans-sdk-go/issues/61)) ([fd1cf3a](https://github.com/agentnameservice/ans-sdk-go/commit/fd1cf3a275d665200982e3e781a3487e5216d951))
+* **deps:** bump actions/setup-go from 6.4.0 to 7.0.0 ([#62](https://github.com/agentnameservice/ans-sdk-go/issues/62)) ([302fc94](https://github.com/agentnameservice/ans-sdk-go/commit/302fc945c4c35cfb85743bc2157bbbdb154e0dff))
+* **deps:** bump golang.org/x/net from 0.51.0 to 0.55.0 ([#51](https://github.com/agentnameservice/ans-sdk-go/issues/51)) ([e57f69d](https://github.com/agentnameservice/ans-sdk-go/commit/e57f69ddf0dc50ed504664aa45d31ab16e167318))
+* **deps:** bump golangci/golangci-lint-action from 9.2.1 to 9.3.0 ([#48](https://github.com/agentnameservice/ans-sdk-go/issues/48)) ([521d750](https://github.com/agentnameservice/ans-sdk-go/commit/521d75095ff2f71d515b15e90c988c86e7534525))
+* **deps:** bump goreleaser/goreleaser-action from 7.2.2 to 7.2.3 ([#49](https://github.com/agentnameservice/ans-sdk-go/issues/49)) ([d720054](https://github.com/agentnameservice/ans-sdk-go/commit/d7200546ed850652814db9725178207a2f5181aa))
+
 ## [0.1.17](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.16...v0.1.17) (2026-06-23)
 
 
