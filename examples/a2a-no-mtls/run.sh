@@ -13,6 +13,16 @@ DIR="$(mktemp -d)"
 BIN="$(mktemp -d)"
 SRV_PID=""
 
+# POP_RSA=1 provisions an RSA identity and makes the callee accept RS256 DPoP —
+# a throwaway path for demoing against prod, which issues only RSA identity
+# certs today. The client auto-detects the key type from the bundle.
+# RSA-THROWAWAY(remove when prod supports ES256).
+SERVER_ARGS=()
+if [[ "${POP_RSA:-}" == "1" ]]; then
+  SERVER_ARGS+=(--rsa)
+  echo "RSA mode: provisioning an RSA identity; callee will accept RS256 DPoP."
+fi
+
 cleanup() {
   [[ -n "${SRV_PID}" ]] && kill "${SRV_PID}" 2>/dev/null || true
   rm -rf "${DIR}" "${BIN}"
@@ -24,7 +34,7 @@ go build -o "${BIN}/server" ./examples/a2a-no-mtls/server
 go build -o "${BIN}/client" ./examples/a2a-no-mtls/client
 
 echo "starting callee (no mTLS)..."
-"${BIN}/server" --dir "${DIR}" --addr "${ADDR}" &
+"${BIN}/server" --dir "${DIR}" --addr "${ADDR}" ${SERVER_ARGS[@]+"${SERVER_ARGS[@]}"} &
 SRV_PID=$!
 
 echo

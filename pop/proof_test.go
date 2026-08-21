@@ -69,7 +69,7 @@ func TestAcceptES256DPoP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := acceptES256DPoP(&tt.hdr)
+			err := acceptDPoP(&tt.hdr, false)
 			if tt.ok {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

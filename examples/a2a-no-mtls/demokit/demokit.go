@@ -5,9 +5,11 @@
 package demokit
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -22,9 +24,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/agentnameservice/ans-sdk-go/pop"
 	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
 	"github.com/fxamacker/cbor/v2"
 )
+
+// rsaAgentKeyBits is the RSA modulus size the RSA demo provisions, matching the
+// prod issuance floor. RSA-THROWAWAY(remove when prod supports ES256).
+const rsaAgentKeyBits = 2048
 
 // COSE_Sign1 / CWT protected-header and VDP structural constants.
 const (
@@ -65,8 +72,12 @@ const (
 
 // Bundle is the credential set a caller agent holds: its identity key and
 // certificate plus the SCITT receipt and status token the TL issued for it.
+//
+// AgentKey is a crypto.Signer so the demo can provision either a P-256 identity
+// (Provision) or, for the prod demo, an RSA identity (ProvisionRSA). The caller
+// picks pop.NewSigner or pop.NewRSASigner by its concrete type.
 type Bundle struct {
-	AgentKey    *ecdsa.PrivateKey
+	AgentKey    crypto.Signer
 	CertDER     []byte
 	Receipt     []byte
 	StatusToken []byte
@@ -80,15 +91,35 @@ const (
 )
 
 // Provision generates a transparency-log signing key and a caller agent's full
-// credential bundle (identity key+certificate, SCITT receipt, status token),
-// the receipt and status token signed by the TL key. The TL key is returned so
-// the callee can build its trust store with KeyLookup.
+// credential bundle (P-256 identity key+certificate, SCITT receipt, status
+// token), the receipt and status token signed by the TL key. The TL key is
+// returned so the callee can build its trust store with KeyLookup.
 func Provision(ansName, agentID string) (*ecdsa.PrivateKey, *Bundle, error) {
-	tlKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	agentKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	agentKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	return provision(ansName, agentID, agentKey)
+}
+
+// ProvisionRSA is Provision with an RSA agent identity instead of P-256, for the
+// throwaway demo against prod (which issues only RSA identity certs today). The
+// transparency-log key stays EC — it signs the status token and receipt, which
+// vouch for the RSA cert's fingerprint, so only the caller's DPoP proof is
+// RS256. RSA-THROWAWAY(remove when prod supports ES256).
+func ProvisionRSA(ansName, agentID string) (*ecdsa.PrivateKey, *Bundle, error) {
+	agentKey, err := rsa.GenerateKey(rand.Reader, rsaAgentKeyBits)
+	if err != nil {
+		return nil, nil, err
+	}
+	return provision(ansName, agentID, agentKey)
+}
+
+// provision builds the TL key and the credential bundle around a caller's
+// identity key (EC or RSA), which is used both as the identity cert's subject
+// key and as its self-signing key.
+func provision(ansName, agentID string, agentKey crypto.Signer) (*ecdsa.PrivateKey, *Bundle, error) {
+	tlKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,6 +137,20 @@ func Provision(ansName, agentID string) (*ecdsa.PrivateKey, *Bundle, error) {
 		return nil, nil, err
 	}
 	return tlKey, &Bundle{AgentKey: agentKey, CertDER: certDER, Receipt: rcpt, StatusToken: status}, nil
+}
+
+// NewSigner builds the pop.Signer matching the bundle's identity key type: a
+// P-256 key (Provision) uses pop.NewSigner, an RSA key (ProvisionRSA) uses
+// pop.NewRSASigner. Callers stay agnostic to which identity was provisioned.
+func (b *Bundle) NewSigner(opts ...pop.SignerOption) (*pop.Signer, error) {
+	switch k := b.AgentKey.(type) {
+	case *ecdsa.PrivateKey:
+		return pop.NewSigner(k, b.CertDER, opts...)
+	case *rsa.PrivateKey: // RSA-THROWAWAY(remove when prod supports ES256)
+		return pop.NewRSASigner(k, b.CertDER, opts...)
+	default:
+		return nil, fmt.Errorf("unsupported agent key type %T", k)
+	}
 }
 
 // Save writes the bundle to dir as PEM and binary files.
@@ -152,7 +197,7 @@ func LoadBundle(dir string) (*Bundle, error) {
 	return &Bundle{AgentKey: key, CertDER: certDER, Receipt: rcpt, StatusToken: status}, nil
 }
 
-func loadKey(path string) (*ecdsa.PrivateKey, error) {
+func loadKey(path string) (crypto.Signer, error) {
 	keyPEM, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -165,11 +210,11 @@ func loadKey(path string) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	ecKey, ok := key.(*ecdsa.PrivateKey)
+	signer, ok := key.(crypto.Signer)
 	if !ok {
-		return nil, fmt.Errorf("%s: not an ECDSA key", path)
+		return nil, fmt.Errorf("%s: not a signing key", path)
 	}
-	return ecKey, nil
+	return signer, nil
 }
 
 func loadCertDER(path string) ([]byte, error) {
@@ -266,7 +311,7 @@ func keyID(pub *ecdsa.PublicKey) ([4]byte, error) {
 	return kid, nil
 }
 
-func identityCert(key *ecdsa.PrivateKey, ansName string) ([]byte, error) {
+func identityCert(key crypto.Signer, ansName string) ([]byte, error) {
 	u, err := url.Parse(ansName)
 	if err != nil {
 		return nil, err
@@ -280,7 +325,7 @@ func identityCert(key *ecdsa.PrivateKey, ansName string) ([]byte, error) {
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		URIs:         []*url.URL{u},
 	}
-	return x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	return x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 }
 
 func signP1363(key *ecdsa.PrivateKey, digest [32]byte) ([]byte, error) {

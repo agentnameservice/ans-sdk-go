@@ -16,7 +16,7 @@ import (
 // DPoP proof type and algorithm pinned by this profile. ES256 is the only
 // algorithm; "dpop+jwt" is the only proof type. These two constants plus the
 // jwk and x5c requirements are the entire downgrade policy, enforced in one
-// place by acceptES256DPoP — a future WIMSE WPT variant extends here, not in
+// place by acceptDPoP — a future WIMSE WPT variant extends here, not in
 // scattered literals across sign and verify.
 const (
 	dpopTyp = "dpop+jwt"
@@ -49,9 +49,16 @@ type proofHeader struct {
 // §4.2) — and jwkCoords enforces EC/P-256 with full-width coordinates.
 type proofJWK struct {
 	Kty string `json:"kty"`
-	Crv string `json:"crv"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
+	Crv string `json:"crv,omitempty"`
+	X   string `json:"x,omitempty"`
+	Y   string `json:"y,omitempty"`
+	// RSA-THROWAWAY(remove when prod supports ES256): RSA members for the throwaway RS256
+	// opt-in (see rs256.go). They live on the shared struct so the strict header
+	// decoder accepts an RSA jwk; the ES256 path rejects their presence in
+	// jwkCoords, and the RSA path rejects EC members in rsaJWKKey, so a proof can
+	// still carry only one key shape.
+	N string `json:"n,omitempty"`
+	E string `json:"e,omitempty"`
 }
 
 // proofPayload holds the DPoP claims this profile binds: the HTTP method and
@@ -67,15 +74,23 @@ type proofPayload struct {
 	ATH string `json:"ath,omitempty"`
 }
 
-// acceptES256DPoP is the single predicate deciding which (typ, alg) a proof
-// must carry and that both key headers (jwk, x5c) are present. Reject
-// alg:"none", RS256, ES384, a missing alg, or a wrong typ here, before any
-// signature work.
-func acceptES256DPoP(h *proofHeader) error {
+// acceptDPoP is the single predicate deciding which (typ, alg) a proof must
+// carry and that both key headers (jwk, x5c) are present. Reject alg:"none",
+// ES384, a missing alg, or a wrong typ here, before any signature work.
+//
+// The profile is ES256-only, so RS256 is rejected too — UNLESS allowRSA is set,
+// the throwaway WithAllowRSA opt-in for the prod demo (prod issues RSA identity
+// certs today). RSA-THROWAWAY(remove the allowRSA parameter when prod supports ES256).
+func acceptDPoP(h *proofHeader, allowRSA bool) error {
 	if h.Typ != dpopTyp {
 		return newErr(ErrUnsupportedAlg, fmt.Sprintf("typ must be %q, got %q", dpopTyp, echo(h.Typ)))
 	}
-	if h.Alg != dpopAlg {
+	switch {
+	case h.Alg == dpopAlg:
+		// ES256: the profile default.
+	case allowRSA && h.Alg == algRS256:
+		// RSA-THROWAWAY(remove when prod supports ES256): admitted only under opt-in.
+	default:
 		return newErr(ErrUnsupportedAlg, fmt.Sprintf("alg must be %q, got %q", dpopAlg, echo(h.Alg)))
 	}
 	if h.Jwk == nil {
@@ -107,6 +122,12 @@ func jwkCoords(j *proofJWK) ([]byte, []byte, error) {
 		return nil, nil, newErr(ErrUnsupportedAlg,
 			fmt.Sprintf("jwk must be kty=%q crv=%q, got kty=%q crv=%q",
 				jwkKty, jwkCrv, echo(j.Kty), echo(j.Crv)))
+	}
+	// RSA-THROWAWAY(remove when prod supports ES256): the shared struct also carries RSA
+	// members; an EC jwk must not present them, or a proof could smuggle a second
+	// key shape past the strict decoder.
+	if j.N != "" || j.E != "" {
+		return nil, nil, newErr(ErrMalformedProof, "EC jwk carries RSA members")
 	}
 	x, err := b64urlDecode(j.X)
 	if err != nil {
