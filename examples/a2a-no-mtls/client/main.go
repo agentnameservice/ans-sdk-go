@@ -55,12 +55,12 @@ func run(dir, rawURL, mode string) error {
 	if err != nil {
 		return err
 	}
-	signer, err := pop.NewSigner(bundle.AgentKey, bundle.CertDER)
+	signer, err := bundle.NewSigner()
 	if err != nil {
 		return err
 	}
 	log.Info("loaded agent identity (no client certificate will be presented)",
-		"ansName", demokit.DemoAnsName)
+		"ansName", demokit.DemoAnsName, "keyType", fmt.Sprintf("%T", bundle.AgentKey))
 
 	c := &caller{
 		client: &http.Client{Timeout: 5 * time.Second},

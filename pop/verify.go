@@ -3,6 +3,7 @@ package pop
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
@@ -34,8 +35,12 @@ const (
 // RFC 7638 thumbprint for OAuth2 cnf.jkt confirmation, and the proof's
 // jti/htu/iat for the caller binding and structured logging.
 type ProofResult struct {
-	Cert        *x509.Certificate
-	Key         *ecdsa.PublicKey
+	Cert *x509.Certificate
+	Key  *ecdsa.PublicKey
+	// RSAKey is set instead of Key when the proof was an RS256 proof accepted
+	// under WithAllowRSA (throwaway). Exactly one of Key/RSAKey is non-nil.
+	// RSA-THROWAWAY(remove when prod supports ES256).
+	RSAKey      *rsa.PublicKey
 	Fingerprint [32]byte
 	// JKT is the RFC 7638 thumbprint of Key. A resource server holding a
 	// DPoP-bound access token MUST compare it to the token's cnf.jkt claim to
@@ -56,6 +61,9 @@ type ProofResult struct {
 type verifyConfig struct {
 	accessToken    string
 	tokenPresented bool
+	// allowRSA admits RS256 proofs backed by an RSA identity certificate.
+	// RSA-THROWAWAY(remove when prod supports ES256).
+	allowRSA bool
 }
 
 // VerifyOption configures a single VerifyProof call.
@@ -72,11 +80,20 @@ func WithBoundAccessToken(token string) VerifyOption {
 	}
 }
 
+// WithAllowRSA is a THROWAWAY opt-in that additionally accepts RS256 DPoP proofs
+// backed by an RSA identity certificate. The profile is ES256-only by design and
+// rejects RS256 as a downgrade; this exists solely so the demo can authenticate
+// against prod, which today issues only RSA identity certs. Do NOT enable it in
+// the ES256 product. RSA-THROWAWAY(remove when prod supports ES256).
+func WithAllowRSA() VerifyOption {
+	return func(c *verifyConfig) { c.allowRSA = true }
+}
+
 // VerifyProof verifies a compact DPoP proof against an HTTP method and URL at
 // time now, with freshness window skew and replay protection via replay.
 //
 // Order: ctx, size cap, compact structure, pinned typ/alg plus required
-// jwk/x5c (acceptES256DPoP), x5c[0] P-256 leaf, jwk↔x5c key equality,
+// jwk/x5c (acceptDPoP), x5c[0] P-256 leaf, jwk↔x5c key equality,
 // signature under that single key, htm, normalized htu, ath ⟺ presented
 // token, iat window, then jti single-use. Replay is recorded LAST, so only
 // proofs that pass every other check consume a cache slot.
@@ -128,17 +145,11 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 	if err != nil {
 		return nil, err
 	}
-	if err := acceptES256DPoP(hdr); err != nil {
+	if err := acceptDPoP(hdr, cfg.allowRSA); err != nil {
 		return nil, err
 	}
-	cert, pub, err := leafCert(hdr)
+	cert, ecKey, rsaKey, jkt, err := verifyProofSig(hdr, jwsSigningInput(headerB64, payloadB64), sigB64)
 	if err != nil {
-		return nil, err
-	}
-	if err := matchJWKToCert(hdr.Jwk, pub); err != nil {
-		return nil, err
-	}
-	if err := verifyES256(pub, jwsSigningInput(headerB64, payloadB64), sigB64); err != nil {
 		return nil, err
 	}
 	pl, err := decodeProofPayload(payloadB64)
@@ -164,14 +175,50 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 
 	return &ProofResult{
 		Cert:        cert,
-		Key:         pub,
+		Key:         ecKey,
+		RSAKey:      rsaKey,
 		Fingerprint: sha256.Sum256(cert.Raw),
-		JKT:         jwkThumbprint(pub),
+		JKT:         jkt,
 		JTI:         pl.JTI,
 		HTU:         pl.HTU,
 		IssuedAt:    iat,
 		replayExp:   iat.Add(skew + replayGrace),
 	}, nil
+}
+
+// verifyProofSig validates x5c[0], the jwk↔cert key equality, and the JWS
+// signature under that single key. It returns the leaf certificate, the verified
+// key (exactly one of ecKey/rsaKey is non-nil), and the key's RFC 7638
+// thumbprint.
+//
+// The RS256 branch is a throwaway opt-in reached only after acceptDPoP admitted
+// RS256 under WithAllowRSA. RSA-THROWAWAY(remove the RS256 branch when prod supports ES256).
+func verifyProofSig(hdr *proofHeader, signingInput []byte, sigB64 string) (
+	*x509.Certificate, *ecdsa.PublicKey, *rsa.PublicKey, string, error) {
+	if hdr.Alg == algRS256 {
+		cert, pub, err := leafCertRSA(hdr)
+		if err != nil {
+			return nil, nil, nil, "", err
+		}
+		if err := matchRSAJWKToCert(hdr.Jwk, pub); err != nil {
+			return nil, nil, nil, "", err
+		}
+		if err := verifyRS256(pub, signingInput, sigB64); err != nil {
+			return nil, nil, nil, "", err
+		}
+		return cert, nil, pub, rsaThumbprint(pub), nil
+	}
+	cert, pub, err := leafCert(hdr)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
+	if err := matchJWKToCert(hdr.Jwk, pub); err != nil {
+		return nil, nil, nil, "", err
+	}
+	if err := verifyES256(pub, signingInput, sigB64); err != nil {
+		return nil, nil, nil, "", err
+	}
+	return cert, pub, nil, jwkThumbprint(pub), nil
 }
 
 // checkHTTPBinding confirms the proof's htm/htu match the request method and

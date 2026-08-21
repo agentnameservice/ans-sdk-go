@@ -27,21 +27,28 @@ func main() {
 	externalHost := flag.String("external-host", "127.0.0.1:18099",
 		"externally-visible authority callers dial; this is what htu is checked against, NOT the bind address")
 	debug := flag.Bool("debug", true, "log each verification step at DEBUG")
+	rsaMode := flag.Bool("rsa", false,
+		"provision an RSA identity and accept RS256 DPoP (throwaway; prod issues RSA today)")
 	flag.Parse()
 	if *dir == "" {
 		fmt.Fprintln(os.Stderr, "server: --dir is required")
 		os.Exit(2)
 	}
-	if err := run(*dir, *addr, *externalHost, *debug); err != nil {
+	if err := run(*dir, *addr, *externalHost, *debug, *rsaMode); err != nil {
 		fmt.Fprintln(os.Stderr, "server:", err)
 		os.Exit(1)
 	}
 }
 
-func run(dir, addr, externalHost string, debug bool) error {
+func run(dir, addr, externalHost string, debug, rsaMode bool) error {
 	// Provision the demo agent's credentials (RA/TL stand-in) and keep the TL
-	// key to build the verifier trust store.
-	tlKey, bundle, err := demokit.Provision(demokit.DemoAnsName, demokit.DemoAgentID)
+	// key to build the verifier trust store. --rsa provisions an RSA identity to
+	// mirror prod, which issues only RSA identity certs today.
+	provision := demokit.Provision
+	if rsaMode {
+		provision = demokit.ProvisionRSA // RSA-THROWAWAY(remove when prod supports ES256)
+	}
+	tlKey, bundle, err := provision(demokit.DemoAnsName, demokit.DemoAgentID)
 	if err != nil {
 		return err
 	}
@@ -86,7 +93,7 @@ func run(dir, addr, externalHost string, debug bool) error {
 	// through pop.Middleware.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.Handle("/", pop.Middleware(keys, replay,
+	mwOpts := []pop.MiddlewareOption{
 		pop.WithMiddlewareLogger(logger),
 		// htu is compared against this authority instead of the request's own
 		// Host header, which a client controls. Without this a proof captured
@@ -96,7 +103,14 @@ func run(dir, addr, externalHost string, debug bool) error {
 		// production service listens on :port or 0.0.0.0:port, neither of which
 		// any client ever sends as Host.
 		pop.WithTrustedHosts(externalHost),
-	)(app))
+	}
+	if rsaMode {
+		// RSA-THROWAWAY(remove when prod supports ES256): admit RS256 proofs. The profile
+		// is ES256-only by default; this opt-in exists solely for the prod demo.
+		mwOpts = append(mwOpts,
+			pop.WithMiddlewareCallerOptions(pop.WithVerifyOptions(pop.WithAllowRSA())))
+	}
+	mux.Handle("/", pop.Middleware(keys, replay, mwOpts...)(app))
 
 	lc := net.ListenConfig{}
 	ln, err := lc.Listen(context.Background(), "tcp", addr)

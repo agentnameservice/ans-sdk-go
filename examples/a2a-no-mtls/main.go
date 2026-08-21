@@ -88,7 +88,7 @@ func provision() (*agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	signer, err := pop.NewSigner(bundle.AgentKey, bundle.CertDER)
+	signer, err := bundle.NewSigner()
 	if err != nil {
 		return nil, err
 	}

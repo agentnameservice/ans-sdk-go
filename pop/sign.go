@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,7 +20,11 @@ const jtiBytes = 16
 // certificate — the certificate whose fingerprint the agent's status token
 // vouches for. Build one with NewSigner; the zero value is not usable.
 type Signer struct {
-	key     *ecdsa.PrivateKey
+	key *ecdsa.PrivateKey
+	// rsaKey and alg back the throwaway RS256 opt-in (NewRSASigner): when rsaKey
+	// is set, key is nil and alg is algRS256. RSA-THROWAWAY(remove when prod supports ES256).
+	rsaKey  *rsa.PrivateKey
+	alg     string
 	certDER []byte
 	jwk     *proofJWK
 	now     func() time.Time
@@ -47,7 +52,34 @@ func NewSigner(key *ecdsa.PrivateKey, certDER []byte, opts ...SignerOption) (*Si
 	if !ok || !pub.Equal(&key.PublicKey) {
 		return nil, newErr(ErrCertInvalid, "signer: certificate public key does not match private key")
 	}
-	s := &Signer{key: key, certDER: certDER, jwk: publicJWK(&key.PublicKey), now: time.Now}
+	s := &Signer{key: key, alg: dpopAlg, certDER: certDER, jwk: publicJWK(&key.PublicKey), now: time.Now}
+	for _, o := range opts {
+		o(s)
+	}
+	return s, nil
+}
+
+// NewRSASigner is a THROWAWAY constructor mirroring NewSigner for an RSA identity
+// key. It exists only so the demo can authenticate against prod, which today
+// issues RSA identity certificates rather than P-256. The proofs it mints are
+// RS256 and are rejected by verifiers unless they opt in with WithAllowRSA.
+// RSA-THROWAWAY(remove when prod supports ES256).
+func NewRSASigner(key *rsa.PrivateKey, certDER []byte, opts ...SignerOption) (*Signer, error) {
+	if key == nil {
+		return nil, newErr(ErrCertInvalid, "signer: nil private key")
+	}
+	if key.N.BitLen() < minRSABits {
+		return nil, newErr(ErrCertInvalid, "signer: RSA key smaller than 2048 bits")
+	}
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, wrapErr(ErrCertInvalid, "signer: parse certificate DER", err)
+	}
+	pub, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok || !pub.Equal(&key.PublicKey) {
+		return nil, newErr(ErrCertInvalid, "signer: certificate public key does not match private key")
+	}
+	s := &Signer{rsaKey: key, alg: algRS256, certDER: certDER, jwk: rsaPublicJWK(&key.PublicKey), now: time.Now}
 	for _, o := range opts {
 		o(s)
 	}
@@ -76,6 +108,9 @@ func WithAccessToken(token string) ProofOption {
 // (RFC 9449 §6), and the value a callee compares against
 // CallerIdentity.JKT. A client needs it to request a token bound to this key.
 func (s *Signer) JKT() string {
+	if s.rsaKey != nil { // RSA-THROWAWAY(remove when prod supports ES256)
+		return rsaThumbprint(&s.rsaKey.PublicKey)
+	}
 	return jwkThumbprint(&s.key.PublicKey)
 }
 
@@ -107,7 +142,7 @@ func (s *Signer) Sign(ctx context.Context, method, rawURL string, opts ...ProofO
 	}
 	hdr := &proofHeader{
 		Typ: dpopTyp,
-		Alg: dpopAlg,
+		Alg: s.alg,
 		Jwk: s.jwk,
 		X5c: []string{base64.StdEncoding.EncodeToString(s.certDER)},
 	}
@@ -122,11 +157,19 @@ func (s *Signer) Sign(ctx context.Context, method, rawURL string, opts ...ProofO
 	if err != nil {
 		return "", err
 	}
-	sigB64, err := signES256(s.key, jwsSigningInput(headerB64, payloadB64))
+	sigB64, err := s.sign(jwsSigningInput(headerB64, payloadB64))
 	if err != nil {
 		return "", err
 	}
 	return headerB64 + "." + payloadB64 + "." + sigB64, nil
+}
+
+// sign produces the JWS signature under the signer's configured algorithm.
+func (s *Signer) sign(signingInput []byte) (string, error) {
+	if s.rsaKey != nil { // RSA-THROWAWAY(remove when prod supports ES256)
+		return signRS256(s.rsaKey, signingInput)
+	}
+	return signES256(s.key, signingInput)
 }
 
 // newJTI returns a random 128-bit jti as lowercase hex.
