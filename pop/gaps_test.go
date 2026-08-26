@@ -3,6 +3,7 @@ package pop
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -227,6 +228,53 @@ func TestReceiptNamesAgent_Gaps(t *testing.T) {
 			callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
 		assertProofErr(t, err, ErrBindingFailed)
 	})
+}
+
+// TestReceiptLeafSchemas pins the leaf shape a live transparency log signs. A
+// flat event object is the /events REST representation; decoding a receipt that
+// way names no agent and rejected every caller.
+func TestReceiptLeafSchemas(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   func(t *testing.T, agentID, ansName string) []byte
+		wantErr ErrorType
+	}{
+		{name: "V1 ansId", event: eventJSON},
+		{name: "V0 agentId", event: eventJSONV0},
+		{
+			name: "flat event names no agent",
+			event: func(t *testing.T, agentID, ansName string) []byte {
+				t.Helper()
+				b, err := json.Marshal(leafEvent{AnsID: agentID, AnsName: ansName})
+				if err != nil {
+					t.Fatalf("marshal flat event: %v", err)
+				}
+				return b
+			},
+			wantErr: ErrReceiptInvalid,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			hdrs := &scitt.Headers{
+				Receipt:     receipt(t, h.tlKey, tt.event(t, h.agentID, h.ansName)),
+				StatusToken: h.statusToken(t),
+			}
+			id, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), hdrs,
+				callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
+			if tt.wantErr != "" {
+				assertProofErr(t, err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyCaller: %v", err)
+			}
+			if id.AgentID != h.agentID {
+				t.Errorf("AgentID = %q, want %q", id.AgentID, h.agentID)
+			}
+		})
+	}
 }
 
 func TestMiddleware_LoggerAndBadScittHeader(t *testing.T) {

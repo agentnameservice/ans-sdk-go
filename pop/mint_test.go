@@ -173,10 +173,23 @@ func receipt(t *testing.T, tlKey *ecdsa.PrivateKey, eventJSON []byte) []byte {
 	return coseSign1(t, tlKey, protected, unprotected, eventJSON)
 }
 
-// eventJSON builds a transparency-log leaf-event JSON naming an agent.
+// eventJSON builds a schema-V1 transparency-log leaf, the shape a live log
+// signs: the event wrapped in payload.producer.event with the agent id as
+// "ansId".
 func eventJSON(t *testing.T, agentID, ansName string) []byte {
 	t.Helper()
-	b, err := json.Marshal(leafEvent{AgentID: agentID, AnsName: ansName})
+	return leafJSON(t, leafEvent{AnsID: agentID, AnsName: ansName})
+}
+
+// eventJSONV0 builds the older leaf spelling, which names the agent "agentId".
+func eventJSONV0(t *testing.T, agentID, ansName string) []byte {
+	t.Helper()
+	return leafJSON(t, leafEvent{AgentID: agentID, AnsName: ansName})
+}
+
+func leafJSON(t *testing.T, ev leafEvent) []byte {
+	t.Helper()
+	b, err := json.Marshal(leafEnvelope{Payload: leafPayload{Producer: leafProducer{Event: ev}}})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}

@@ -292,12 +292,39 @@ func verifyBinding(proof *ProofResult, st *scitt.VerifiedStatusToken,
 	}, nil
 }
 
-// leafEvent is the minimal projection of a transparency-log leaf event needed
-// to bind a receipt to the status token's agent. Field names match
-// models.EventItem.
+// leafEnvelope is the minimal projection of a transparency-log leaf needed to
+// bind a receipt to the status token's agent.
+//
+// The log signs the event wrapped as payload.producer.event, not as a bare
+// object: see models.TransparencyLogV1. The flat shape models.EventItem
+// describes belongs to the /events REST API and never appears in a receipt.
+type leafEnvelope struct {
+	Payload leafPayload `json:"payload"`
+}
+
+type leafPayload struct {
+	Producer leafProducer `json:"producer"`
+}
+
+type leafProducer struct {
+	Event leafEvent `json:"event"`
+}
+
+// leafEvent carries both spellings of the agent identifier because the schemas
+// disagree: V1 emits "ansId" (models.EventV1), V0 emits "agentId"
+// (models.EventV0).
 type leafEvent struct {
+	AnsID   string `json:"ansId"`
 	AgentID string `json:"agentId"`
 	AnsName string `json:"ansName"`
+}
+
+// agentID returns whichever schema's identifier the leaf populated.
+func (e leafEvent) agentID() string {
+	if e.AnsID != "" {
+		return e.AnsID
+	}
+	return e.AgentID
 }
 
 // receiptNamesAgent makes the receipt load-bearing: its leaf event must name
@@ -305,14 +332,16 @@ type leafEvent struct {
 // to a witnessed tree head — see scitt.VerifiedReceipt — so this is
 // leaf-signature trust, not tree-head trust.)
 func receiptNamesAgent(rcpt *scitt.VerifiedReceipt, st *scitt.StatusTokenPayload) error {
-	var ev leafEvent
-	if err := json.Unmarshal(rcpt.EventBytes, &ev); err != nil {
+	var env leafEnvelope
+	if err := json.Unmarshal(rcpt.EventBytes, &env); err != nil {
 		return wrapErr(ErrReceiptInvalid, "receipt leaf event is not decodable JSON", err)
 	}
-	if ev.AgentID == "" && ev.AnsName == "" {
-		return newErr(ErrReceiptInvalid, "receipt leaf event names no agent (agentId/ansName)")
+	ev := env.Payload.Producer.Event
+	agentID := ev.agentID()
+	if agentID == "" && ev.AnsName == "" {
+		return newErr(ErrReceiptInvalid, "receipt leaf event names no agent (ansId/agentId/ansName)")
 	}
-	if ev.AgentID != "" && st.AgentID != "" && ev.AgentID != st.AgentID {
+	if agentID != "" && st.AgentID != "" && agentID != st.AgentID {
 		return newErr(ErrBindingFailed, "receipt leaf agentId does not match status token agentId")
 	}
 	if ev.AnsName != "" && st.AnsName != "" && !strings.EqualFold(ev.AnsName, st.AnsName) {
