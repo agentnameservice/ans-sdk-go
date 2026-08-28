@@ -754,6 +754,33 @@ func TestHeaderSupplier_FetchAndVerify(t *testing.T) {
 	}
 }
 
+// A successful RefreshNow must make the supplier report healthy immediately.
+// It did not: only initOnce and the auto-refresh loop set initialized, so an
+// agent primed by RefreshNow at startup reported degraded for ~50% of the
+// token TTL while serving valid headers the whole time.
+func TestHeaderSupplierRefreshNowMarksHealthy(t *testing.T) {
+	t.Parallel()
+
+	receiptBytes, tokenBytes, rks := buildSupplierTestFixture(t)
+	mc := NewMockClient().
+		WithReceipt("agent-1", receiptBytes).
+		WithStatusToken("agent-1", tokenBytes)
+	s := NewHeaderSupplier("agent-1", mc, rks,
+		WithInitTimeout(2*time.Second),
+		WithSupplierClockSkew(1*time.Minute),
+	)
+
+	if s.Healthy() {
+		t.Fatal("supplier reports healthy before any refresh")
+	}
+	if err := s.RefreshNow(context.Background()); err != nil {
+		t.Fatalf("RefreshNow: %v", err)
+	}
+	if !s.Healthy() {
+		t.Errorf("Healthy() = false immediately after successful RefreshNow (LastError=%v)", s.LastError())
+	}
+}
+
 func TestHeaderSupplier_FetchAndVerify_ClearsError(t *testing.T) {
 	t.Parallel()
 
