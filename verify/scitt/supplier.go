@@ -269,11 +269,14 @@ func (s *HeaderSupplier) fetchAndVerify(ctx context.Context) error {
 		return s.recordError(err)
 	}
 
-	// Cache verified artifacts.
+	// Cache verified artifacts. A successful fetch IS initialization: without
+	// this, an agent primed by RefreshNow reports unhealthy until the first
+	// auto-refresh tick (~50% of token TTL), despite serving valid headers.
 	s.mu.Lock()
 	s.receipt = receiptBytes
 	s.statusToken = tokenBytes
 	s.tokenExp = &verified.Payload.Exp
+	s.initialized = true
 	s.lastError = nil
 	s.mu.Unlock()
 
@@ -304,10 +307,6 @@ func (s *HeaderSupplier) autoRefreshLoop(ctx context.Context) {
 						"error", err,
 					)
 				}
-			} else {
-				s.mu.Lock()
-				s.initialized = true
-				s.mu.Unlock()
 			}
 		}
 	}
