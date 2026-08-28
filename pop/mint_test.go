@@ -36,7 +36,7 @@ const (
 )
 
 // genKey returns a fresh P-256 key.
-func genKey(t *testing.T) *ecdsa.PrivateKey {
+func genKey(t testing.TB) *ecdsa.PrivateKey {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -46,7 +46,7 @@ func genKey(t *testing.T) *ecdsa.PrivateKey {
 }
 
 // kidFor derives the 4-byte kid = SHA-256(SPKI)[:4] used across the SDK.
-func kidFor(t *testing.T, pub *ecdsa.PublicKey) [4]byte {
+func kidFor(t testing.TB, pub *ecdsa.PublicKey) [4]byte {
 	t.Helper()
 	spki, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
@@ -69,7 +69,7 @@ func (k *keyLookup) Get(kid [4]byte) (*scitt.TrustedKey, error) {
 	return tk, nil
 }
 
-func newKeyLookup(t *testing.T, name string, pub *ecdsa.PublicKey) *keyLookup {
+func newKeyLookup(t testing.TB, name string, pub *ecdsa.PublicKey) *keyLookup {
 	t.Helper()
 	kid := kidFor(t, pub)
 	return &keyLookup{keys: map[[4]byte]*scitt.TrustedKey{
@@ -80,7 +80,7 @@ func newKeyLookup(t *testing.T, name string, pub *ecdsa.PublicKey) *keyLookup {
 // identityCert creates a P-256 identity certificate carrying the given ans://
 // URI SAN and returns its DER. Self-signed; trust comes from the status-token
 // fingerprint, not a chain.
-func identityCert(t *testing.T, key *ecdsa.PrivateKey, ansName string) []byte {
+func identityCert(t testing.TB, key *ecdsa.PrivateKey, ansName string) []byte {
 	t.Helper()
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -105,7 +105,7 @@ func identityCert(t *testing.T, key *ecdsa.PrivateKey, ansName string) []byte {
 }
 
 // cborMarshal marshals v to CBOR, failing the test on error.
-func cborMarshal(t *testing.T, v any) []byte {
+func cborMarshal(t testing.TB, v any) []byte {
 	t.Helper()
 	b, err := cbor.Marshal(v)
 	if err != nil {
@@ -115,7 +115,7 @@ func cborMarshal(t *testing.T, v any) []byte {
 }
 
 // p1363 signs digest with key and returns a 64-byte R‖S signature.
-func p1363(t *testing.T, key *ecdsa.PrivateKey, digest [32]byte) []byte {
+func p1363(t testing.TB, key *ecdsa.PrivateKey, digest [32]byte) []byte {
 	t.Helper()
 	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
@@ -129,7 +129,7 @@ func p1363(t *testing.T, key *ecdsa.PrivateKey, digest [32]byte) []byte {
 
 // coseSign1 assembles a COSE_Sign1 (CBOR Tag 18) over protectedBytes+payload,
 // signed by key, with the given unprotected header.
-func coseSign1(t *testing.T, key *ecdsa.PrivateKey, protectedBytes []byte, unprotected any, payload []byte) []byte {
+func coseSign1(t testing.TB, key *ecdsa.PrivateKey, protectedBytes []byte, unprotected any, payload []byte) []byte {
 	t.Helper()
 	digest, err := scitt.ComputeSigStructureDigest(protectedBytes, payload)
 	if err != nil {
@@ -142,7 +142,7 @@ func coseSign1(t *testing.T, key *ecdsa.PrivateKey, protectedBytes []byte, unpro
 
 // statusToken mints a COSE status token signed by tlKey vouching identityFP as
 // an x509-ov-client identity cert for the given agent.
-func statusToken(t *testing.T, tlKey *ecdsa.PrivateKey, agentID, ansName string,
+func statusToken(t testing.TB, tlKey *ecdsa.PrivateKey, agentID, ansName string,
 	status scitt.AgentStatus, iat, exp int64, identityFP [32]byte) []byte {
 	t.Helper()
 	kid := kidFor(t, &tlKey.PublicKey)
@@ -161,7 +161,7 @@ func statusToken(t *testing.T, tlKey *ecdsa.PrivateKey, agentID, ansName string,
 
 // receipt mints a COSE_Sign1 SCITT receipt (vds=1, single-leaf tree) signed by
 // tlKey over the given leaf-event payload.
-func receipt(t *testing.T, tlKey *ecdsa.PrivateKey, eventJSON []byte) []byte {
+func receipt(t testing.TB, tlKey *ecdsa.PrivateKey, eventJSON []byte) []byte {
 	t.Helper()
 	kid := kidFor(t, &tlKey.PublicKey)
 	protected := cborMarshal(t, map[int64]any{
@@ -174,7 +174,7 @@ func receipt(t *testing.T, tlKey *ecdsa.PrivateKey, eventJSON []byte) []byte {
 }
 
 // eventJSON builds a transparency-log leaf-event JSON naming an agent.
-func eventJSON(t *testing.T, agentID, ansName string) []byte {
+func eventJSON(t testing.TB, agentID, ansName string) []byte {
 	t.Helper()
 	b, err := json.Marshal(leafEvent{AgentID: agentID, AnsName: ansName})
 	if err != nil {
