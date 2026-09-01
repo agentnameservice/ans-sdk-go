@@ -249,6 +249,97 @@ func TestTransparencyLog_IsV1(t *testing.T) {
 	}
 }
 
+func TestTransparencyLog_GetV2Payload(t *testing.T) {
+	v2 := &TransparencyLogV2{Producer: ProducerV2{KeyID: "v2-key"}}
+	tests := []struct {
+		name      string
+		log       *TransparencyLog
+		wantNil   bool
+		wantKeyID string
+	}{
+		{
+			name:      "V2 parsed payload",
+			log:       &TransparencyLog{ParsedPayload: v2},
+			wantNil:   false,
+			wantKeyID: "v2-key",
+		},
+		{
+			name:    "nil parsed payload",
+			log:     &TransparencyLog{},
+			wantNil: true,
+		},
+		{
+			name:    "V1 parsed payload",
+			log:     &TransparencyLog{ParsedPayload: &TransparencyLogV1{}},
+			wantNil: true,
+		},
+		{
+			name:    "V0 parsed payload",
+			log:     &TransparencyLog{ParsedPayload: &TransparencyLogV0{}},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.log.GetV2Payload()
+			if tt.wantNil && got != nil {
+				t.Errorf("GetV2Payload() = %v, want nil", got)
+			}
+			if !tt.wantNil {
+				if got == nil {
+					t.Fatal("GetV2Payload() = nil, want non-nil")
+				}
+				if got.Producer.KeyID != tt.wantKeyID {
+					t.Errorf("GetV2Payload().Producer.KeyID = %q, want %q", got.Producer.KeyID, tt.wantKeyID)
+				}
+			}
+		})
+	}
+}
+
+func TestTransparencyLog_IsV2(t *testing.T) {
+	tests := []struct {
+		name string
+		log  *TransparencyLog
+		want bool
+	}{
+		{
+			name: "schema version V2",
+			log:  &TransparencyLog{SchemaVersion: string(SchemaVersionV2)},
+			want: true,
+		},
+		{
+			name: "parsed V2 payload",
+			log:  &TransparencyLog{ParsedPayload: &TransparencyLogV2{}},
+			want: true,
+		},
+		{
+			name: "schema version V1",
+			log:  &TransparencyLog{SchemaVersion: string(SchemaVersionV1)},
+			want: false,
+		},
+		{
+			name: "schema version V0",
+			log:  &TransparencyLog{SchemaVersion: string(SchemaVersionV0)},
+			want: false,
+		},
+		{
+			name: "empty schema version",
+			log:  &TransparencyLog{},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.log.IsV2(); got != tt.want {
+				t.Errorf("IsV2() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTransparencyLog_IsV0(t *testing.T) {
 	tests := []struct {
 		name string
