@@ -149,8 +149,16 @@ type CertIdentity struct {
 	DNSSANs []string
 	// URISANs are the URI Subject Alternative Names.
 	URISANs []string
-	// Fingerprint is the certificate's SHA-256 fingerprint.
+	// Fingerprint is the certificate's SHA-256 fingerprint (SHA-256 over the full DER).
 	Fingerprint CertFingerprint
+	// Raw is the full DER encoding of the certificate. It is populated by
+	// CertIdentityFromX509/CertIdentityFromDER and is nil for identities built from a
+	// bare fingerprint. DANE/TLSA selector-aware matching needs it to recompute the
+	// association data for a record's selector and matching type.
+	Raw []byte
+	// SPKIRaw is the DER-encoded SubjectPublicKeyInfo, used to match TLSA selector 1
+	// (SPKI) records. Nil for fingerprint-only identities.
+	SPKIRaw []byte
 }
 
 // NewCertIdentity creates a new CertIdentity from components.
@@ -183,6 +191,8 @@ func CertIdentityFromX509(cert *x509.Certificate) *CertIdentity {
 		DNSSANs:     cert.DNSNames,
 		URISANs:     uriSANs,
 		Fingerprint: fp,
+		Raw:         cert.Raw,
+		SPKIRaw:     cert.RawSubjectPublicKeyInfo,
 	}
 }
 
