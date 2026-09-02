@@ -2,6 +2,9 @@ package verify
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -114,8 +117,47 @@ func NewDANEVerifier(resolver DANEResolver) *DANEVerifier {
 	return &DANEVerifier{resolver: resolver}
 }
 
-// tlsaUsageDANEEE is the DANE-EE (domain-issued certificate) usage type.
-const tlsaUsageDANEEE = 3
+// TLSA selector and matching-type values per RFC 6698 §2.1.2–2.1.3.
+const (
+	tlsaUsageDANEEE     = 3 // DANE-EE (domain-issued certificate)
+	tlsaSelectorFullDER = 0 // association data is the full certificate DER
+	tlsaSelectorSPKI    = 1 // association data is the SubjectPublicKeyInfo DER
+	tlsaMatchExact      = 0 // compare the raw DER
+	tlsaMatchSHA256     = 1 // compare SHA-256 of the selected data
+	tlsaMatchSHA512     = 2 // compare SHA-512 of the selected data
+)
+
+// tlsaAssociation computes the hex association data a cert presents for a given TLSA
+// selector and matching type, per RFC 6698. It returns ("", false) when the material the
+// selector needs is absent (e.g. a fingerprint-only CertIdentity has no DER) or when the
+// selector/matching type is unrecognized — the caller then cannot claim a match for that
+// record rather than silently comparing the wrong bytes.
+func tlsaAssociation(cert *CertIdentity, selector, matchingType uint8) (string, bool) {
+	var data []byte
+	switch selector {
+	case tlsaSelectorFullDER:
+		data = cert.Raw
+	case tlsaSelectorSPKI:
+		data = cert.SPKIRaw
+	default:
+		return "", false
+	}
+	if len(data) == 0 {
+		return "", false
+	}
+	switch matchingType {
+	case tlsaMatchExact:
+		return hex.EncodeToString(data), true
+	case tlsaMatchSHA256:
+		sum := sha256.Sum256(data)
+		return hex.EncodeToString(sum[:]), true
+	case tlsaMatchSHA512:
+		sum := sha512.Sum512(data)
+		return hex.EncodeToString(sum[:]), true
+	default:
+		return "", false
+	}
+}
 
 // Verify performs DANE/TLSA verification for a certificate.
 func (d *DANEVerifier) Verify(ctx context.Context, fqdn models.Fqdn, port uint16, cert *CertIdentity) *DANEOutcome {
@@ -140,17 +182,31 @@ func (d *DANEVerifier) Verify(ctx context.Context, fqdn models.Fqdn, port uint16
 		return &DANEOutcome{Type: DANESkipped, Records: result.Records}
 	}
 
-	// Compare cert fingerprint against DANE-EE (Usage=3) TLSA records only.
-	// NOTE: Selector and MatchingType are not yet checked — a production implementation
-	// should compute the appropriate hash for each selector (full cert vs SPKI).
+	// Match against DANE-EE (Usage=3) records only, honoring each record's Selector
+	// (full cert vs SPKI) and MatchingType (exact/SHA-256/SHA-512) per RFC 6698. When the
+	// CertIdentity carries DER material we recompute the correct association data for each
+	// record; a selector-1 (SPKI) record is therefore never matched against a full-cert
+	// hash, and vice versa.
+	//
+	// Fingerprint-only fallback: a CertIdentity built from a bare SHA-256 fingerprint has
+	// no DER, so it cannot recompute per-selector data. For those callers we compare the
+	// full-cert SHA-256 fingerprint directly against the record hash regardless of
+	// selector — the pre-DER behavior, kept so fingerprint-only callers do not regress.
+	hasDER := len(cert.Raw) > 0
 	certHex := strings.ToLower(cert.Fingerprint.ToHex())
 	for _, rec := range result.Records {
 		if rec.Usage != tlsaUsageDANEEE {
 			continue // Only match DANE-EE records; skip DANE-TA, PKIX-TA, PKIX-EE
 		}
-		// Defensive lowercase: StandardDANEResolver already lowercases, but alternative
-		// resolver implementations or mocks may provide mixed-case hashes.
-		if strings.ToLower(rec.CertHash) == certHex {
+		recHash := strings.ToLower(rec.CertHash)
+		if hasDER {
+			want, ok := tlsaAssociation(cert, rec.Selector, rec.MatchingType)
+			if ok && want == recHash {
+				return &DANEOutcome{Type: DANEVerified, Records: result.Records}
+			}
+			continue
+		}
+		if recHash == certHex {
 			return &DANEOutcome{Type: DANEVerified, Records: result.Records}
 		}
 	}
