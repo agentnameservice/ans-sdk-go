@@ -78,6 +78,37 @@ func TestIsValidRevocationReason(t *testing.T) {
 	}
 }
 
+func TestIsAPIRevocationReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason RevocationReason
+		want   bool
+	}{
+		{name: "KEY_COMPROMISE accepted", reason: RevocationReasonKeyCompromise, want: true},
+		{name: "CESSATION_OF_OPERATION accepted", reason: RevocationReasonCessationOfOperation, want: true},
+		{name: "AFFILIATION_CHANGED accepted", reason: RevocationReasonAffiliationChanged, want: true},
+		{name: "CERTIFICATE_HOLD accepted", reason: RevocationReasonCertificateHold, want: true},
+		{name: "PRIVILEGE_WITHDRAWN accepted", reason: RevocationReasonPrivilegeWithdrawn, want: true},
+		{name: "AA_COMPROMISE accepted", reason: RevocationReasonAACompromise, want: true},
+		// Reserved for the registry's internal successor-deprecation flow.
+		{name: "SUPERSEDED rejected", reason: RevocationReasonSuperseded, want: false},
+		// RFC-only codes with no registry enum value.
+		{name: "CA_COMPROMISE rejected", reason: RevocationReasonCACompromise, want: false},
+		{name: "EXPIRED_CERT rejected", reason: RevocationReasonExpiredCert, want: false},
+		{name: "REMOVE_FROM_CRL rejected", reason: RevocationReasonRemoveFromCRL, want: false},
+		{name: "UNSPECIFIED rejected", reason: RevocationReasonUnspecified, want: false},
+		{name: "unknown rejected", reason: RevocationReason("INVALID_REASON"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsAPIRevocationReason(tt.reason); got != tt.want {
+				t.Errorf("IsAPIRevocationReason(%q) = %v, want %v", tt.reason, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAgentRevocationRequest_JSON(t *testing.T) {
 	tests := []struct {
 		name     string
