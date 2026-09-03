@@ -17,6 +17,28 @@ func IsValidRevocationReason(r RevocationReason) bool {
 	}
 }
 
+// IsAPIRevocationReason reports whether the ANS registry accepts this reason
+// from an API caller. It is narrower than IsValidRevocationReason: SUPERSEDED is
+// reserved for the registry's internal successor-deprecation flow, and the
+// RFC-only codes (CA_COMPROMISE, EXPIRED_CERT, REMOVE_FROM_CRL, UNSPECIFIED)
+// have no registry enum value.
+func IsAPIRevocationReason(r RevocationReason) bool {
+	switch r {
+	case RevocationReasonKeyCompromise, RevocationReasonCessationOfOperation,
+		RevocationReasonAffiliationChanged, RevocationReasonCertificateHold,
+		RevocationReasonPrivilegeWithdrawn, RevocationReasonAACompromise:
+		return true
+	// SUPERSEDED is reserved for the registry's internal successor-deprecation
+	// flow; the remaining codes have no registry enum value.
+	case RevocationReasonSuperseded, RevocationReasonCACompromise,
+		RevocationReasonExpiredCert, RevocationReasonRemoveFromCRL,
+		RevocationReasonUnspecified:
+		return false
+	default:
+		return false
+	}
+}
+
 // AgentRevocationRequest represents a request to revoke an agent
 type AgentRevocationRequest struct {
 	// Reason is the revocation reason (required)
