@@ -165,7 +165,7 @@ ans-cli register \
 - `--description`: Agent description
 - `--server-csr`: Path to server CSR PEM file
 - `--server-cert`: Path to server certificate PEM file (BYOC)
-- `--metadata-url`: Agent metadata URL (e.g., `/.well-known/agent-card.json`)
+- `--metadata-url`: Agent metadata URL, absolute https (e.g., `https://myagent.example.com/.well-known/agent-card.json`)
 - `--endpoint-protocol`: Protocol (MCP, A2A, HTTP-API) (default: MCP)
 - `--endpoint-transports`: Comma-separated list of transports (default: STREAMABLE-HTTP)
 - `--function`: Agent function in format `id:name` or `id:name:tag1,tag2` (repeatable)
