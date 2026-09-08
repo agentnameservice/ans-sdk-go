@@ -65,10 +65,8 @@ func runRevoke(agentID, reason, comments string) error {
 		return err
 	}
 
-	// Validate reason against the set the registry accepts (narrower than the
-	// full RFC 5280 enum: SUPERSEDED and the RFC-only codes are rejected server-side).
 	revocationReason := models.RevocationReason(strings.ToUpper(reason))
-	if !models.IsAPIRevocationReason(revocationReason) {
+	if !models.IsValidRevocationReason(revocationReason) {
 		return fmt.Errorf("revocation reason %q is not accepted by the registry. See 'ans-cli revoke --help' for accepted reasons", reason)
 	}
 

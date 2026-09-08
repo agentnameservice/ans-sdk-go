@@ -12,78 +12,6 @@ func TestIsValidRevocationReason(t *testing.T) {
 		reason RevocationReason
 		want   bool
 	}{
-		{
-			name:   "KEY_COMPROMISE",
-			reason: RevocationReasonKeyCompromise,
-			want:   true,
-		},
-		{
-			name:   "CESSATION_OF_OPERATION",
-			reason: RevocationReasonCessationOfOperation,
-			want:   true,
-		},
-		{
-			name:   "AFFILIATION_CHANGED",
-			reason: RevocationReasonAffiliationChanged,
-			want:   true,
-		},
-		{
-			name:   "SUPERSEDED",
-			reason: RevocationReasonSuperseded,
-			want:   true,
-		},
-		{
-			name:   "CERTIFICATE_HOLD",
-			reason: RevocationReasonCertificateHold,
-			want:   true,
-		},
-		{
-			name:   "PRIVILEGE_WITHDRAWN",
-			reason: RevocationReasonPrivilegeWithdrawn,
-			want:   true,
-		},
-		{
-			name:   "AA_COMPROMISE",
-			reason: RevocationReasonAACompromise,
-			want:   true,
-		},
-		{
-			name:   "CA_COMPROMISE",
-			reason: RevocationReasonCACompromise,
-			want:   true,
-		},
-		{
-			name:   "UNSPECIFIED",
-			reason: RevocationReasonUnspecified,
-			want:   true,
-		},
-		{
-			name:   "invalid reason",
-			reason: RevocationReason("INVALID_REASON"),
-			want:   false,
-		},
-		{
-			name:   "empty string",
-			reason: RevocationReason(""),
-			want:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := IsValidRevocationReason(tt.reason); got != tt.want {
-				t.Errorf("IsValidRevocationReason(%q) = %v, want %v", tt.reason, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsAPIRevocationReason(t *testing.T) {
-	tests := []struct {
-		name   string
-		reason RevocationReason
-		want   bool
-	}{
 		{name: "KEY_COMPROMISE accepted", reason: RevocationReasonKeyCompromise, want: true},
 		{name: "CESSATION_OF_OPERATION accepted", reason: RevocationReasonCessationOfOperation, want: true},
 		{name: "AFFILIATION_CHANGED accepted", reason: RevocationReasonAffiliationChanged, want: true},
@@ -98,12 +26,13 @@ func TestIsAPIRevocationReason(t *testing.T) {
 		{name: "REMOVE_FROM_CRL rejected", reason: RevocationReasonRemoveFromCRL, want: false},
 		{name: "UNSPECIFIED rejected", reason: RevocationReasonUnspecified, want: false},
 		{name: "unknown rejected", reason: RevocationReason("INVALID_REASON"), want: false},
+		{name: "empty string rejected", reason: RevocationReason(""), want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsAPIRevocationReason(tt.reason); got != tt.want {
-				t.Errorf("IsAPIRevocationReason(%q) = %v, want %v", tt.reason, got, tt.want)
+			if got := IsValidRevocationReason(tt.reason); got != tt.want {
+				t.Errorf("IsValidRevocationReason(%q) = %v, want %v", tt.reason, got, tt.want)
 			}
 		})
 	}
