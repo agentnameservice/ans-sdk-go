@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
@@ -22,6 +23,9 @@ const (
 	// rejects requests that exceed this limit; the CLI enforces it client-side so
 	// operators see a clear message before the HTTP call.
 	maxTags = 5
+	// functionFlagFieldCount is the number of colon-separated fields in a --function
+	// flag value: <id>:<name>:<tags>.
+	functionFlagFieldCount = 3
 )
 
 // registerParams carries the register command's flag values. A struct
@@ -332,7 +336,7 @@ func validateRegistrationParams(p *registerParams) error {
 		{"description", p.description},
 	} {
 		for i, r := range field.value {
-			if r > 127 {
+			if r >= utf8.RuneSelf {
 				return fmt.Errorf("--%s contains non-ASCII character %q at position %d; use ASCII equivalents (e.g. '-' instead of '—')", field.label, r, i)
 			}
 		}
@@ -341,8 +345,8 @@ func validateRegistrationParams(p *registerParams) error {
 	// value (third colon-separated field) so this check fires here alongside the
 	// other pre-flight validations rather than only inside ParseFunctionFlags.
 	for _, flagVal := range p.functionFlags {
-		parts := strings.SplitN(strings.TrimSpace(flagVal), ":", 3)
-		if len(parts) < 3 {
+		parts := strings.SplitN(strings.TrimSpace(flagVal), ":", functionFlagFieldCount)
+		if len(parts) < functionFlagFieldCount {
 			continue // no tag section; length/name validated in ParseFunctionFlags
 		}
 		var count int
@@ -366,7 +370,7 @@ func validateRegistrationParams(p *registerParams) error {
 func lintCardFieldsASCII(data json.RawMessage) error {
 	var v any
 	if err := json.Unmarshal(data, &v); err != nil {
-		return nil // malformed JSON is the server's validation, not ours
+		return nil //nolint:nilerr // malformed JSON is the RA's validation surface, not this client-side ASCII lint
 	}
 	return checkValueASCII(v, "")
 }
@@ -374,33 +378,48 @@ func lintCardFieldsASCII(data json.RawMessage) error {
 func checkValueASCII(v any, path string) error {
 	switch val := v.(type) {
 	case string:
-		for i, r := range val {
-			if r > 127 {
-				if path != "" {
-					return fmt.Errorf("card field %q contains non-ASCII character %q at byte offset %d; use ASCII equivalents (e.g. '-' instead of '—')", path, r, i)
-				}
-				return fmt.Errorf("card content contains non-ASCII character %q at byte offset %d; use ASCII equivalents", r, i)
-			}
-		}
+		return checkStringASCII(val, path)
 	case map[string]any:
-		for k, child := range val {
-			childPath := k
-			if path != "" {
-				childPath = path + "." + k
-			}
-			if err := checkValueASCII(child, childPath); err != nil {
-				return err
-			}
-		}
+		return checkMapASCII(val, path)
 	case []any:
-		for i, child := range val {
-			childPath := fmt.Sprintf("%s[%d]", path, i)
-			if path == "" {
-				childPath = fmt.Sprintf("[%d]", i)
+		return checkSliceASCII(val, path)
+	}
+	return nil
+}
+
+func checkStringASCII(val, path string) error {
+	for i, r := range val {
+		if r >= utf8.RuneSelf {
+			if path != "" {
+				return fmt.Errorf("card field %q contains non-ASCII character %q at byte offset %d; use ASCII equivalents (e.g. '-' instead of '—')", path, r, i)
 			}
-			if err := checkValueASCII(child, childPath); err != nil {
-				return err
-			}
+			return fmt.Errorf("card content contains non-ASCII character %q at byte offset %d; use ASCII equivalents", r, i)
+		}
+	}
+	return nil
+}
+
+func checkMapASCII(val map[string]any, path string) error {
+	for k, child := range val {
+		childPath := k
+		if path != "" {
+			childPath = path + "." + k
+		}
+		if err := checkValueASCII(child, childPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkSliceASCII(val []any, path string) error {
+	for i, child := range val {
+		childPath := fmt.Sprintf("[%d]", i)
+		if path != "" {
+			childPath = fmt.Sprintf("%s[%d]", path, i)
+		}
+		if err := checkValueASCII(child, childPath); err != nil {
+			return err
 		}
 	}
 	return nil
