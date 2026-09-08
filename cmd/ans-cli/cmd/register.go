@@ -3,7 +3,10 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -12,6 +15,8 @@ import (
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
+
+const maxDescriptionLen = 150
 
 // registerParams carries the register command's flag values. A struct
 // (matching searchParams/eventsParams) rather than positional
@@ -136,6 +141,10 @@ func runRegisterWithParams(p *registerParams) error {
 		return err
 	}
 
+	if err := validateRegistrationParams(p); err != nil {
+		return err
+	}
+
 	// Build registration request
 	req := &models.AgentRegistrationRequest{
 		AgentDisplayName: p.name,
@@ -167,6 +176,10 @@ func runRegisterWithParams(p *registerParams) error {
 	ctx := context.Background()
 	result, err := c.RegisterAgent(ctx, req)
 	if err != nil {
+		var respErr *models.ResponseError
+		if errors.As(err, &respErr) && len(respErr.Details) > 0 {
+			printResponseErrorDetails(os.Stderr, respErr)
+		}
 		return fmt.Errorf("registration failed: %w", err)
 	}
 
@@ -295,5 +308,93 @@ func printResultLinks(links []models.Link) {
 	fmt.Fprintln(os.Stdout, "\nLinks:")
 	for _, link := range links {
 		fmt.Fprintf(os.Stdout, "  %s: %s\n", link.Rel, link.Href)
+	}
+}
+
+// validateRegistrationParams checks operator-supplied flag values before the
+// HTTP call so that common mistakes fail fast with guidance instead of
+// round-tripping to a server 422.
+func validateRegistrationParams(p *registerParams) error {
+	if len(p.description) > maxDescriptionLen {
+		return fmt.Errorf("description exceeds maximum length of %d characters (got %d)", maxDescriptionLen, len(p.description))
+	}
+	// Agent name and description are sealed into the signed card; non-ASCII
+	// characters (e.g. an em-dash from copy-paste) cause JCS byte-level
+	// mismatches across verifier implementations.
+	for _, field := range []struct{ label, value string }{
+		{"name", p.name},
+		{"description", p.description},
+	} {
+		for i, r := range field.value {
+			if r > 127 {
+				return fmt.Errorf("--%s contains non-ASCII character %q at position %d; use ASCII equivalents (e.g. '-' instead of '—')", field.label, r, i)
+			}
+		}
+	}
+	return nil
+}
+
+// lintCardFieldsASCII returns an error if any string value in the JSON card
+// contains a non-ASCII character. An em-dash or other multi-byte rune in a
+// skill description breaks cross-verifier signature comparison at the byte
+// level because JCS escaping diverges between implementations.
+func lintCardFieldsASCII(data json.RawMessage) error {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil // malformed JSON is the server's validation, not ours
+	}
+	return checkValueASCII(v, "")
+}
+
+func checkValueASCII(v any, path string) error {
+	switch val := v.(type) {
+	case string:
+		for i, r := range val {
+			if r > 127 {
+				if path != "" {
+					return fmt.Errorf("card field %q contains non-ASCII character %q at byte offset %d; use ASCII equivalents (e.g. '-' instead of '—')", path, r, i)
+				}
+				return fmt.Errorf("card content contains non-ASCII character %q at byte offset %d; use ASCII equivalents", r, i)
+			}
+		}
+	case map[string]any:
+		for k, child := range val {
+			childPath := k
+			if path != "" {
+				childPath = path + "." + k
+			}
+			if err := checkValueASCII(child, childPath); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, child := range val {
+			childPath := fmt.Sprintf("%s[%d]", path, i)
+			if path == "" {
+				childPath = fmt.Sprintf("[%d]", i)
+			}
+			if err := checkValueASCII(child, childPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// printResponseErrorDetails renders the Details map from a ResponseError to w.
+// Called when a registration HTTP call returns a structured error with detail
+// fields (e.g. a 422 with per-field validation messages) so the operator sees
+// exactly which fields need fixing without having to parse the raw body.
+func printResponseErrorDetails(w io.Writer, e *models.ResponseError) {
+	if len(e.Details) == 0 {
+		return
+	}
+	statusText := http.StatusText(e.StatusCode)
+	if statusText == "" {
+		statusText = fmt.Sprintf("HTTP %d", e.StatusCode)
+	}
+	fmt.Fprintf(w, "\nRegistration rejected (%d %s):\n", e.StatusCode, statusText)
+	for k, v := range e.Details {
+		fmt.Fprintf(w, "  %s: %v\n", k, v)
 	}
 }
