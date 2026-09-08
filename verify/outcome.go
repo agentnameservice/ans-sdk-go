@@ -36,6 +36,13 @@ const (
 	OutcomeDANERejection
 	// OutcomeScittError indicates a SCITT verification error.
 	OutcomeScittError
+	// OutcomeReachable indicates the agent card was fetched successfully but
+	// the agent is not registered in the ANS Transparency Log. This outcome
+	// is distinct from OutcomeVerified: a caller can trust that the card
+	// content is reachable and self-consistent, but cannot trust that it has
+	// been sealed by a neutral third-party log. Use IsANSVerified() and
+	// IsReachable() to test each condition independently.
+	OutcomeReachable
 )
 
 // VerificationTier represents the level of SCITT verification achieved.
@@ -66,6 +73,15 @@ type VerificationOutcome struct {
 	Type OutcomeType
 	// Tier indicates the SCITT verification level achieved (defaults to TierBadgeOnly).
 	Tier VerificationTier
+	// ANSVerified is true when the agent's identity has been proven via a valid
+	// ANS Transparency Log entry. It is set only for OutcomeVerified outcomes.
+	// Callers that want to distinguish TL-proven identity from mere card
+	// reachability should test this field rather than checking Type directly.
+	ANSVerified bool
+	// Reachable is true when the agent card was fetched successfully, regardless
+	// of whether the agent is registered in the ANS Transparency Log. It is set
+	// for both OutcomeVerified and OutcomeReachable outcomes.
+	Reachable bool
 	// Badge is the badge if verification partially completed (may be nil).
 	Badge *models.Badge
 	// MatchedFingerprint is the fingerprint that matched (for successful verification).
@@ -87,11 +103,28 @@ type VerificationOutcome struct {
 }
 
 // NewVerifiedOutcome creates a successful verification outcome.
+// ANSVerified and Reachable are both set to true: the agent card was fetched
+// and the agent's identity is proven via a Transparency Log entry.
 func NewVerifiedOutcome(badge *models.Badge, fingerprint CertFingerprint) *VerificationOutcome {
 	return &VerificationOutcome{
 		Type:               OutcomeVerified,
+		ANSVerified:        true,
+		Reachable:          true,
 		Badge:              badge,
 		MatchedFingerprint: &fingerprint,
+	}
+}
+
+// NewReachableOutcome creates an outcome for an agent whose card was fetched
+// successfully but which is not registered in the ANS Transparency Log.
+// Reachable is true; ANSVerified is false. IsSuccess() returns false because
+// TL-proof is absent, but callers that only require card reachability may test
+// IsReachable() directly.
+func NewReachableOutcome(badge *models.Badge) *VerificationOutcome {
+	return &VerificationOutcome{
+		Type:      OutcomeReachable,
+		Reachable: true,
+		Badge:     badge,
 	}
 }
 
@@ -201,8 +234,24 @@ func NewScittErrorOutcome(err error) *VerificationOutcome {
 }
 
 // IsSuccess returns true if verification was successful or fail-open was applied.
+// An OutcomeReachable result is not considered a success: the agent card was
+// fetched, but TL-proof is absent. Callers that accept reachable-without-TL
+// should test IsReachable() directly.
 func (o *VerificationOutcome) IsSuccess() bool {
 	return o.Type == OutcomeVerified || o.Type == OutcomeFailOpen
+}
+
+// IsReachable returns true if the agent card was fetched successfully,
+// regardless of ANS Transparency Log registration status. Both
+// OutcomeVerified and OutcomeReachable outcomes set this to true.
+func (o *VerificationOutcome) IsReachable() bool {
+	return o.Reachable
+}
+
+// IsANSVerified returns true when the agent's identity is proven via a valid
+// ANS Transparency Log entry. Only OutcomeVerified sets this to true.
+func (o *VerificationOutcome) IsANSVerified() bool {
+	return o.ANSVerified
 }
 
 // IsFailOpen returns true if verification was skipped due to fail-open policy.
@@ -216,9 +265,11 @@ func (o *VerificationOutcome) IsNotAnsAgent() bool {
 }
 
 // ToError converts the outcome to an error if verification failed.
+// OutcomeReachable returns nil because the card was fetched successfully;
+// the caller is responsible for deciding whether TL-proof (ANSVerified) is required.
 func (o *VerificationOutcome) ToError() error {
 	switch o.Type {
-	case OutcomeVerified, OutcomeFailOpen:
+	case OutcomeVerified, OutcomeFailOpen, OutcomeReachable:
 		return nil
 	case OutcomeNotAnsAgent:
 		// If an underlying error exists, return it directly for better context

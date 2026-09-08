@@ -243,6 +243,92 @@ func TestOutcome_ToError(t *testing.T) {
 	}
 }
 
+// TestOutcomeReachable exercises the new OutcomeReachable type and
+// ANSVerified/Reachable boolean fields introduced by issue #64.
+func TestOutcomeReachable(t *testing.T) {
+	t.Parallel()
+
+	badge := &models.Badge{Status: models.BadgeStatusActive}
+
+	t.Run("NewReachableOutcome sets type and Reachable flag", func(t *testing.T) {
+		t.Parallel()
+		o := NewReachableOutcome(badge)
+		if o.Type != OutcomeReachable {
+			t.Errorf("Type = %v, want OutcomeReachable", o.Type)
+		}
+		if !o.Reachable {
+			t.Error("Reachable = false, want true")
+		}
+		if o.ANSVerified {
+			t.Error("ANSVerified = true, want false for reachable-only outcome")
+		}
+		if o.Badge != badge {
+			t.Error("Badge not set")
+		}
+	})
+
+	t.Run("NewVerifiedOutcome sets ANSVerified and Reachable", func(t *testing.T) {
+		t.Parallel()
+		fp := CertFingerprintFromBytes([32]byte{1, 2, 3})
+		o := NewVerifiedOutcome(badge, fp)
+		if !o.ANSVerified {
+			t.Error("ANSVerified = false, want true for verified outcome")
+		}
+		if !o.Reachable {
+			t.Error("Reachable = false, want true for verified outcome")
+		}
+	})
+
+	t.Run("OutcomeReachable is not a success", func(t *testing.T) {
+		t.Parallel()
+		o := NewReachableOutcome(badge)
+		if o.IsSuccess() {
+			t.Error("IsSuccess() = true for OutcomeReachable; want false (card fetched, not TL-proven)")
+		}
+	})
+
+	t.Run("IsReachable helper", func(t *testing.T) {
+		t.Parallel()
+		o := NewReachableOutcome(badge)
+		if !o.IsReachable() {
+			t.Error("IsReachable() = false, want true")
+		}
+		o2 := NewNotAnsAgentOutcome("host.example.com")
+		if o2.IsReachable() {
+			t.Error("IsReachable() = true for NotAnsAgent, want false")
+		}
+	})
+
+	t.Run("IsANSVerified helper", func(t *testing.T) {
+		t.Parallel()
+		fp := CertFingerprintFromBytes([32]byte{4, 5, 6})
+		o := NewVerifiedOutcome(badge, fp)
+		if !o.IsANSVerified() {
+			t.Error("IsANSVerified() = false for verified outcome, want true")
+		}
+		o2 := NewReachableOutcome(badge)
+		if o2.IsANSVerified() {
+			t.Error("IsANSVerified() = true for reachable-only outcome, want false")
+		}
+	})
+
+	t.Run("OutcomeReachable ToError returns nil", func(t *testing.T) {
+		t.Parallel()
+		o := NewReachableOutcome(badge)
+		if err := o.ToError(); err != nil {
+			t.Errorf("ToError() = %v, want nil for reachable outcome", err)
+		}
+	})
+
+	t.Run("OutcomeReachable not in IsNotAnsAgent", func(t *testing.T) {
+		t.Parallel()
+		o := NewReachableOutcome(badge)
+		if o.IsNotAnsAgent() {
+			t.Error("IsNotAnsAgent() = true for reachable outcome, want false")
+		}
+	})
+}
+
 func containsStr(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
