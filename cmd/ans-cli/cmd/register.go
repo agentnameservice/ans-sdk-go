@@ -16,7 +16,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const maxDescriptionLen = 150
+const (
+	maxDescriptionLen = 150
+	// maxTags is the maximum number of tags allowed per agent function. The server
+	// rejects requests that exceed this limit; the CLI enforces it client-side so
+	// operators see a clear message before the HTTP call.
+	maxTags = 5
+)
 
 // registerParams carries the register command's flag values. A struct
 // (matching searchParams/eventsParams) rather than positional
@@ -329,6 +335,25 @@ func validateRegistrationParams(p *registerParams) error {
 			if r > 127 {
 				return fmt.Errorf("--%s contains non-ASCII character %q at position %d; use ASCII equivalents (e.g. '-' instead of '—')", field.label, r, i)
 			}
+		}
+	}
+	// Each function may carry at most maxTags tags. Count them from the raw flag
+	// value (third colon-separated field) so this check fires here alongside the
+	// other pre-flight validations rather than only inside ParseFunctionFlags.
+	for _, flagVal := range p.functionFlags {
+		parts := strings.SplitN(strings.TrimSpace(flagVal), ":", 3)
+		if len(parts) < 3 {
+			continue // no tag section; length/name validated in ParseFunctionFlags
+		}
+		var count int
+		for _, t := range strings.Split(parts[2], ",") {
+			if strings.TrimSpace(t) != "" {
+				count++
+			}
+		}
+		if count > maxTags {
+			fnID := strings.TrimSpace(parts[0])
+			return fmt.Errorf("function %q has %d tags; maximum is %d", fnID, count, maxTags)
 		}
 	}
 	return nil
