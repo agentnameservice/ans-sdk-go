@@ -36,6 +36,13 @@ const (
 	OutcomeDANERejection
 	// OutcomeScittError indicates a SCITT verification error.
 	OutcomeScittError
+	// OutcomeReachable indicates the agent card was successfully fetched and is
+	// cryptographically valid, but the agent is NOT registered in the ANS
+	// Transparency Log. Use IsReachable() to test this condition independently of
+	// ANS registration (e.g. for Infoblox DDI agents or other non-ANS agents that
+	// carry signed cards with jku and enforce OAuth2). IsSuccess() returns false
+	// for this outcome because it does not satisfy ANS Transparency Log proof.
+	OutcomeReachable
 )
 
 // VerificationTier represents the level of SCITT verification achieved.
@@ -100,6 +107,19 @@ func NewNotAnsAgentOutcome(host string) *VerificationOutcome {
 	return &VerificationOutcome{
 		Type: OutcomeNotAnsAgent,
 		Host: host,
+	}
+}
+
+// NewReachableOutcome creates a reachable-but-not-ANS-registered outcome. The
+// agent card was fetched and is valid, but the host has no ANS Transparency Log
+// entry. Callers interoperating with non-ANS agents (e.g. agents with a signed
+// card and jku but no _ans-badge TXT record) should test IsReachable() rather
+// than IsSuccess() when ANS registration is optional.
+func NewReachableOutcome(host string, badge *models.Badge) *VerificationOutcome {
+	return &VerificationOutcome{
+		Type:  OutcomeReachable,
+		Host:  host,
+		Badge: badge,
 	}
 }
 
@@ -215,10 +235,18 @@ func (o *VerificationOutcome) IsNotAnsAgent() bool {
 	return o.Type == OutcomeNotAnsAgent
 }
 
+// IsReachable returns true if the agent card was successfully fetched,
+// regardless of whether the agent is registered in the ANS Transparency Log.
+// OutcomeVerified and OutcomeReachable both satisfy this condition.
+// Use this instead of IsSuccess() when interoperating with non-ANS agents.
+func (o *VerificationOutcome) IsReachable() bool {
+	return o.Type == OutcomeVerified || o.Type == OutcomeReachable
+}
+
 // ToError converts the outcome to an error if verification failed.
 func (o *VerificationOutcome) ToError() error {
 	switch o.Type {
-	case OutcomeVerified, OutcomeFailOpen:
+	case OutcomeVerified, OutcomeFailOpen, OutcomeReachable:
 		return nil
 	case OutcomeNotAnsAgent:
 		// If an underlying error exists, return it directly for better context

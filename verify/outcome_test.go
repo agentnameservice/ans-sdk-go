@@ -342,3 +342,78 @@ func TestVerificationTierDefaultsToZero(t *testing.T) {
 		t.Errorf("default Tier = %v, want TierBadgeOnly", outcome.Tier)
 	}
 }
+
+func TestOutcomeReachable(t *testing.T) {
+	badge := &models.Badge{Status: models.BadgeStatusActive}
+
+	outcome := NewReachableOutcome("test.example.com", badge)
+
+	if outcome.Type != OutcomeReachable {
+		t.Errorf("Type = %v, want OutcomeReachable", outcome.Type)
+	}
+	if outcome.Host != "test.example.com" {
+		t.Errorf("Host = %q, want %q", outcome.Host, "test.example.com")
+	}
+	if outcome.Badge != badge {
+		t.Error("Badge not set on ReachableOutcome")
+	}
+	if outcome.IsSuccess() {
+		t.Error("IsSuccess() = true for ReachableOutcome, want false (not ANS-verified)")
+	}
+	if !outcome.IsReachable() {
+		t.Error("IsReachable() = false for ReachableOutcome, want true")
+	}
+	if err := outcome.ToError(); err != nil {
+		t.Errorf("ToError() = %v, want nil (reachable is not an error condition)", err)
+	}
+}
+
+func TestIsReachable(t *testing.T) {
+	badge := &models.Badge{Status: models.BadgeStatusActive}
+	fp := CertFingerprintFromBytes([32]byte{1})
+
+	tests := []struct {
+		name    string
+		outcome *VerificationOutcome
+		want    bool
+	}{
+		{
+			name:    "Verified is reachable",
+			outcome: NewVerifiedOutcome(badge, fp),
+			want:    true,
+		},
+		{
+			name:    "Reachable is reachable",
+			outcome: NewReachableOutcome("host.example.com", badge),
+			want:    true,
+		},
+		{
+			name:    "NotAnsAgent is not reachable",
+			outcome: NewNotAnsAgentOutcome("host.example.com"),
+			want:    false,
+		},
+		{
+			name:    "DNSError is not reachable",
+			outcome: NewDNSErrorOutcome(errors.New("dns error")),
+			want:    false,
+		},
+		{
+			name:    "FailOpen is not reachable",
+			outcome: NewFailOpenOutcome(errors.New("underlying")),
+			want:    false,
+		},
+		{
+			name:    "FingerprintMismatch is not reachable",
+			outcome: NewFingerprintMismatchOutcome(badge, "exp", "act"),
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.outcome.IsReachable(); got != tt.want {
+				t.Errorf("IsReachable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
