@@ -49,7 +49,7 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	cmd.Flags().StringVar(&p.serverCSR, "server-csr", "", "Path to server CSR PEM file")
 	cmd.Flags().StringVar(&p.serverCert, "server-cert", "", "Path to server certificate PEM file (BYOC)")
 	cmd.Flags().StringVar(&p.endpointURL, "endpoint-url", "", "Agent endpoint URL (required)")
-	cmd.Flags().StringVar(&p.metaDataURL, "metadata-url", "", "Agent metadata URL (e.g., /.well-known/agent-card.json)")
+	cmd.Flags().StringVar(&p.metaDataURL, "metadata-url", "", "Agent metadata URL, absolute https (e.g., https://myagent.example.com/.well-known/agent-card.json)")
 	cmd.Flags().StringVar(&p.endpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
 	cmd.Flags().StringSliceVar(&p.endpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
 	cmd.Flags().StringArrayVar(&p.functionFlags, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
