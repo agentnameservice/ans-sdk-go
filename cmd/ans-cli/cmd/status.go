@@ -64,7 +64,7 @@ func printAgentDetails(agent *models.AgentDetails) {
 	printDNSRecords(agent.DNSRecords)
 
 	if agent.RegistrationPending != nil {
-		printRegistrationPending(agent.RegistrationPending)
+		printRegistrationPending(agent.AgentID, agent.RegistrationPending)
 	}
 
 	printTimestamps(agent)
@@ -171,7 +171,7 @@ func printLinks(links []models.Link) {
 	}
 }
 
-func printRegistrationPending(pending *models.RegistrationPending) {
+func printRegistrationPending(agentID string, pending *models.RegistrationPending) {
 	fmt.Fprintln(os.Stdout, "\nRegistration Pending:")
 	fmt.Fprintf(os.Stdout, "  Status: %s\n", pending.Status)
 
@@ -190,6 +190,7 @@ func printRegistrationPending(pending *models.RegistrationPending) {
 	}
 
 	if len(pending.DNSRecords) > 0 {
+		fmt.Fprintf(os.Stdout, "\nPublish these DNS records, then run: ans-cli verify-dns %s\n", agentID)
 		printDNSRecords(pending.DNSRecords)
 	}
 
