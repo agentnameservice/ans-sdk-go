@@ -79,6 +79,9 @@ type DANEOutcome struct {
 	Type DANEOutcomeType
 	// Records contains the TLSA records found (if any).
 	Records []TLSARecord
+	// MatchedRecord is the specific TLSA record that matched the certificate.
+	// It is set only when Type == DANEVerified; nil otherwise.
+	MatchedRecord *TLSARecord
 	// Error is the underlying error (if any).
 	Error error
 }
@@ -189,9 +192,9 @@ func (d *DANEVerifier) Verify(ctx context.Context, fqdn models.Fqdn, port uint16
 	// hash, and vice versa.
 	//
 	// Fingerprint-only fallback: a CertIdentity built from a bare SHA-256 fingerprint has
-	// no DER, so it cannot recompute per-selector data. For those callers we compare the
-	// full-cert SHA-256 fingerprint directly against the record hash regardless of
-	// selector — the pre-DER behavior, kept so fingerprint-only callers do not regress.
+	// no DER, so it cannot recompute per-selector data. The fallback accepts only 3 0 1
+	// records (full-cert, SHA-256) — the form the ANS RA emits. SPKI (selector 1) or
+	// non-SHA256 matching types are skipped, matching Rust's matches_fingerprint behavior.
 	hasDER := len(cert.Raw) > 0
 	certHex := strings.ToLower(cert.Fingerprint.ToHex())
 	for _, rec := range result.Records {
@@ -202,12 +205,18 @@ func (d *DANEVerifier) Verify(ctx context.Context, fqdn models.Fqdn, port uint16
 		if hasDER {
 			want, ok := tlsaAssociation(cert, rec.Selector, rec.MatchingType)
 			if ok && want == recHash {
-				return &DANEOutcome{Type: DANEVerified, Records: result.Records}
+				matched := rec
+				return &DANEOutcome{Type: DANEVerified, Records: result.Records, MatchedRecord: &matched}
 			}
 			continue
 		}
+		// Fingerprint-only: only 3 0 1 (full-cert SHA-256) is evaluable.
+		if rec.Selector != tlsaSelectorFullDER || rec.MatchingType != tlsaMatchSHA256 {
+			continue
+		}
 		if recHash == certHex {
-			return &DANEOutcome{Type: DANEVerified, Records: result.Records}
+			matched := rec
+			return &DANEOutcome{Type: DANEVerified, Records: result.Records, MatchedRecord: &matched}
 		}
 	}
 

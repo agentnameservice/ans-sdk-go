@@ -47,7 +47,7 @@ func TestDANEVerifier(t *testing.T) {
 				Found:       true,
 				DNSSECValid: true,
 				Records: []TLSARecord{
-					{Usage: 3, Selector: 1, MatchingType: 1, CertHash: testHex},
+					{Usage: 3, Selector: 0, MatchingType: 1, CertHash: testHex},
 				},
 			}),
 			cert:         createTestCertIdentity(testHost, testFP),
@@ -101,8 +101,8 @@ func TestDANEVerifier(t *testing.T) {
 				Found:       true,
 				DNSSECValid: true,
 				Records: []TLSARecord{
-					{Usage: 3, Selector: 1, MatchingType: 1, CertHash: otherHex},
-					{Usage: 3, Selector: 1, MatchingType: 1, CertHash: testHex},
+					{Usage: 3, Selector: 0, MatchingType: 1, CertHash: otherHex},
+					{Usage: 3, Selector: 0, MatchingType: 1, CertHash: testHex},
 				},
 			}),
 			cert:         createTestCertIdentity(testHost, testFP),
@@ -134,7 +134,7 @@ func TestDANEVerifier(t *testing.T) {
 				Found:       true,
 				DNSSECValid: true,
 				Records: []TLSARecord{
-					{Usage: 3, Selector: 1, MatchingType: 1, CertHash: strings.ToUpper(testHex)},
+					{Usage: 3, Selector: 0, MatchingType: 1, CertHash: strings.ToUpper(testHex)},
 				},
 			}),
 			cert:         createTestCertIdentity(testHost, testFP),
@@ -480,21 +480,22 @@ func TestDANEVerifier_SelectorMatchingType(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		records []TLSARecord
-		want    DANEOutcomeType
+		name        string
+		records     []TLSARecord
+		want        DANEOutcomeType
+		wantMatched bool // MatchedRecord should be non-nil when true
 	}{
-		{"3 0 1 full-cert sha256 matches", []TLSARecord{rec(0, 1, fullSHA256)}, DANEVerified},
-		{"3 1 1 spki sha256 matches", []TLSARecord{rec(1, 1, spkiSHA256)}, DANEVerified},
-		{"3 0 2 full-cert sha512 matches", []TLSARecord{rec(0, 2, fullSHA512)}, DANEVerified},
-		{"3 1 2 spki sha512 matches", []TLSARecord{rec(1, 2, spkiSHA512)}, DANEVerified},
-		{"3 0 0 full-cert exact matches", []TLSARecord{rec(0, 0, hex.EncodeToString(cert.Raw))}, DANEVerified},
+		{"3 0 1 full-cert sha256 matches", []TLSARecord{rec(0, 1, fullSHA256)}, DANEVerified, true},
+		{"3 1 1 spki sha256 matches", []TLSARecord{rec(1, 1, spkiSHA256)}, DANEVerified, true},
+		{"3 0 2 full-cert sha512 matches", []TLSARecord{rec(0, 2, fullSHA512)}, DANEVerified, true},
+		{"3 1 2 spki sha512 matches", []TLSARecord{rec(1, 2, spkiSHA512)}, DANEVerified, true},
+		{"3 0 0 full-cert exact matches", []TLSARecord{rec(0, 0, hex.EncodeToString(cert.Raw))}, DANEVerified, true},
 		// Silent-bug regression: a selector-1 (SPKI) record carrying the full-cert hash
 		// must NOT match, because selector 1 means "compare against the SPKI hash".
-		{"selector honored: 3 1 1 holding full-cert hash does not match", []TLSARecord{rec(1, 1, fullSHA256)}, DANEMismatch},
-		{"selector honored: 3 0 1 holding spki hash does not match", []TLSARecord{rec(0, 1, spkiSHA256)}, DANEMismatch},
-		{"multiple records, only spki-selector one correct", []TLSARecord{rec(0, 1, spkiSHA256), rec(1, 1, spkiSHA256)}, DANEVerified},
-		{"unknown selector is skipped", []TLSARecord{rec(9, 1, fullSHA256)}, DANEMismatch},
+		{"selector honored: 3 1 1 holding full-cert hash does not match", []TLSARecord{rec(1, 1, fullSHA256)}, DANEMismatch, false},
+		{"selector honored: 3 0 1 holding spki hash does not match", []TLSARecord{rec(0, 1, spkiSHA256)}, DANEMismatch, false},
+		{"multiple records, only spki-selector one correct", []TLSARecord{rec(0, 1, spkiSHA256), rec(1, 1, spkiSHA256)}, DANEVerified, true},
+		{"unknown selector is skipped", []TLSARecord{rec(9, 1, fullSHA256)}, DANEMismatch, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -505,13 +506,21 @@ func TestDANEVerifier_SelectorMatchingType(t *testing.T) {
 			if out.Type != tt.want {
 				t.Errorf("Verify() = %v, want %v", out.Type, tt.want)
 			}
+			if tt.wantMatched && out.MatchedRecord == nil {
+				t.Error("MatchedRecord is nil, want non-nil on DANEVerified")
+			}
+			if !tt.wantMatched && out.MatchedRecord != nil {
+				t.Errorf("MatchedRecord = %+v, want nil on non-DANEVerified", out.MatchedRecord)
+			}
 		})
 	}
 }
 
-// TestDANEVerifier_FingerprintOnlyFallback confirms that a CertIdentity built from a bare
-// fingerprint (no DER material) still matches via the full-cert SHA-256, regardless of the
-// record's selector — the legacy path, kept so fingerprint-only callers do not regress.
+// TestDANEVerifier_FingerprintOnlyFallback confirms the fingerprint-only path behavior for
+// a CertIdentity built from a bare fingerprint (no DER material):
+//   - A 3 0 1 record (full-cert SHA-256, the form the ANS RA emits) matches and sets MatchedRecord.
+//   - A 3 1 1 record (SPKI) does NOT match even when its CertHash equals the full-cert hash,
+//     because the fingerprint-only path cannot evaluate SPKI records without DER.
 func TestDANEVerifier_FingerprintOnlyFallback(t *testing.T) {
 	const host = "agent.example.com"
 	fqdn, _ := models.NewFqdn(host)
@@ -519,14 +528,36 @@ func TestDANEVerifier_FingerprintOnlyFallback(t *testing.T) {
 	const fpHex = "e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
 	id := createTestCertIdentity(host, fp)
 
-	resolver := NewMockDANEResolver().WithTLSA(host, 443, TLSALookupResult{
-		Found: true, DNSSECValid: true,
-		Records: []TLSARecord{{Usage: 3, Selector: 1, MatchingType: 1, CertHash: fpHex}},
+	t.Run("3 0 1 matches and sets MatchedRecord", func(t *testing.T) {
+		resolver := NewMockDANEResolver().WithTLSA(host, 443, TLSALookupResult{
+			Found: true, DNSSECValid: true,
+			Records: []TLSARecord{{Usage: 3, Selector: 0, MatchingType: 1, CertHash: fpHex}},
+		})
+		out := NewDANEVerifier(resolver).Verify(context.Background(), fqdn, 443, id)
+		if out.Type != DANEVerified {
+			t.Errorf("3 0 1 fingerprint-only = %v, want DANEVerified", out.Type)
+		}
+		if out.MatchedRecord == nil {
+			t.Error("MatchedRecord is nil, want the matched TLSARecord")
+		} else if out.MatchedRecord.Selector != 0 || out.MatchedRecord.MatchingType != 1 {
+			t.Errorf("MatchedRecord = {Selector:%d MatchingType:%d}, want {0 1}",
+				out.MatchedRecord.Selector, out.MatchedRecord.MatchingType)
+		}
 	})
-	out := NewDANEVerifier(resolver).Verify(context.Background(), fqdn, 443, id)
-	if out.Type != DANEVerified {
-		t.Errorf("fingerprint-only fallback = %v, want DANEVerified", out.Type)
-	}
+
+	t.Run("3 1 1 with full-cert hash is rejected (selector not evaluable without DER)", func(t *testing.T) {
+		resolver := NewMockDANEResolver().WithTLSA(host, 443, TLSALookupResult{
+			Found: true, DNSSECValid: true,
+			Records: []TLSARecord{{Usage: 3, Selector: 1, MatchingType: 1, CertHash: fpHex}},
+		})
+		out := NewDANEVerifier(resolver).Verify(context.Background(), fqdn, 443, id)
+		if out.Type != DANEMismatch {
+			t.Errorf("3 1 1 fingerprint-only = %v, want DANEMismatch", out.Type)
+		}
+		if out.MatchedRecord != nil {
+			t.Error("MatchedRecord should be nil on mismatch")
+		}
+	})
 }
 
 func TestServerVerifier_DANEIntegration(t *testing.T) {
@@ -551,7 +582,7 @@ func TestServerVerifier_DANEIntegration(t *testing.T) {
 		daneResolver := NewMockDANEResolver().WithTLSA(host, 443, TLSALookupResult{
 			Found:       true,
 			DNSSECValid: true,
-			Records:     []TLSARecord{{Usage: 3, Selector: 1, MatchingType: 1, CertHash: fpHex}},
+			Records:     []TLSARecord{{Usage: 3, Selector: 0, MatchingType: 1, CertHash: fpHex}},
 		})
 
 		verifier := NewServerVerifier(
