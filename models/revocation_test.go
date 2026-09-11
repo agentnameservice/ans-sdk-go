@@ -18,9 +18,8 @@ func TestIsValidRevocationReason(t *testing.T) {
 		{name: "CERTIFICATE_HOLD accepted", reason: RevocationReasonCertificateHold, want: true},
 		{name: "PRIVILEGE_WITHDRAWN accepted", reason: RevocationReasonPrivilegeWithdrawn, want: true},
 		{name: "AA_COMPROMISE accepted", reason: RevocationReasonAACompromise, want: true},
-		// Reserved for the registry's internal successor-deprecation flow.
-		{name: "SUPERSEDED rejected", reason: RevocationReasonSuperseded, want: false},
-		// RFC-only codes with no registry enum value.
+		{name: "SUPERSEDED accepted", reason: RevocationReasonSuperseded, want: true},
+		// RFC-only codes not in the registry enum.
 		{name: "CA_COMPROMISE rejected", reason: RevocationReasonCACompromise, want: false},
 		{name: "EXPIRED_CERT rejected", reason: RevocationReasonExpiredCert, want: false},
 		{name: "REMOVE_FROM_CRL rejected", reason: RevocationReasonRemoveFromCRL, want: false},

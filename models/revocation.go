@@ -2,16 +2,19 @@ package models
 
 import "time"
 
-// IsValidRevocationReason reports whether the ANS registry accepts this reason
-// from an API caller. SUPERSEDED is reserved for the registry's internal
-// successor-deprecation flow, and the RFC-only codes (CA_COMPROMISE,
-// EXPIRED_CERT, REMOVE_FROM_CRL, UNSPECIFIED) have no registry enum value.
+// IsValidRevocationReason reports whether r is a valid revocation reason for
+// this registry. The RFC-only codes (CA_COMPROMISE, EXPIRED_CERT,
+// REMOVE_FROM_CRL, UNSPECIFIED) are not in the registry enum and are rejected.
 func IsValidRevocationReason(r RevocationReason) bool {
 	switch r {
 	case RevocationReasonKeyCompromise, RevocationReasonCessationOfOperation,
-		RevocationReasonAffiliationChanged, RevocationReasonCertificateHold,
-		RevocationReasonPrivilegeWithdrawn, RevocationReasonAACompromise:
+		RevocationReasonAffiliationChanged, RevocationReasonSuperseded,
+		RevocationReasonCertificateHold, RevocationReasonPrivilegeWithdrawn,
+		RevocationReasonAACompromise:
 		return true
+	case RevocationReasonCACompromise, RevocationReasonExpiredCert,
+		RevocationReasonRemoveFromCRL, RevocationReasonUnspecified:
+		return false
 	default:
 		return false
 	}

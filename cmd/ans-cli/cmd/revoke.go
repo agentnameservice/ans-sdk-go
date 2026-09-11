@@ -25,19 +25,17 @@ func buildRevokeCmd() *cobra.Command {
 
 Revocation reasons the registry accepts:
   KEY_COMPROMISE          - Private key was compromised
-  CESSATION_OF_OPERATION  - Agent is no longer operational (use this to cancel a pending registration)
+  CESSATION_OF_OPERATION  - Agent is no longer operational
   AFFILIATION_CHANGED     - Agent ownership/affiliation changed
+  SUPERSEDED              - Replaced by a newer agent version
   CERTIFICATE_HOLD        - Temporarily suspended
   PRIVILEGE_WITHDRAWN     - Authorization was revoked
   AA_COMPROMISE           - Attribute authority was compromised
 
-SUPERSEDED is reserved for the registry's own successor-deprecation flow and is
-rejected for API callers. To retire a version in favor of a newer one, register
-the new version and revoke the old with CESSATION_OF_OPERATION.
-
-Revoking a PENDING (not yet ACTIVE) registration cancels it: no certificate was
-sealed and no transparency-log event is written. The name and version become
-reusable once the call returns.
+Revoking a PENDING_CERTS or PENDING_DNS registration cancels it: no certificate
+was sealed and no transparency-log event is written. The name and version become
+reusable once the call returns. A PENDING_VALIDATION registration cannot be
+canceled; it auto-expires after the challenge window closes.
 
 Examples:
   ans-cli revoke abc123 --reason KEY_COMPROMISE
