@@ -362,10 +362,10 @@ func (c *Client) ResolveAgent(ctx context.Context, host, version string) (*model
 
 // RevokeAgent revokes an agent registration.
 //
-// For a PENDING (not yet ACTIVE) registration this cancels it: no transparency-log
-// event is written and the name/version becomes reusable. reason SUPERSEDED is
-// rejected by the registry for API callers; use CESSATION_OF_OPERATION to retire a
-// version in favor of a successor.
+// For a PENDING_CERTS or PENDING_DNS registration this cancels it: no transparency-log
+// event is written and the name/version becomes reusable once the call returns.
+// A PENDING_VALIDATION registration cannot be canceled; it auto-expires after the
+// challenge window closes.
 func (c *Client) RevokeAgent(ctx context.Context, agentID string, reason models.RevocationReason, comments string) (*models.AgentRevocationResponse, error) {
 	if err := validateRequired("agentID", agentID); err != nil {
 		return nil, err
