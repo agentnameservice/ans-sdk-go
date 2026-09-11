@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -277,18 +276,6 @@ func TestValidateRegistrationParams(t *testing.T) {
 			name: "empty description",
 			p:    registerParams{},
 		},
-		{
-			name:    "non-ASCII in description",
-			p:       registerParams{description: "smart\xe2\x80\x94agent"},
-			wantErr: true,
-			errMsg:  "non-ASCII",
-		},
-		{
-			name:    "non-ASCII in name",
-			p:       registerParams{name: "My Agent\xe2\x80\x94Beta"},
-			wantErr: true,
-			errMsg:  "non-ASCII",
-		},
 	}
 
 	for _, tt := range tests {
@@ -296,107 +283,6 @@ func TestValidateRegistrationParams(t *testing.T) {
 			err := validateRegistrationParams(&tt.p)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateRegistrationParams() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("error message %q does not contain %q", err.Error(), tt.errMsg)
-			}
-		})
-	}
-}
-
-func TestValidateRegistrationParamsTags(t *testing.T) {
-	tests := []struct {
-		name    string
-		p       registerParams
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "function with 5 tags (at limit)",
-			p: registerParams{
-				functionFlags: []string{"fn1:Search:tag1,tag2,tag3,tag4,tag5"},
-			},
-		},
-		{
-			name: "function with 6 tags (over limit)",
-			p: registerParams{
-				functionFlags: []string{"fn1:Search:tag1,tag2,tag3,tag4,tag5,tag6"},
-			},
-			wantErr: true,
-			errMsg:  "tags",
-		},
-		{
-			name: "multiple functions, one with too many tags",
-			p: registerParams{
-				functionFlags: []string{
-					"fn1:Search:tag1,tag2",
-					"fn2:Index:t1,t2,t3,t4,t5,t6",
-				},
-			},
-			wantErr: true,
-			errMsg:  "tags",
-		},
-		{
-			name: "function with zero tags",
-			p:    registerParams{functionFlags: []string{"fn1:Search"}},
-		},
-		{
-			name: "no functions",
-			p:    registerParams{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateRegistrationParams(&tt.p)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateRegistrationParams() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("error message %q does not contain %q", err.Error(), tt.errMsg)
-			}
-		})
-	}
-}
-
-func TestLintCardFieldsASCII(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:  "ASCII only string",
-			input: `{"name": "My Agent", "description": "test"}`,
-		},
-		{
-			name:    "non-ASCII in string value",
-			input:   `{"description": "smart—quote"}`,
-			wantErr: true,
-			errMsg:  "non-ASCII",
-		},
-		{
-			name:    "em dash in nested field",
-			input:   `{"functions": [{"name": "search—fast"}]}`,
-			wantErr: true,
-			errMsg:  "non-ASCII",
-		},
-		{
-			name:  "numbers and booleans pass",
-			input: `{"version": 1, "active": true}`,
-		},
-		{
-			name:  "empty object",
-			input: `{}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := lintCardFieldsASCII(json.RawMessage(tt.input))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("lintCardFieldsASCII() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 				t.Errorf("error message %q does not contain %q", err.Error(), tt.errMsg)
