@@ -1481,7 +1481,7 @@ func TestServerVerifier_DANEVerified(t *testing.T) {
 					Found:       true,
 					DNSSECValid: true,
 					Records: []TLSARecord{
-						{Usage: 3, CertHash: fp.ToHex()},
+						{Usage: 3, Selector: 0, MatchingType: 1, CertHash: fp.ToHex()},
 					},
 				})
 
@@ -2229,7 +2229,7 @@ func TestVerifyWithScitt_PolicyEnforcement(t *testing.T) {
 						Found:       true,
 						DNSSECValid: true,
 						Records: []TLSARecord{
-							{Usage: 3, CertHash: fp.ToHex()},
+							{Usage: 3, Selector: 0, MatchingType: 1, CertHash: fp.ToHex()},
 						},
 					})
 			}(),
