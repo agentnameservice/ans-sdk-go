@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/agentnameservice/ans-sdk-go/ans"
-	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
-	"github.com/agentnameservice/ans-sdk-go/models"
-	"github.com/spf13/cobra"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/agentnameservice/ans-sdk-go/ans"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/models"
+	"github.com/spf13/cobra"
 )
 
 const maxDescriptionLen = 150
