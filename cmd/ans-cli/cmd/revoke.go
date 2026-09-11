@@ -33,9 +33,9 @@ Revocation reasons the registry accepts:
   AA_COMPROMISE           - Attribute authority was compromised
 
 Revoking a PENDING_CERTS or PENDING_DNS registration cancels it: no certificate
-was sealed and no transparency-log event is written. The name and version become
-reusable once the call returns. A PENDING_VALIDATION registration cannot be
-canceled; it auto-expires after the challenge window closes.
+was sealed and no transparency-log event is written. A PENDING_VALIDATION
+registration cannot be canceled; it auto-expires after the challenge window
+closes. Name and version reuse after cancellation is not yet fully specified.
 
 Examples:
   ans-cli revoke abc123 --reason KEY_COMPROMISE

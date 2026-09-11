@@ -363,9 +363,13 @@ func (c *Client) ResolveAgent(ctx context.Context, host, version string) (*model
 // RevokeAgent revokes an agent registration.
 //
 // For a PENDING_CERTS or PENDING_DNS registration this cancels it: no transparency-log
-// event is written and the name/version becomes reusable once the call returns.
-// A PENDING_VALIDATION registration cannot be canceled; it auto-expires after the
-// challenge window closes.
+// event is written. A PENDING_VALIDATION registration cannot be canceled; it
+// auto-expires after the challenge window closes.
+// Name and version reuse after cancellation is not yet fully specified; see
+// https://github.com/agentnameservice/ans/issues/88 for the incomplete-registration
+// case and https://github.com/agentnameservice/ans-registry/issues/64 and
+// https://github.com/agentnameservice/ans-registry/issues/65 for the broader
+// ownership and expiry/recovery questions.
 func (c *Client) RevokeAgent(ctx context.Context, agentID string, reason models.RevocationReason, comments string) (*models.AgentRevocationResponse, error) {
 	if err := validateRequired("agentID", agentID); err != nil {
 		return nil, err
