@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -249,6 +251,93 @@ func TestPrintResultLinks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(_ *testing.T) {
 			printResultLinks(tt.links)
+		})
+	}
+}
+
+func TestValidateRegistrationParams(t *testing.T) {
+	tests := []struct {
+		name    string
+		p       registerParams
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "description within limit",
+			p:    registerParams{description: strings.Repeat("a", 150)},
+		},
+		{
+			name:    "description too long",
+			p:       registerParams{description: strings.Repeat("a", 151)},
+			wantErr: true,
+			errMsg:  "description exceeds maximum length",
+		},
+		{
+			name: "empty description",
+			p:    registerParams{},
+		},
+		{
+			// 150 two-byte characters = 300 bytes; must be accepted (character count is 150)
+			name: "description at limit with multibyte characters",
+			p:    registerParams{description: strings.Repeat("é", 150)},
+		},
+		{
+			// 151 two-byte characters = 302 bytes; must be rejected
+			name:    "description over limit with multibyte characters",
+			p:       registerParams{description: strings.Repeat("é", 151)},
+			wantErr: true,
+			errMsg:  "description exceeds maximum length",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRegistrationParams(&tt.p)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateRegistrationParams() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error message %q does not contain %q", err.Error(), tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestPrintResponseErrorDetails(t *testing.T) {
+	tests := []struct {
+		name     string
+		respErr  *models.ResponseError
+		wantSubs []string
+	}{
+		{
+			name: "422 with details",
+			respErr: &models.ResponseError{
+				StatusCode: 422,
+				Code:       "VALIDATION_ERROR",
+				Message:    "Validation failed",
+				Details:    map[string]any{"agentDescription": "must be at most 150 characters"},
+			},
+			wantSubs: []string{"agentDescription", "150"},
+		},
+		{
+			name: "details map empty",
+			respErr: &models.ResponseError{
+				StatusCode: 400,
+				Details:    map[string]any{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printResponseErrorDetails(&buf, tt.respErr)
+			output := buf.String()
+			for _, sub := range tt.wantSubs {
+				if !strings.Contains(output, sub) {
+					t.Errorf("output %q does not contain %q", output, sub)
+				}
+			}
 		})
 	}
 }
