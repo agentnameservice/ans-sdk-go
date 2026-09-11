@@ -276,6 +276,18 @@ func TestValidateRegistrationParams(t *testing.T) {
 			name: "empty description",
 			p:    registerParams{},
 		},
+		{
+			// 150 two-byte characters = 300 bytes; must be accepted (character count is 150)
+			name: "description at limit with multibyte characters",
+			p:    registerParams{description: strings.Repeat("é", 150)},
+		},
+		{
+			// 151 two-byte characters = 302 bytes; must be rejected
+			name:    "description over limit with multibyte characters",
+			p:       registerParams{description: strings.Repeat("é", 151)},
+			wantErr: true,
+			errMsg:  "description exceeds maximum length",
+		},
 	}
 
 	for _, tt := range tests {

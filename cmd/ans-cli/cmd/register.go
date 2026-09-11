@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
@@ -315,8 +316,8 @@ func printResultLinks(links []models.Link) {
 // HTTP call so that common mistakes fail fast with guidance instead of
 // round-tripping to a server 422.
 func validateRegistrationParams(p *registerParams) error {
-	if len(p.description) > maxDescriptionLen {
-		return fmt.Errorf("description exceeds maximum length of %d characters (got %d)", maxDescriptionLen, len(p.description))
+	if utf8.RuneCountInString(p.description) > maxDescriptionLen {
+		return fmt.Errorf("description exceeds maximum length of %d characters (got %d)", maxDescriptionLen, utf8.RuneCountInString(p.description))
 	}
 	return nil
 }
