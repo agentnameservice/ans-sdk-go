@@ -3,10 +3,13 @@ package pop
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -227,6 +230,111 @@ func TestReceiptNamesAgent_Gaps(t *testing.T) {
 			callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
 		assertProofErr(t, err, ErrBindingFailed)
 	})
+}
+
+// TestReceiptLeafSchemas pins the leaf shape a transparency log signs: the event
+// wrapped in payload.producer.event, naming the agent "ansId" (V1/V2) or
+// "agentId" (V0). The flat object is the /events REST representation and never
+// appears in a receipt; an envelope naming no agent, or only half of one, fails
+// closed.
+func TestReceiptLeafSchemas(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   func(t testing.TB, agentID, ansName string) []byte
+		wantErr ErrorType
+	}{
+		{name: "V1 envelope with ansId", event: eventJSON},
+		{name: "V0 envelope with agentId", event: eventJSONV0},
+		{
+			name: "flat REST event shape",
+			event: func(t testing.TB, agentID, ansName string) []byte {
+				t.Helper()
+				b, err := json.Marshal(map[string]string{"ansId": agentID, "ansName": ansName})
+				if err != nil {
+					t.Fatalf("marshal flat event: %v", err)
+				}
+				return b
+			},
+			wantErr: ErrReceiptInvalid,
+		},
+		{
+			name: "envelope missing ansName",
+			event: func(t testing.TB, agentID, _ string) []byte {
+				return leafJSON(t, leafEvent{AnsID: agentID})
+			},
+			wantErr: ErrReceiptInvalid,
+		},
+		{
+			name: "envelope missing agent id",
+			event: func(t testing.TB, _, ansName string) []byte {
+				return leafJSON(t, leafEvent{AnsName: ansName})
+			},
+			wantErr: ErrReceiptInvalid,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			hdrs := &scitt.Headers{
+				Receipt:     receipt(t, h.tlKey, tt.event(t, h.agentID, h.ansName)),
+				StatusToken: h.statusToken(t),
+			}
+			id, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), hdrs,
+				callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
+			if tt.wantErr != "" {
+				assertProofErr(t, err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyCaller: %v", err)
+			}
+			if id.AgentID != h.agentID {
+				t.Errorf("AgentID = %q, want %q", id.AgentID, h.agentID)
+			}
+		})
+	}
+}
+
+// TestReceiptLeafGolden verifies receipts over the envelopes the ANS
+// transparency log actually signs, byte-for-byte from the log's own golden
+// fixtures (agentnameservice/ans internal/tl/event/{,v1/}testdata). The same
+// leaf must then fail to vouch for a different agent, proving the identity was
+// read rather than defaulted.
+func TestReceiptLeafGolden(t *testing.T) {
+	const ansName = "ans://v1.0.0.agent.example.com"
+	tests := []struct {
+		name    string
+		file    string
+		agentID string
+	}{
+		{name: "V1", file: "tl_leaf_v1.json", agentID: "10000000-0000-4000-8000-0000000000a1"},
+		{name: "V2", file: "tl_leaf_v2.json", agentID: "10000000-0000-4000-8000-000000000001"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaf, err := os.ReadFile(filepath.Join("testdata", tt.file))
+			if err != nil {
+				t.Fatalf("read golden leaf: %v", err)
+			}
+
+			h := newHarnessFor(t, tt.agentID, ansName)
+			hdrs := &scitt.Headers{Receipt: receipt(t, h.tlKey, leaf), StatusToken: h.statusToken(t)}
+			id, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), hdrs,
+				callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
+			if err != nil {
+				t.Fatalf("VerifyCaller over golden leaf: %v", err)
+			}
+			if id.AgentID != tt.agentID {
+				t.Errorf("AgentID = %q, want %q", id.AgentID, tt.agentID)
+			}
+
+			other := newHarnessFor(t, "some-other-agent", ansName)
+			hdrs = &scitt.Headers{Receipt: receipt(t, other.tlKey, leaf), StatusToken: other.statusToken(t)}
+			_, err = VerifyCaller(context.Background(), other.proof(t, callMethod, callURL), hdrs,
+				callMethod, callURL, other.keys, other.replay, other.callerOpts()...)
+			assertProofErr(t, err, ErrBindingFailed)
+		})
+	}
 }
 
 func TestMiddleware_LoggerAndBadScittHeader(t *testing.T) {

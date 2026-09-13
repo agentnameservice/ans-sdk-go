@@ -173,12 +173,25 @@ func receipt(t testing.TB, tlKey *ecdsa.PrivateKey, eventJSON []byte) []byte {
 	return coseSign1(t, tlKey, protected, unprotected, eventJSON)
 }
 
-// eventJSON builds a transparency-log leaf-event JSON naming an agent.
+// eventJSON builds a schema-V1/V2 transparency-log leaf, the shape a live log
+// signs: the event wrapped in payload.producer.event, naming the agent "ansId".
 func eventJSON(t testing.TB, agentID, ansName string) []byte {
 	t.Helper()
-	b, err := json.Marshal(leafEvent{AgentID: agentID, AnsName: ansName})
+	return leafJSON(t, leafEvent{AnsID: agentID, AnsName: ansName})
+}
+
+// eventJSONV0 builds the schema-V0 leaf, which names the agent "agentId".
+func eventJSONV0(t testing.TB, agentID, ansName string) []byte {
+	t.Helper()
+	return leafJSON(t, leafEvent{AgentID: agentID, AnsName: ansName})
+}
+
+// leafJSON wraps ev in the payload.producer.event envelope a receipt signs.
+func leafJSON(t testing.TB, ev leafEvent) []byte {
+	t.Helper()
+	b, err := json.Marshal(leafEnvelope{Payload: leafPayload{Producer: leafProducer{Event: ev}}})
 	if err != nil {
-		t.Fatalf("marshal event: %v", err)
+		t.Fatalf("marshal leaf: %v", err)
 	}
 	return b
 }
@@ -200,7 +213,12 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	const ansName = "ans://v1.0.0.payments.acme.example"
+	return newHarnessFor(t, "agent-123", "ans://v1.0.0.payments.acme.example")
+}
+
+// newHarnessFor mints a fresh identity for agentID registered under ansName.
+func newHarnessFor(t *testing.T, agentID, ansName string) *harness {
+	t.Helper()
 	agentKey := genKey(t)
 	certDER := identityCert(t, agentKey, ansName)
 	tlKey := genKey(t)
@@ -218,7 +236,7 @@ func newHarness(t *testing.T) *harness {
 		fp:       sha256.Sum256(certDER),
 		tlKey:    tlKey,
 		keys:     newKeyLookup(t, "tl", &tlKey.PublicKey),
-		agentID:  "agent-123",
+		agentID:  agentID,
 		ansName:  ansName,
 		now:      now,
 		signer:   signer,

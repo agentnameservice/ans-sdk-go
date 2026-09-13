@@ -344,7 +344,13 @@ func mintReceipt(tlKey *ecdsa.PrivateKey, agentID, ansName string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	event, err := json.Marshal(map[string]string{"agentId": agentID, "ansName": ansName})
+	event, err := json.Marshal(map[string]any{
+		"payload": map[string]any{
+			"producer": map[string]any{
+				"event": map[string]string{"ansId": agentID, "ansName": ansName},
+			},
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

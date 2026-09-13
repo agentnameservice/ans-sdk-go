@@ -39,7 +39,7 @@ const (
 	benchLeafIndex = uint64(524_287)
 	// benchEventPadBytes pads the leaf event to ~512 bytes, the size of a
 	// realistic registration event.
-	benchEventPadBytes = 336
+	benchEventPadBytes = 306
 )
 
 // inclusionPathLen mirrors WalkInclusionPath's fn/sn state machine to return
@@ -61,18 +61,25 @@ func inclusionPathLen(leafIndex, treeSize uint64) int {
 	return n
 }
 
-// benchEvent is a ~512-byte transparency-log leaf event naming the agent.
-// receiptNamesAgent reads only agentId/ansName; the pad key is ignored.
+// benchEvent is a ~512-byte transparency-log leaf naming the agent in the
+// payload.producer.event envelope a live log signs. receiptNamesAgent reads
+// only ansId/ansName; the pad key is ignored.
 func benchEvent(t testing.TB, agentID, ansName string) []byte {
 	t.Helper()
 	pad := make([]byte, benchEventPadBytes)
 	if _, err := rand.Read(pad); err != nil {
 		t.Fatalf("rand: %v", err)
 	}
-	ev, err := json.Marshal(map[string]string{
-		"agentId": agentID,
-		"ansName": ansName,
-		"pad":     base64.RawStdEncoding.EncodeToString(pad),
+	ev, err := json.Marshal(map[string]any{
+		"payload": map[string]any{
+			"producer": map[string]any{
+				"event": map[string]string{
+					"ansId":   agentID,
+					"ansName": ansName,
+					"pad":     base64.RawStdEncoding.EncodeToString(pad),
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
