@@ -276,6 +276,13 @@ func TestReceiptLeafSchemas(t *testing.T) {
 			},
 			wantErr: ErrReceiptInvalid,
 		},
+		{
+			name: "envelope whose ansName is not an ans:// name",
+			event: func(t testing.TB, agentID, _ string) []byte {
+				return leafJSON(t, leafEvent{AnsID: agentID, AnsName: "payments.acme.example"})
+			},
+			wantErr: ErrReceiptInvalid,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

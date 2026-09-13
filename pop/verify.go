@@ -135,8 +135,16 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 	if err != nil {
 		return nil, err
 	}
-	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
-		return nil, newErr(ErrCertInvalid, "proof identity certificate is outside its validity period")
+	// Certificate dates are checked exactly, as a TLS handshake would check
+	// them; the skew allowance covers the proof's own iat, not the credential's
+	// lifetime.
+	if now.Before(cert.NotBefore) {
+		return nil, newErr(ErrCertInvalid,
+			"proof identity certificate is not valid until "+cert.NotBefore.UTC().Format(time.RFC3339))
+	}
+	if now.After(cert.NotAfter) {
+		return nil, newErr(ErrCertInvalid,
+			"proof identity certificate expired at "+cert.NotAfter.UTC().Format(time.RFC3339))
 	}
 	if err := matchJWKToCert(hdr.Jwk, pub); err != nil {
 		return nil, err

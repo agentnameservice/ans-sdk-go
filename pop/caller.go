@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -313,20 +314,22 @@ func verifyBinding(proof *ProofResult, st *scitt.VerifiedStatusToken,
 		return nil, wrapErr(ErrBindingFailed, "status token AnsName is invalid", err)
 	}
 	if canonicalAnsName(certAns) != canonicalAnsName(stAns) {
-		return nil, newErr(ErrBindingFailed,
-			"proof certificate ans:// SAN does not match the status token AnsName")
+		return nil, newErr(ErrBindingFailed, fmt.Sprintf(
+			"proof certificate ans:// SAN %s does not match the status token AnsName %s",
+			echo(certAns.String()), echo(st.Payload.AnsName)))
 	}
 
 	// 3. The receipt's leaf must name the same agent as the status token.
 	if rcpt != nil {
-		if err := receiptNamesAgent(rcpt, &st.Payload); err != nil {
+		if err := receiptNamesAgent(rcpt, &st.Payload, stAns); err != nil {
 			return nil, err
 		}
 	}
 
 	// 4. Optional expected-peer pinning.
 	if len(cfg.allowed) > 0 && !cfg.allowed[canonicalAnsName(stAns)] {
-		return nil, newErr(ErrExpectedPeerMismatch, "caller ans:// name is not in the accepted set")
+		return nil, newErr(ErrExpectedPeerMismatch,
+			"caller "+echo(canonicalAnsName(stAns))+" is not in the accepted set")
 	}
 
 	return &CallerIdentity{
@@ -344,7 +347,8 @@ func verifyBinding(proof *ProofResult, st *scitt.VerifiedStatusToken,
 // object (models.TransparencyLogV1). The flat shape models.EventItem describes
 // belongs to the /events REST API and does not appear in a receipt.
 type leafEnvelope struct {
-	Payload leafPayload `json:"payload"`
+	Payload       leafPayload `json:"payload"`
+	SchemaVersion string      `json:"schemaVersion"`
 }
 
 type leafPayload struct {
@@ -376,7 +380,7 @@ func (e leafEvent) agentID() string {
 // the same agent the status token does. (The receipt's RootHash is not anchored
 // to a witnessed tree head — see scitt.VerifiedReceipt — so this is
 // leaf-signature trust, not tree-head trust.)
-func receiptNamesAgent(rcpt *scitt.VerifiedReceipt, st *scitt.StatusTokenPayload) error {
+func receiptNamesAgent(rcpt *scitt.VerifiedReceipt, st *scitt.StatusTokenPayload, stAns *verify.AnsName) error {
 	var env leafEnvelope
 	if err := json.Unmarshal(rcpt.EventBytes, &env); err != nil {
 		return wrapErr(ErrReceiptInvalid, "receipt leaf event is not decodable JSON", err)
@@ -384,13 +388,21 @@ func receiptNamesAgent(rcpt *scitt.VerifiedReceipt, st *scitt.StatusTokenPayload
 	ev := env.Payload.Producer.Event
 	agentID := ev.agentID()
 	if agentID == "" || ev.AnsName == "" {
-		return newErr(ErrReceiptInvalid, "receipt leaf event does not name an agent (ansId/agentId and ansName)")
+		return newErr(ErrReceiptInvalid, fmt.Sprintf(
+			"receipt leaf event (schemaVersion %q) does not name an agent (ansId/agentId and ansName)",
+			echo(env.SchemaVersion)))
+	}
+	leafAns, err := verify.ParseAnsName(ev.AnsName)
+	if err != nil {
+		return wrapErr(ErrReceiptInvalid, "receipt leaf ansName is not an ans:// name", err)
 	}
 	if agentID != st.AgentID {
-		return newErr(ErrBindingFailed, "receipt leaf agent id does not match status token agentId")
+		return newErr(ErrBindingFailed, fmt.Sprintf(
+			"receipt leaf agent id %s does not match status token agentId %s", echo(agentID), echo(st.AgentID)))
 	}
-	if !strings.EqualFold(ev.AnsName, st.AnsName) {
-		return newErr(ErrBindingFailed, "receipt leaf ansName does not match status token ansName")
+	if canonicalAnsName(leafAns) != canonicalAnsName(stAns) {
+		return newErr(ErrBindingFailed, fmt.Sprintf(
+			"receipt leaf ansName %s does not match status token AnsName %s", echo(ev.AnsName), echo(st.AnsName)))
 	}
 	return nil
 }

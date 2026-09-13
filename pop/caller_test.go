@@ -3,6 +3,7 @@ package pop
 import (
 	"context"
 	"crypto/sha256"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,6 +208,11 @@ func TestVerifyCaller_BindingFailures(t *testing.T) {
 		_, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), hdrs,
 			callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
 		assertProofErr(t, err, ErrBindingFailed)
+		for _, want := range []string{h.ansName, otherVersion} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name %q", err.Error(), want)
+			}
+		}
 	})
 
 	t.Run("receipt names a different agent", func(t *testing.T) {
@@ -269,12 +275,16 @@ func TestVerifyCaller_CertValidity(t *testing.T) {
 		notBefore time.Duration // relative to the harness clock
 		notAfter  time.Duration
 		wantErr   ErrorType
+		wantMsg   string
 	}{
 		{name: "within validity period", notBefore: -time.Hour, notAfter: time.Hour},
 		{name: "expires exactly now", notBefore: -time.Hour, notAfter: 0},
-		{name: "expired a day ago", notBefore: -48 * time.Hour, notAfter: -24 * time.Hour, wantErr: ErrCertInvalid},
-		{name: "expired one second ago", notBefore: -time.Hour, notAfter: -time.Second, wantErr: ErrCertInvalid},
-		{name: "not yet valid", notBefore: time.Hour, notAfter: 48 * time.Hour, wantErr: ErrCertInvalid},
+		{name: "expired a day ago", notBefore: -48 * time.Hour, notAfter: -24 * time.Hour,
+			wantErr: ErrCertInvalid, wantMsg: "expired at 2023-11-13T22:13:20Z"},
+		{name: "expired one second ago", notBefore: -time.Hour, notAfter: -time.Second,
+			wantErr: ErrCertInvalid, wantMsg: "expired at 2023-11-14T22:13:19Z"},
+		{name: "not yet valid", notBefore: time.Hour, notAfter: 48 * time.Hour,
+			wantErr: ErrCertInvalid, wantMsg: "not valid until 2023-11-14T23:13:20Z"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -284,12 +294,15 @@ func TestVerifyCaller_CertValidity(t *testing.T) {
 			h := newHarnessWithCert(t, key, der, "agent-123", ansName)
 			expect := func(what string, err error) {
 				t.Helper()
-				if tt.wantErr != "" {
-					assertProofErr(t, err, tt.wantErr)
+				if tt.wantErr == "" {
+					if err != nil {
+						t.Fatalf("%s: %v", what, err)
+					}
 					return
 				}
-				if err != nil {
-					t.Fatalf("%s: %v", what, err)
+				assertProofErr(t, err, tt.wantErr)
+				if !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Errorf("%s error %q does not mention %q", what, err.Error(), tt.wantMsg)
 				}
 			}
 
@@ -314,6 +327,7 @@ func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 		name    string
 		pins    []string
 		wantErr ErrorType
+		wantMsg string
 	}{
 		{name: "exact name", pins: []string{"ans://v1.0.0.payments.acme.example"}},
 		{name: "host compared case-insensitively", pins: []string{"ans://v1.0.0.Payments.ACME.example"}},
@@ -321,7 +335,8 @@ func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 			"ans://v2.0.0.payments.acme.example", "ans://v1.0.0.payments.acme.example"}},
 		{name: "different host", pins: []string{"ans://v1.0.0.nope.example"}, wantErr: ErrExpectedPeerMismatch},
 		{name: "different version of the same host", pins: []string{"ans://v2.0.0.payments.acme.example"},
-			wantErr: ErrExpectedPeerMismatch},
+			wantErr: ErrExpectedPeerMismatch,
+			wantMsg: "caller ans://v1.0.0.payments.acme.example is not in the accepted set"},
 		{name: "malformed pin is a misconfiguration", pins: []string{"not-an-ans-name"}, wantErr: ErrMisconfigured},
 		{name: "malformed pin spelled like the host is a misconfiguration", pins: []string{"payments.acme.example"},
 			wantErr: ErrMisconfigured},
@@ -340,6 +355,9 @@ func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 				callMethod, callURL, h.keys, h.replay, h.callerOpts(pin)...)
 			if tt.wantErr != "" {
 				assertProofErr(t, err, tt.wantErr)
+				if !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Errorf("error %q does not mention %q", err.Error(), tt.wantMsg)
+				}
 				return
 			}
 			if err != nil {
