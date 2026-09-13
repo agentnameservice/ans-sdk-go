@@ -28,8 +28,8 @@ const (
 	// ErrSignatureInvalid is a proof whose signature does not verify under
 	// the x5c[0] certificate key.
 	ErrSignatureInvalid ErrorType = "SIGNATURE_INVALID"
-	// ErrCertInvalid is a missing/unparseable x5c, or a leaf key that is not
-	// ECDSA P-256.
+	// ErrCertInvalid is a missing/unparseable x5c, a leaf key that is not
+	// ECDSA P-256, or a certificate outside its validity period.
 	ErrCertInvalid ErrorType = "CERT_INVALID"
 	// ErrKeyMismatch means the header's jwk and x5c[0] do not present the same
 	// public key — the dual-header consistency invariant failed.

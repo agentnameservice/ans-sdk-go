@@ -249,6 +249,50 @@ func TestVerifyCaller_StatusInvalid(t *testing.T) {
 	})
 }
 
+// TestVerifyCaller_CertValidity: the log derives ACTIVE from lifecycle events,
+// not from certificate expiry, so a fresh status token can still vouch for an
+// expired certificate. The verifier enforces the certificate's own dates.
+func TestVerifyCaller_CertValidity(t *testing.T) {
+	tests := []struct {
+		name      string
+		notBefore time.Duration // relative to the harness clock
+		notAfter  time.Duration
+		wantErr   ErrorType
+	}{
+		{name: "within validity period", notBefore: -time.Hour, notAfter: time.Hour},
+		{name: "expires exactly now", notBefore: -time.Hour, notAfter: 0},
+		{name: "expired a day ago", notBefore: -48 * time.Hour, notAfter: -24 * time.Hour, wantErr: ErrCertInvalid},
+		{name: "expired one second ago", notBefore: -time.Hour, notAfter: -time.Second, wantErr: ErrCertInvalid},
+		{name: "not yet valid", notBefore: time.Hour, notAfter: 48 * time.Hour, wantErr: ErrCertInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const ansName = "ans://v1.0.0.payments.acme.example"
+			key := genKey(t)
+			der := identityCertValid(t, key, ansName, testEpoch.Add(tt.notBefore), testEpoch.Add(tt.notAfter))
+			h := newHarnessWithCert(t, key, der, "agent-123", ansName)
+			expect := func(what string, err error) {
+				t.Helper()
+				if tt.wantErr != "" {
+					assertProofErr(t, err, tt.wantErr)
+					return
+				}
+				if err != nil {
+					t.Fatalf("%s: %v", what, err)
+				}
+			}
+
+			_, err := VerifyProof(context.Background(), h.proof(t, callMethod, callURL), callMethod, callURL,
+				h.now, DefaultPoPSkew, h.replay)
+			expect("VerifyProof", err)
+
+			_, err = VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), h.headers(t),
+				callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
+			expect("VerifyCaller", err)
+		})
+	}
+}
+
 func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 	t.Run("match", func(t *testing.T) {
 		h := newHarness(t)

@@ -39,10 +39,13 @@
 // the status token's ValidIdentityCerts fingerprints, and (c) confirms the
 // certificate's own ans:// URI SAN equals the status token's AnsName. To pass,
 // a caller must hold the private key for a certificate its own
-// transparency-log-signed status token vouches for. The status token
-// (TL-signed) is the trust statement — there is no CA-chain validation, and
-// the certificate's own validity dates, key usage, and cert-type entry are
-// deliberately not consulted. A captured receipt and status token (both
+// transparency-log-signed status token vouches for, presented while that
+// certificate is within its validity period. The status token (TL-signed) is
+// the trust statement — there is no CA-chain validation, and the certificate's
+// key usage and cert-type entry are deliberately not consulted. Its validity
+// dates are enforced because the log derives ACTIVE from lifecycle events, not
+// from certificate expiry: a fresh status token alone does not establish that
+// the certificate is unexpired. A captured receipt and status token (both
 // public) are useless without the key, and the proof's jti/htm/htu/iat defeat
 // replay and redirection.
 //

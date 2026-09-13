@@ -76,10 +76,10 @@ func WithBoundAccessToken(token string) VerifyOption {
 // time now, with freshness window skew and replay protection via replay.
 //
 // Order: ctx, size cap, compact structure, pinned typ/alg plus required
-// jwk/x5c (acceptES256DPoP), x5c[0] P-256 leaf, jwk↔x5c key equality,
-// signature under that single key, htm, normalized htu, ath ⟺ presented
-// token, iat window, then jti single-use. Replay is recorded LAST, so only
-// proofs that pass every other check consume a cache slot.
+// jwk/x5c (acceptES256DPoP), x5c[0] P-256 leaf, its validity period at now,
+// jwk↔x5c key equality, signature under that single key, htm, normalized htu,
+// ath ⟺ presented token, iat window, then jti single-use. Replay is recorded
+// LAST, so only proofs that pass every other check consume a cache slot.
 //
 // A proof verified here is cryptographically well-formed but NOT yet trusted:
 // nothing has established that its certificate belongs to a live ANS agent
@@ -134,6 +134,9 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 	cert, pub, err := leafCert(hdr)
 	if err != nil {
 		return nil, err
+	}
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return nil, newErr(ErrCertInvalid, "proof identity certificate is outside its validity period")
 	}
 	if err := matchJWKToCert(hdr.Jwk, pub); err != nil {
 		return nil, err

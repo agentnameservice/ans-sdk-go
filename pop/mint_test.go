@@ -77,16 +77,26 @@ func newKeyLookup(t testing.TB, name string, pub *ecdsa.PublicKey) *keyLookup {
 	}}
 }
 
+// testEpoch is the instant every harness clock reports. Certificates minted by
+// identityCert are valid for an hour either side of it.
+var testEpoch = time.Unix(1_700_000_000, 0)
+
 // identityCert creates a P-256 identity certificate carrying the given ans://
-// URI SAN and returns its DER. Self-signed; trust comes from the status-token
-// fingerprint, not a chain.
+// URI SAN, valid around testEpoch, and returns its DER. Self-signed; trust
+// comes from the status-token fingerprint, not a chain.
 func identityCert(t testing.TB, key *ecdsa.PrivateKey, ansName string) []byte {
+	t.Helper()
+	return identityCertValid(t, key, ansName, testEpoch.Add(-time.Hour), testEpoch.Add(time.Hour))
+}
+
+// identityCertValid is identityCert with an explicit validity period.
+func identityCertValid(t testing.TB, key *ecdsa.PrivateKey, ansName string, notBefore, notAfter time.Time) []byte {
 	t.Helper()
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "test-agent"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
@@ -220,9 +230,15 @@ func newHarness(t *testing.T) *harness {
 func newHarnessFor(t *testing.T, agentID, ansName string) *harness {
 	t.Helper()
 	agentKey := genKey(t)
-	certDER := identityCert(t, agentKey, ansName)
+	return newHarnessWithCert(t, agentKey, identityCert(t, agentKey, ansName), agentID, ansName)
+}
+
+// newHarnessWithCert builds the harness around a caller-supplied identity
+// certificate for agentKey, so a test can choose the certificate's dates.
+func newHarnessWithCert(t *testing.T, agentKey *ecdsa.PrivateKey, certDER []byte, agentID, ansName string) *harness {
+	t.Helper()
 	tlKey := genKey(t)
-	now := time.Unix(1_700_000_000, 0)
+	now := testEpoch
 	clock := func() time.Time { return now }
 	signer, err := NewSigner(agentKey, certDER, withSignerClock(clock))
 	if err != nil {

@@ -132,7 +132,7 @@ func newBenchFixture(b *testing.B) *benchFixture {
 		ansName = "ans://v1.0.0.payments.acme.example"
 		agentID = "agent-bench-1"
 	)
-	now := time.Now()
+	now := testEpoch
 	clock := func() time.Time { return now }
 
 	agentKey := genKey(b)
