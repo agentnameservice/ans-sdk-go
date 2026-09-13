@@ -279,6 +279,7 @@ func TestVerifyCaller_CertValidity(t *testing.T) {
 	}{
 		{name: "within validity period", notBefore: -time.Hour, notAfter: time.Hour},
 		{name: "expires exactly now", notBefore: -time.Hour, notAfter: 0},
+		{name: "becomes valid exactly now", notBefore: 0, notAfter: time.Hour},
 		{name: "expired a day ago", notBefore: -48 * time.Hour, notAfter: -24 * time.Hour,
 			wantErr: ErrCertInvalid, wantMsg: "expired at 2023-11-13T22:13:20Z"},
 		{name: "expired one second ago", notBefore: -time.Hour, notAfter: -time.Second,

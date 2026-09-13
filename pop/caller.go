@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/agentnameservice/ans-sdk-go/verify"
@@ -97,7 +96,7 @@ func WithAllowedAnsNames(ansNames ...string) CallerOption {
 // canonicalAnsName renders a parsed ans:// name in one spelling so that pins,
 // certificate SANs, and status tokens compare on version and host alone.
 func canonicalAnsName(ans *verify.AnsName) string {
-	return "ans://" + ans.Version.String() + "." + strings.ToLower(ans.Host)
+	return "ans://" + ans.Version.String() + "." + ans.Host
 }
 
 // addAllowed records an expected ans:// name by its canonical form. A name that
@@ -391,6 +390,9 @@ func receiptNamesAgent(rcpt *scitt.VerifiedReceipt, st *scitt.StatusTokenPayload
 		return newErr(ErrReceiptInvalid, fmt.Sprintf(
 			"receipt leaf event (schemaVersion %q) does not name an agent (ansId/agentId and ansName)",
 			echo(env.SchemaVersion)))
+	}
+	if ev.AnsID != "" && ev.AgentID != "" && ev.AnsID != ev.AgentID {
+		return newErr(ErrReceiptInvalid, "receipt leaf event names two different agent ids (ansId and agentId)")
 	}
 	leafAns, err := verify.ParseAnsName(ev.AnsName)
 	if err != nil {

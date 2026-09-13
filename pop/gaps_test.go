@@ -251,6 +251,19 @@ func TestReceiptLeafSchemas(t *testing.T) {
 		{name: "V1 envelope with ansId", event: eventJSON},
 		{name: "V0 envelope with agentId", event: eventJSONV0},
 		{
+			name: "envelope with both spellings agreeing",
+			event: func(t testing.TB, agentID, ansName string) []byte {
+				return leafJSON(t, leafEvent{AnsID: agentID, AgentID: agentID, AnsName: ansName})
+			},
+		},
+		{
+			name: "envelope with both spellings disagreeing",
+			event: func(t testing.TB, agentID, ansName string) []byte {
+				return leafJSON(t, leafEvent{AnsID: agentID, AgentID: "someone-else", AnsName: ansName})
+			},
+			wantErr: ErrReceiptInvalid,
+		},
+		{
 			name: "flat REST event shape",
 			event: func(t testing.TB, agentID, ansName string) []byte {
 				t.Helper()
