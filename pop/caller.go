@@ -41,7 +41,7 @@ func (c *CallerIdentity) FingerprintHex() string {
 // callerConfig is the resolved options for VerifyCaller / Middleware.
 type callerConfig struct {
 	requireReceipt bool
-	allowed        map[string]bool // lowercased ans hosts; empty = accept any proven agent
+	allowed        map[string]bool // canonical ans:// names; empty = accept any proven agent
 	logger         *slog.Logger
 	popSkew        time.Duration
 	statusSkew     time.Duration
@@ -62,10 +62,12 @@ func defaultCallerConfig() callerConfig {
 // CallerOption configures VerifyCaller and Middleware.
 type CallerOption func(*callerConfig)
 
-// WithExpectedAnsName restricts accepted callers to the given ans:// name. May
-// be combined; call it more than once or use WithAllowedAnsNames to allow a
-// set. When no expected name is set, any proven agent authenticates (and the
-// callee authorizes downstream).
+// WithExpectedAnsName restricts accepted callers to the given ans:// name,
+// version included: another version of the same host is a separate
+// registration, possibly with a different owner, and does not match. May be
+// combined; call it more than once or use WithAllowedAnsNames to allow a set.
+// When no expected name is set, any proven agent authenticates (and the callee
+// authorizes downstream).
 func WithExpectedAnsName(ansName string) CallerOption {
 	return func(c *callerConfig) { addAllowed(c, ansName) }
 }
@@ -79,18 +81,25 @@ func WithAllowedAnsNames(ansNames ...string) CallerOption {
 	}
 }
 
-// addAllowed records the host of an expected ans:// name. A name that does not
-// parse is stored verbatim (lowercased) so it simply never matches a real host
-// — a misconfigured pin fails closed rather than opening the gate.
+// canonicalAnsName renders a parsed ans:// name in one spelling so that pins,
+// certificate SANs, and status tokens compare on version and host alone.
+func canonicalAnsName(ans *verify.AnsName) string {
+	return "ans://" + ans.Version.String() + "." + strings.ToLower(ans.Host)
+}
+
+// addAllowed records an expected ans:// name by its canonical form. A name that
+// does not parse is stored under a key no canonical name can take, so a
+// misconfigured pin fails closed rather than opening the gate.
 func addAllowed(c *callerConfig, ansName string) {
 	if c.allowed == nil {
 		c.allowed = make(map[string]bool)
 	}
-	if ans, err := verify.ParseAnsName(ansName); err == nil {
-		c.allowed[strings.ToLower(ans.Host)] = true
+	ans, err := verify.ParseAnsName(ansName)
+	if err != nil {
+		c.allowed["invalid:"+ansName] = true
 		return
 	}
-	c.allowed[strings.ToLower(strings.TrimSpace(ansName))] = true
+	c.allowed[canonicalAnsName(ans)] = true
 }
 
 // WithRequireReceipt sets whether a SCITT receipt is required (default true).
@@ -267,9 +276,9 @@ func verifyBinding(proof *ProofResult, st *scitt.VerifiedStatusToken,
 	if err != nil {
 		return nil, wrapErr(ErrBindingFailed, "status token AnsName is invalid", err)
 	}
-	if !strings.EqualFold(certAns.Host, stAns.Host) {
+	if canonicalAnsName(certAns) != canonicalAnsName(stAns) {
 		return nil, newErr(ErrBindingFailed,
-			"proof certificate ans:// SAN host does not match the status token AnsName")
+			"proof certificate ans:// SAN does not match the status token AnsName")
 	}
 
 	// 3. The receipt's leaf must name the same agent as the status token.
@@ -280,8 +289,8 @@ func verifyBinding(proof *ProofResult, st *scitt.VerifiedStatusToken,
 	}
 
 	// 4. Optional expected-peer pinning.
-	if len(cfg.allowed) > 0 && !cfg.allowed[strings.ToLower(stAns.Host)] {
-		return nil, newErr(ErrExpectedPeerMismatch, "caller ans host is not in the accepted set")
+	if len(cfg.allowed) > 0 && !cfg.allowed[canonicalAnsName(stAns)] {
+		return nil, newErr(ErrExpectedPeerMismatch, "caller ans:// name is not in the accepted set")
 	}
 
 	return &CallerIdentity{

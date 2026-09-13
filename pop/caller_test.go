@@ -198,6 +198,17 @@ func TestVerifyCaller_BindingFailures(t *testing.T) {
 		assertProofErr(t, err, ErrBindingFailed)
 	})
 
+	t.Run("cert SAN version does not match status token AnsName", func(t *testing.T) {
+		h := newHarness(t)
+		const otherVersion = "ans://v2.0.0.payments.acme.example"
+		st := statusToken(t, h.tlKey, h.agentID, otherVersion, scitt.StatusActive,
+			h.now.Add(-time.Minute).Unix(), h.now.Add(time.Hour).Unix(), h.fp)
+		hdrs := &scitt.Headers{Receipt: receipt(t, h.tlKey, eventJSON(t, h.agentID, otherVersion)), StatusToken: st}
+		_, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), hdrs,
+			callMethod, callURL, h.keys, h.replay, h.callerOpts()...)
+		assertProofErr(t, err, ErrBindingFailed)
+	})
+
 	t.Run("receipt names a different agent", func(t *testing.T) {
 		h := newHarness(t)
 		bad := receipt(t, h.tlKey, eventJSON(t, "different-agent", h.ansName))
@@ -293,27 +304,43 @@ func TestVerifyCaller_CertValidity(t *testing.T) {
 	}
 }
 
+// TestVerifyCaller_ExpectedPeer: a pin names one registration. Registrations
+// are keyed by the full versioned ans:// name and versions of one host can have
+// different owners, so another version of the same host is another peer. The
+// harness caller is ans://v1.0.0.payments.acme.example.
 func TestVerifyCaller_ExpectedPeer(t *testing.T) {
-	t.Run("match", func(t *testing.T) {
-		h := newHarness(t)
-		_, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), h.headers(t),
-			callMethod, callURL, h.keys, h.replay, h.callerOpts(WithExpectedAnsName(h.ansName))...)
-		if err != nil {
-			t.Fatalf("expected-peer match: %v", err)
-		}
-	})
-	t.Run("mismatch", func(t *testing.T) {
-		h := newHarness(t)
-		_, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), h.headers(t),
-			callMethod, callURL, h.keys, h.replay,
-			h.callerOpts(WithAllowedAnsNames("ans://v1.0.0.nope.example"))...)
-		assertProofErr(t, err, ErrExpectedPeerMismatch)
-	})
-	t.Run("malformed expected name fails closed", func(t *testing.T) {
-		h := newHarness(t)
-		_, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), h.headers(t),
-			callMethod, callURL, h.keys, h.replay,
-			h.callerOpts(WithExpectedAnsName("not-an-ans-name"))...)
-		assertProofErr(t, err, ErrExpectedPeerMismatch)
-	})
+	tests := []struct {
+		name    string
+		pins    []string
+		wantErr ErrorType
+	}{
+		{name: "exact name", pins: []string{"ans://v1.0.0.payments.acme.example"}},
+		{name: "host compared case-insensitively", pins: []string{"ans://v1.0.0.Payments.ACME.example"}},
+		{name: "set containing the caller", pins: []string{
+			"ans://v2.0.0.payments.acme.example", "ans://v1.0.0.payments.acme.example"}},
+		{name: "different host", pins: []string{"ans://v1.0.0.nope.example"}, wantErr: ErrExpectedPeerMismatch},
+		{name: "different version of the same host", pins: []string{"ans://v2.0.0.payments.acme.example"},
+			wantErr: ErrExpectedPeerMismatch},
+		{name: "malformed pin fails closed", pins: []string{"not-an-ans-name"}, wantErr: ErrExpectedPeerMismatch},
+		{name: "malformed pin spelled like the host fails closed", pins: []string{"payments.acme.example"},
+			wantErr: ErrExpectedPeerMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			pin := WithAllowedAnsNames(tt.pins...)
+			if len(tt.pins) == 1 {
+				pin = WithExpectedAnsName(tt.pins[0])
+			}
+			_, err := VerifyCaller(context.Background(), h.proof(t, callMethod, callURL), h.headers(t),
+				callMethod, callURL, h.keys, h.replay, h.callerOpts(pin)...)
+			if tt.wantErr != "" {
+				assertProofErr(t, err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyCaller with pins %v: %v", tt.pins, err)
+			}
+		})
+	}
 }
