@@ -165,15 +165,20 @@ func TestVerifyCaller_NilDependencies(t *testing.T) {
 	})
 }
 
-func TestMiddleware_PanicsOnNilDependencies(t *testing.T) {
+func TestMiddleware_PanicsAtWiringTime(t *testing.T) {
 	h := newHarness(t)
 	cases := []struct {
 		name   string
 		keys   scitt.KeyLookup
 		replay ReplayCache
+		opts   []MiddlewareOption
 	}{
-		{"nil KeyLookup", nil, h.replay},
-		{"nil ReplayCache", h.keys, nil},
+		{name: "nil KeyLookup", keys: nil, replay: h.replay},
+		{name: "nil ReplayCache", keys: h.keys, replay: nil},
+		{name: "malformed expected-peer pin", keys: h.keys, replay: h.replay, opts: []MiddlewareOption{
+			quiet(), WithMiddlewareCallerOptions(WithExpectedAnsName("not-an-ans-name"))}},
+		{name: "empty allow-list", keys: h.keys, replay: h.replay, opts: []MiddlewareOption{
+			quiet(), WithMiddlewareCallerOptions(WithAllowedAnsNames())}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -182,7 +187,7 @@ func TestMiddleware_PanicsOnNilDependencies(t *testing.T) {
 					t.Error("expected panic at wiring time, got none")
 				}
 			}()
-			Middleware(tc.keys, tc.replay)
+			Middleware(tc.keys, tc.replay, tc.opts...)
 		})
 	}
 }

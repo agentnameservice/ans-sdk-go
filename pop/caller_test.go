@@ -306,7 +306,8 @@ func TestVerifyCaller_CertValidity(t *testing.T) {
 
 // TestVerifyCaller_ExpectedPeer: a pin names one registration. Registrations
 // are keyed by the full versioned ans:// name and versions of one host can have
-// different owners, so another version of the same host is another peer. The
+// different owners, so another version of the same host is another peer. A pin
+// that is not an ans:// name is a wiring mistake, not a peer mismatch. The
 // harness caller is ans://v1.0.0.payments.acme.example.
 func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 	tests := []struct {
@@ -321,9 +322,12 @@ func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 		{name: "different host", pins: []string{"ans://v1.0.0.nope.example"}, wantErr: ErrExpectedPeerMismatch},
 		{name: "different version of the same host", pins: []string{"ans://v2.0.0.payments.acme.example"},
 			wantErr: ErrExpectedPeerMismatch},
-		{name: "malformed pin fails closed", pins: []string{"not-an-ans-name"}, wantErr: ErrExpectedPeerMismatch},
-		{name: "malformed pin spelled like the host fails closed", pins: []string{"payments.acme.example"},
-			wantErr: ErrExpectedPeerMismatch},
+		{name: "malformed pin is a misconfiguration", pins: []string{"not-an-ans-name"}, wantErr: ErrMisconfigured},
+		{name: "malformed pin spelled like the host is a misconfiguration", pins: []string{"payments.acme.example"},
+			wantErr: ErrMisconfigured},
+		{name: "malformed pin alongside a valid one is a misconfiguration", pins: []string{
+			"ans://v1.0.0.payments.acme.example", "not-an-ans-name"}, wantErr: ErrMisconfigured},
+		{name: "empty allow-list is a misconfiguration", pins: []string{}, wantErr: ErrMisconfigured},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

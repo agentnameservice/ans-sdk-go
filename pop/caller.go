@@ -42,6 +42,7 @@ func (c *CallerIdentity) FingerprintHex() string {
 type callerConfig struct {
 	requireReceipt bool
 	allowed        map[string]bool // canonical ans:// names; empty = accept any proven agent
+	pinErr         error           // why the expected-peer configuration can never be satisfied
 	logger         *slog.Logger
 	popSkew        time.Duration
 	statusSkew     time.Duration
@@ -65,16 +66,27 @@ type CallerOption func(*callerConfig)
 // WithExpectedAnsName restricts accepted callers to the given ans:// name,
 // version included: another version of the same host is a separate
 // registration, possibly with a different owner, and does not match. May be
-// combined; call it more than once or use WithAllowedAnsNames to allow a set.
-// When no expected name is set, any proven agent authenticates (and the callee
+// combined; call it more than once or use WithAllowedAnsNames to allow a set,
+// which is also how a callee carries a peer through a version rollover. When no
+// expected name is set, any proven agent authenticates (and the callee
 // authorizes downstream).
+//
+// A name that does not parse, or an empty allow-list, is a wiring mistake:
+// Middleware panics at startup and VerifyCaller rejects every request with
+// ErrMisconfigured.
 func WithExpectedAnsName(ansName string) CallerOption {
 	return func(c *callerConfig) { addAllowed(c, ansName) }
 }
 
-// WithAllowedAnsNames restricts accepted callers to the given set of ans:// names.
+// WithAllowedAnsNames restricts accepted callers to the given set of ans://
+// names. Supplying no names is a wiring mistake, not "accept anyone": a pin
+// list that came back empty (an unset variable, say) must not silently turn
+// pinning off.
 func WithAllowedAnsNames(ansNames ...string) CallerOption {
 	return func(c *callerConfig) {
+		if len(ansNames) == 0 && c.pinErr == nil {
+			c.pinErr = errors.New("no ans:// names supplied to WithAllowedAnsNames")
+		}
 		for _, n := range ansNames {
 			addAllowed(c, n)
 		}
@@ -88,18 +100,39 @@ func canonicalAnsName(ans *verify.AnsName) string {
 }
 
 // addAllowed records an expected ans:// name by its canonical form. A name that
-// does not parse is stored under a key no canonical name can take, so a
-// misconfigured pin fails closed rather than opening the gate.
+// does not parse is recorded as a misconfiguration instead, so it can neither
+// match a caller nor be silently dropped.
 func addAllowed(c *callerConfig, ansName string) {
+	ans, err := verify.ParseAnsName(ansName)
+	if err != nil {
+		if c.pinErr == nil {
+			c.pinErr = err
+		}
+		return
+	}
 	if c.allowed == nil {
 		c.allowed = make(map[string]bool)
 	}
-	ans, err := verify.ParseAnsName(ansName)
-	if err != nil {
-		c.allowed["invalid:"+ansName] = true
-		return
-	}
 	c.allowed[canonicalAnsName(ans)] = true
+}
+
+// misconfiguration reports a CallerOption that can never be satisfied.
+func (c *callerConfig) misconfiguration() error {
+	if c.pinErr != nil {
+		return wrapErr(ErrMisconfigured, "expected-peer configuration is unusable", c.pinErr)
+	}
+	return nil
+}
+
+// checkCallerOptions applies opts once so an expected-peer configuration that
+// can never be satisfied fails at wiring time, the way a nil dependency does,
+// rather than as a rejection of every request.
+func checkCallerOptions(opts []CallerOption) error {
+	cfg := defaultCallerConfig()
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg.misconfiguration()
 }
 
 // WithRequireReceipt sets whether a SCITT receipt is required (default true).
@@ -197,6 +230,9 @@ func verifyCaller(ctx context.Context, cfg *callerConfig, log *slog.Logger, proo
 	}
 	if replay == nil {
 		return nil, newErr(ErrMisconfigured, "nil ReplayCache: cannot enforce single-use proofs")
+	}
+	if err := cfg.misconfiguration(); err != nil {
+		return nil, err
 	}
 	if proofJWS == "" {
 		return nil, newErr(ErrMissingHeaders, "no DPoP proof on request")

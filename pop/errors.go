@@ -56,8 +56,10 @@ const (
 	// proof has not been examined at that point.
 	ErrScittHeaderInvalid ErrorType = "SCITT_HEADER_INVALID"
 	// ErrMisconfigured means a required dependency or argument was not supplied
-	// (a nil KeyLookup, ReplayCache, request, or Signer). This is a programmer
-	// error in wiring, not attacker-influenced input; verification fails closed.
+	// (a nil KeyLookup, ReplayCache, request, or Signer) or the expected-peer
+	// configuration can never be satisfied (a pin that is not an ans:// name, an
+	// empty allow-list). This is a programmer error in wiring, not
+	// attacker-influenced input; verification fails closed.
 	ErrMisconfigured ErrorType = "MISCONFIGURED"
 	// ErrClientGone means the request context was canceled or timed out — the
 	// caller hung up. Nothing was rejected on authentication grounds.

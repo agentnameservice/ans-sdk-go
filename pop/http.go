@@ -252,9 +252,10 @@ func (c *middlewareConfig) checkAuthority(r *http.Request) *ProofError {
 // successful authentications at DEBUG, and a saturated replay cache or an
 // unclassified failure at ERROR.
 //
-// Panics if keys or replay is nil: those are required dependencies, and a
-// wiring mistake must fail at startup rather than as a per-request panic
-// inside the handler.
+// Panics if keys or replay is nil, or if the expected-peer configuration can
+// never be satisfied (a pin that is not an ans:// name, an empty allow-list):
+// a wiring mistake must fail at startup rather than per request inside the
+// handler.
 func Middleware(keys scitt.KeyLookup, replay ReplayCache, opts ...MiddlewareOption) func(http.Handler) http.Handler {
 	if keys == nil {
 		panic("pop.Middleware: nil scitt.KeyLookup")
@@ -272,6 +273,9 @@ func Middleware(keys scitt.KeyLookup, replay ReplayCache, opts ...MiddlewareOpti
 	// Drive VerifyCaller with the same logger so verification detail and the
 	// 401 decision share one component=pop log stream.
 	callerOpts := append([]CallerOption{WithLogger(cfg.logger)}, cfg.callerOpts...)
+	if err := checkCallerOptions(callerOpts); err != nil {
+		panic("pop.Middleware: " + err.Error())
+	}
 	log := cfg.logger.With("component", "pop")
 	if cfg.externalSet {
 		probeExternalURL(cfg.externalURL)
