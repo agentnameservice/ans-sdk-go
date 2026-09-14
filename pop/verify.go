@@ -41,10 +41,14 @@ type ProofResult struct {
 	// DPoP-bound access token MUST compare it to the token's cnf.jkt claim to
 	// complete RFC 9449 §4.3 token binding; the ath check alone does not
 	// establish sender-constraint.
-	JKT      string
-	JTI      string
-	HTU      string
-	IssuedAt time.Time
+	JKT string
+	// ContentDigest is the proof's ans_content_digest: SHA-256 of the request
+	// content the caller signed, compared against the received content by
+	// checkContent before the jti is recorded.
+	ContentDigest [sha256.Size]byte
+	JTI           string
+	HTU           string
+	IssuedAt      time.Time
 	// replayExp is the cache retention this proof's freshness window implies:
 	// iat + effective skew + replayGrace. It is computed where the skew is
 	// normalized, so the retention can never disagree with the window the
@@ -56,6 +60,7 @@ type ProofResult struct {
 type verifyConfig struct {
 	accessToken    string
 	tokenPresented bool
+	content        func() ([]byte, error)
 }
 
 // VerifyOption configures a single VerifyProof call.
@@ -77,9 +82,11 @@ func WithBoundAccessToken(token string) VerifyOption {
 //
 // Order: ctx, size cap, compact structure, pinned typ/alg plus required
 // jwk/x5c (acceptES256DPoP), x5c[0] P-256 leaf, its validity period at now,
-// jwk↔x5c key equality, signature under that single key, htm, normalized htu,
-// ath ⟺ presented token, iat window, then jti single-use. Replay is recorded
-// LAST, so only proofs that pass every other check consume a cache slot.
+// jwk↔x5c key equality, signature under that single key, ans_profile,
+// ans_content_digest shape, htm, normalized htu, ath ⟺ presented token, iat
+// window, jti size, then the digest against the received content
+// (WithReceivedContent) and jti single-use. Content is hashed and the replay
+// recorded LAST, so only proofs that pass every other check touch either.
 //
 // A proof verified here is cryptographically well-formed but NOT yet trusted:
 // nothing has established that its certificate belongs to a live ANS agent
@@ -91,8 +98,12 @@ func VerifyProof(ctx context.Context, proofJWS, method, rawURL string,
 	if replay == nil {
 		return nil, newErr(ErrMisconfigured, "nil ReplayCache: cannot enforce single-use proofs")
 	}
-	r, err := verifyProofUnrecorded(ctx, proofJWS, method, rawURL, now, skew, opts...)
+	cfg := resolveVerifyOptions(opts)
+	r, err := verifyProofUnrecorded(ctx, proofJWS, method, rawURL, now, skew, &cfg)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkContent(r, cfg.content); err != nil {
 		return nil, err
 	}
 	if err := commitReplay(r, replay); err != nil {
@@ -101,11 +112,31 @@ func VerifyProof(ctx context.Context, proofJWS, method, rawURL string,
 	return r, nil
 }
 
-// verifyProofUnrecorded runs every proof check except the replay commit, so a
-// caller that has more trust checks to perform can defer consuming a cache slot
-// until the proof is known to belong to a vouched agent.
+// WithReceivedContent supplies the request content the verifier received, read
+// lazily: read runs only after every other check — under VerifyCaller, only
+// after the proof is bound to a live ANS identity — and SHA-256 of what it
+// returns must equal the proof's ans_content_digest before the jti is recorded.
+// Without this option the verifier binds empty content, so a proof minted over
+// a body fails closed. Middleware wires it from the request body; non-HTTP
+// embedders supply their own reader.
+func WithReceivedContent(read func() ([]byte, error)) VerifyOption {
+	return func(c *verifyConfig) { c.content = read }
+}
+
+// resolveVerifyOptions applies opts to a fresh verifyConfig.
+func resolveVerifyOptions(opts []VerifyOption) verifyConfig {
+	var cfg verifyConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// verifyProofUnrecorded runs every proof check except the content comparison
+// and the replay commit, so a caller with more trust checks to perform can
+// defer both until the proof is known to belong to a vouched agent.
 func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
-	now time.Time, skew time.Duration, opts ...VerifyOption) (*ProofResult, error) {
+	now time.Time, skew time.Duration, cfg *verifyConfig) (*ProofResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, wrapErr(ErrClientGone, "request context done before verification", err)
 	}
@@ -114,10 +145,6 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 	}
 	if skew <= 0 {
 		skew = DefaultPoPSkew
-	}
-	var cfg verifyConfig
-	for _, o := range opts {
-		o(&cfg)
 	}
 
 	headerB64, payloadB64, sigB64, err := splitCompactJWS(proofJWS)
@@ -156,10 +183,17 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 	if err != nil {
 		return nil, err
 	}
+	if err := checkProfile(pl.Profile); err != nil {
+		return nil, err
+	}
+	contentDigest, err := decodeContentDigest(pl.ContentDigest)
+	if err != nil {
+		return nil, err
+	}
 	if err := checkHTTPBinding(pl, method, rawURL); err != nil {
 		return nil, err
 	}
-	if err := checkTokenBinding(pl, &cfg); err != nil {
+	if err := checkTokenBinding(pl, cfg); err != nil {
 		return nil, err
 	}
 	iat, err := checkFreshness(pl, now, skew)
@@ -174,15 +208,34 @@ func verifyProofUnrecorded(ctx context.Context, proofJWS, method, rawURL string,
 	}
 
 	return &ProofResult{
-		Cert:        cert,
-		Key:         pub,
-		Fingerprint: sha256.Sum256(cert.Raw),
-		JKT:         jwkThumbprint(pub),
-		JTI:         pl.JTI,
-		HTU:         pl.HTU,
-		IssuedAt:    iat,
-		replayExp:   iat.Add(skew + replayGrace),
+		Cert:          cert,
+		Key:           pub,
+		Fingerprint:   sha256.Sum256(cert.Raw),
+		JKT:           jwkThumbprint(pub),
+		ContentDigest: contentDigest,
+		JTI:           pl.JTI,
+		HTU:           pl.HTU,
+		IssuedAt:      iat,
+		replayExp:     iat.Add(skew + replayGrace),
 	}, nil
+}
+
+// checkContent compares the proof's ans_content_digest with SHA-256 of the
+// content the callee received. A nil read means the request carried no content.
+func checkContent(r *ProofResult, read func() ([]byte, error)) error {
+	var content []byte
+	if read != nil {
+		b, err := read()
+		if err != nil {
+			return wrapErr(ErrContentUnreadable, "request content could not be read", err)
+		}
+		content = b
+	}
+	got := sha256.Sum256(content)
+	if subtle.ConstantTimeCompare(got[:], r.ContentDigest[:]) != 1 {
+		return newErr(ErrContentBindingMismatch, "ans_content_digest does not match the received content")
+	}
+	return nil
 }
 
 // checkHTTPBinding confirms the proof's htm/htu match the request method and

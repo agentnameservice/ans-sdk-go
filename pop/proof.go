@@ -56,15 +56,73 @@ type proofJWK struct {
 
 // proofPayload holds the DPoP claims this profile binds: the HTTP method and
 // normalized target URI (htm/htu), the issued-at (iat), a unique id (jti) for
-// replay detection, and — only when the request also presents an OAuth2
-// access token — that token's hash (ath). Additional claims are tolerated on
-// the payload (DPoP permits them); only the header is strictly decoded.
+// replay detection, the request content's digest (ans_content_digest, required
+// on every proof), and — only when the request also presents an OAuth2 access
+// token — that token's hash (ath). ans_profile names the Method-B profile
+// revision the proof was minted under; absent means revision 1. Additional
+// claims are tolerated on the payload (DPoP permits them); only the header is
+// strictly decoded.
 type proofPayload struct {
-	HTM string `json:"htm"`
-	HTU string `json:"htu"`
-	IAT int64  `json:"iat"`
-	JTI string `json:"jti"`
-	ATH string `json:"ath,omitempty"`
+	HTM           string          `json:"htm"`
+	HTU           string          `json:"htu"`
+	IAT           int64           `json:"iat"`
+	JTI           string          `json:"jti"`
+	ATH           string          `json:"ath,omitempty"`
+	Profile       json.RawMessage `json:"ans_profile,omitempty"`
+	ContentDigest string          `json:"ans_content_digest"`
+}
+
+// EmptyContentDigest is the ans_content_digest of a request without content:
+// base64url(SHA-256("")) without padding.
+const EmptyContentDigest = "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
+
+// decodeContentDigest validates the ans_content_digest claim: present, and
+// base64url without padding of exactly one SHA-256 digest.
+func decodeContentDigest(claim string) ([sha256.Size]byte, error) {
+	var digest [sha256.Size]byte
+	if claim == "" {
+		return digest, newErr(ErrMalformedProof, "proof missing ans_content_digest")
+	}
+	raw, err := b64urlDecode(claim)
+	if err != nil || len(raw) != sha256.Size {
+		return digest, newErr(ErrMalformedProof, "ans_content_digest must be base64url(SHA-256(content))")
+	}
+	copy(digest[:], raw)
+	return digest, nil
+}
+
+// profileRevision is the Method-B profile revision this package implements and
+// mints; it is the only value ans_profile may carry.
+const profileRevision = "1"
+
+// checkProfile enforces the ans_profile claim: absent means revision 1, and a
+// present value must be a positive JSON integer naming a supported revision.
+func checkProfile(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if !isPositiveJSONInteger(raw) {
+		return newErr(ErrMalformedProof, "ans_profile must be a positive JSON integer, got "+echo(string(raw)))
+	}
+	if string(raw) != profileRevision {
+		return newErr(ErrUnsupportedProfile, "ans_profile revision "+echo(string(raw))+
+			" is not supported (this verifier implements revision "+profileRevision+")")
+	}
+	return nil
+}
+
+// isPositiveJSONInteger reports whether raw is a JSON integer literal with no
+// sign, fraction, exponent, or leading zero, and so a value of at least one.
+func isPositiveJSONInteger(raw []byte) bool {
+	if len(raw) == 0 || raw[0] < '1' || raw[0] > '9' {
+		return false
+	}
+	for _, c := range raw[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // acceptES256DPoP is the single predicate deciding which (typ, alg) a proof

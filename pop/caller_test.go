@@ -323,6 +323,56 @@ func TestVerifyCaller_CertValidity(t *testing.T) {
 // different owners, so another version of the same host is another peer. A pin
 // that is not an ans:// name is a wiring mistake, not a peer mismatch. The
 // harness caller is ans://v1.0.0.payments.acme.example.
+// TestVerifyCaller_ContentBinding: the received content is hashed only after
+// the proof is bound to a live identity, compared before the jti is recorded.
+func TestVerifyCaller_ContentBinding(t *testing.T) {
+	body := []byte(`{"amount":100}`)
+	tests := []struct {
+		name         string
+		otherAgent   bool // status token vouches a different agent, so binding fails first
+		received     []byte
+		wantErr      ErrorType
+		wantReadCall bool
+	}{
+		{name: "matching content", received: body, wantReadCall: true},
+		{name: "tampered content", received: []byte(`{"amount":9000}`), wantErr: ErrContentBindingMismatch,
+			wantReadCall: true},
+		{name: "binding failure never reads the content", otherAgent: true, received: body,
+			wantErr: ErrBindingFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			proof, err := h.signer.Sign(context.Background(), callMethod, callURL, WithContent(body))
+			if err != nil {
+				t.Fatalf("sign: %v", err)
+			}
+			hdrs := h.headers(t)
+			if tt.otherAgent {
+				hdrs.StatusToken = statusToken(t, h.tlKey, "someone-else", h.ansName, scitt.StatusActive,
+					h.now.Add(-time.Minute).Unix(), h.now.Add(time.Hour).Unix(), h.fp)
+			}
+			readCalled := false
+			read := func() ([]byte, error) { readCalled = true; return tt.received, nil }
+			_, err = VerifyCaller(context.Background(), proof, hdrs, callMethod, callURL, h.keys, h.replay,
+				h.callerOpts(WithVerifyOptions(WithReceivedContent(read)))...)
+			if readCalled != tt.wantReadCall {
+				t.Errorf("content read = %v, want %v", readCalled, tt.wantReadCall)
+			}
+			if tt.wantErr != "" {
+				assertProofErr(t, err, tt.wantErr)
+				if h.replay.Len() != 0 {
+					t.Errorf("rejected proof consumed a replay slot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyCaller: %v", err)
+			}
+		})
+	}
+}
+
 func TestVerifyCaller_ExpectedPeer(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -85,6 +86,43 @@ func TestSignerSign(t *testing.T) {
 		}
 		if pl.ATH != accessTokenHash(tok) {
 			t.Errorf("ath = %q, want %q", pl.ATH, accessTokenHash(tok))
+		}
+	})
+	t.Run("content binding and profile claims", func(t *testing.T) {
+		body := []byte(`{"amount":100}`)
+		sum := sha256.Sum256([]byte("streamed elsewhere"))
+		tests := []struct {
+			name string
+			opts []ProofOption
+			want string
+		}{
+			{name: "default binds empty content", want: EmptyContentDigest},
+			{name: "WithContent hashes the content", opts: []ProofOption{WithContent(body)},
+				want: b64urlEncode(digestOf(body))},
+			{name: "WithContentDigest takes a precomputed digest", opts: []ProofOption{WithContentDigest(sum)},
+				want: b64urlEncode(sum[:])},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				token, err := h.signer.Sign(context.Background(), "POST", "https://h.example/x", tt.opts...)
+				if err != nil {
+					t.Fatalf("sign: %v", err)
+				}
+				_, pB64, _, err := splitCompactJWS(token)
+				if err != nil {
+					t.Fatalf("split: %v", err)
+				}
+				pl, err := decodeProofPayload(pB64)
+				if err != nil {
+					t.Fatalf("decode payload: %v", err)
+				}
+				if pl.ContentDigest != tt.want {
+					t.Errorf("ans_content_digest = %q, want %q", pl.ContentDigest, tt.want)
+				}
+				if string(pl.Profile) != profileRevision {
+					t.Errorf("ans_profile = %s, want %s", pl.Profile, profileRevision)
+				}
+			})
 		}
 	})
 	t.Run("no token means no ath claim", func(t *testing.T) {

@@ -15,6 +15,9 @@ const (
 	// ES256 / "dpop+jwt" pair (covers the alg:"none" downgrade), or a jwk
 	// that is not EC/P-256.
 	ErrUnsupportedAlg ErrorType = "UNSUPPORTED_ALG"
+	// ErrUnsupportedProfile is a proof whose ans_profile claim names a Method-B
+	// profile revision this verifier does not implement.
+	ErrUnsupportedProfile ErrorType = "UNSUPPORTED_PROFILE"
 	// ErrHTTPBindingMismatch is an htm/htu that does not match the request.
 	ErrHTTPBindingMismatch ErrorType = "HTTP_BINDING_MISMATCH"
 	// ErrProofStale is an iat outside the accepted freshness window
@@ -38,6 +41,14 @@ const (
 	// OAuth2 access token disagree: ath present with no token presented,
 	// absent when one was, or a hash mismatch (RFC 9449 §4.3 / §7.1).
 	ErrTokenBindingMismatch ErrorType = "TOKEN_BINDING_MISMATCH"
+	// ErrContentBindingMismatch means the proof's ans_content_digest does not
+	// match the request content the verifier received: content was rewritten,
+	// added to a request the caller sent empty, or removed.
+	ErrContentBindingMismatch ErrorType = "CONTENT_BINDING_MISMATCH"
+	// ErrContentUnreadable means the request content could not be read for the
+	// digest comparison: the client disconnected, or the content exceeded the
+	// configured size cap.
+	ErrContentUnreadable ErrorType = "CONTENT_UNREADABLE"
 	// ErrBindingFailed means a verified proof and a verified status token do
 	// not describe the same agent (fingerprint, ans:// SAN, or receipt agent
 	// mismatch).

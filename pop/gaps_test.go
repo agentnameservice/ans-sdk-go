@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,9 +175,10 @@ func TestMiddleware_PanicsAtWiringTime(t *testing.T) {
 		{name: "nil KeyLookup", keys: nil, replay: h.replay},
 		{name: "nil ReplayCache", keys: h.keys, replay: nil},
 		{name: "malformed expected-peer pin", keys: h.keys, replay: h.replay, opts: []MiddlewareOption{
-			quiet(), WithMiddlewareCallerOptions(WithExpectedAnsName("not-an-ans-name"))}},
+			quiet(), WithTrustedHosts("callee.example"), WithMiddlewareCallerOptions(WithExpectedAnsName("not-an-ans-name"))}},
 		{name: "empty allow-list", keys: h.keys, replay: h.replay, opts: []MiddlewareOption{
-			quiet(), WithMiddlewareCallerOptions(WithAllowedAnsNames())}},
+			quiet(), WithTrustedHosts("callee.example"), WithMiddlewareCallerOptions(WithAllowedAnsNames())}},
+		{name: "no trusted authority", keys: h.keys, replay: h.replay, opts: []MiddlewareOption{quiet()}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -370,13 +370,11 @@ func TestMiddleware_LoggerAndBadScittHeader(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mw := Middleware(h.keys, replay,
+	srv := newTestServer(t, h.keys, replay, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}),
 		WithMiddlewareLogger(logger),
 		WithMiddlewareCallerOptions(withCallerClock(clock)))
-	srv := httptest.NewTLSServer(mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})))
-	defer srv.Close()
 
 	t.Run("invalid SCITT header -> 401 and logged", func(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/x", nil)

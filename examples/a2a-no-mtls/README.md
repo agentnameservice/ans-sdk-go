@@ -81,7 +81,9 @@ one key and a swapped `jwk` fails closed.
   "htm": "GET",
   "htu": "https://callee.example/v1/do",
   "iat": 1700000000,
-  "jti": "4063b9d16e68177201e9cf4df596374a"
+  "jti": "4063b9d16e68177201e9cf4df596374a",
+  "ans_profile": 1,
+  "ans_content_digest": "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
 }
 ```
 
@@ -92,6 +94,8 @@ one key and a swapped `jwk` fails closed.
 | `iat` | issued-at, unix seconds; the callee accepts ±120 s |
 | `jti` | 128-bit single-use id (16 random bytes, hex); the callee caches it to reject replays |
 | `ath` | *only when an OAuth2 access token is presented* — `base64url(SHA-256(token))` |
+| `ans_profile` | the ANS-6 Method-B profile revision; absent means `1`, the only revision defined. Anything else is rejected |
+| `ans_content_digest` | **required** — `base64url(SHA-256(content))` over the request content as sent; a request with no content carries the digest of the empty string (shown above). The callee compares it with the content it received before the handler runs |
 
 **On the wire**, the three base64url segments are joined with dots (one line in
 reality, ~950 bytes — most of it the certificate):
@@ -107,7 +111,7 @@ eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwieDVj…                ← header
 1. Normalize the request URL → `htu`.
 2. Mint a fresh `jti` — 16 random bytes, hex.
 3. Build the header: `typ`/`alg` pinned, the identity certificate DER (std-base64) in `x5c[0]`.
-4. Build the payload: `htm`, `htu`, `iat = now`, `jti`.
+4. Build the payload: `htm`, `htu`, `iat = now`, `jti`, `ans_profile = 1`, and `ans_content_digest` over the request body (`AttachIdentity` reads the body once and restores it).
 5. `signingInput = base64url(header) + "." + base64url(payload)` — the exact ASCII bytes.
 6. `signature = ECDSA-P256( SHA-256(signingInput) )`, written as fixed-width R‖S (64 bytes), base64url.
 7. Join the three segments with dots.
@@ -189,20 +193,35 @@ because it presented a token issued to another agent's key.
 ## Deployment note: the `htu` authority
 
 `htu` is only as trustworthy as the URL the callee compares it against. The
-fallback derives that from the request's `Host` header, which the client
-controls — so a proof captured from a call to another origin would satisfy the
-check. Every deployment sets one of:
+request's own `Host` header is client-controlled — a proof captured from a call
+to another origin, presented with a spoofed `Host`, would satisfy the check — so
+`pop.Middleware` refuses to start unless one of these supplies the authority:
 
 ```go
 pop.Middleware(keys, replay, pop.WithTrustedHosts("callee.example:443"))
 pop.Middleware(keys, replay, pop.WithExternalURL(fromTrustedProxyHeader))
 ```
 
-`pop` logs a warning at startup when neither is configured, and panics if a
+It panics at construction when neither is configured, and when a
 `WithExternalURL` function ignores the request path (which would collapse `htu`
-to a constant and stop it binding the target at all). Scenario 5 of the
+to a constant and stop it binding the target at all). Allowlist entries name
+origins: under HTTPS, `callee.example` and `callee.example:443` are the same
+entry while `callee.example:80` is a different one. Scenario 5 of the
 **single-process** demo sends a proof minted for `victim.example` with a matching
 spoofed `Host` and shows it rejected.
+
+## Deployment note: request content
+
+`htm` and `htu` say nothing about the body, and a hop that terminates TLS could
+rewrite it — or add one to a request the caller sent empty — on a first,
+in-flight request that passes every replay check. Every proof therefore carries
+`ans_content_digest`, and the callee compares it with the content it actually
+received before the handler runs. `pop.Middleware` buffers the body to do this,
+up to `pop.WithMaxContentBytes` (1 MiB by default; larger requests get 413), and
+hands the verified bytes to the handler. On the caller side `pop.AttachIdentity`
+reads the body once, binds its digest, and restores it; a caller that streams
+content it cannot buffer computes the digest itself and passes
+`pop.WithContentDigest` to `Signer.Sign`.
 
 Note that `WithTrustedHosts` takes the *externally-visible* authority callers
 dial, not the bind address — a service listening on `:8443` or `0.0.0.0:8443`

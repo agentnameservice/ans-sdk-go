@@ -161,10 +161,11 @@ func WithPoPSkew(d time.Duration) CallerOption {
 	}
 }
 
-// WithVerifyOptions forwards options to the underlying VerifyProof — e.g.
-// WithVerifyOptions(WithBoundAccessToken(token)) when the request presented a
-// DPoP-bound OAuth2 access token. Middleware adds that binding automatically
-// from the Authorization header; this hook exists for non-HTTP embedders.
+// WithVerifyOptions forwards options to the underlying proof verification:
+// WithBoundAccessToken when the request presented a DPoP-bound OAuth2 access
+// token, and WithReceivedContent for the content the embedder received.
+// Middleware adds both automatically, from the Authorization header and the
+// request body; this hook exists for non-HTTP embedders.
 func WithVerifyOptions(vopts ...VerifyOption) CallerOption {
 	return func(c *callerConfig) { c.verifyOpts = append(c.verifyOpts, vopts...) }
 }
@@ -246,9 +247,10 @@ func verifyCaller(ctx context.Context, cfg *callerConfig, log *slog.Logger, proo
 
 	now := cfg.now()
 
-	// Possession: the caller holds the identity key, for this request. The jti
-	// is NOT recorded yet — see the commitReplay call below.
-	proof, err := verifyProofUnrecorded(ctx, proofJWS, method, rawURL, now, cfg.popSkew, cfg.verifyOpts...)
+	// Possession: the caller holds the identity key, for this request. Neither
+	// the content comparison nor the jti record happens yet — see below.
+	vcfg := resolveVerifyOptions(cfg.verifyOpts)
+	proof, err := verifyProofUnrecorded(ctx, proofJWS, method, rawURL, now, cfg.popSkew, &vcfg)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +280,12 @@ func verifyCaller(ctx context.Context, cfg *callerConfig, log *slog.Logger, proo
 
 	id, err := verifyBinding(proof, st, rcpt, cfg)
 	if err != nil {
+		return nil, err
+	}
+
+	// Content: hashed only now that the proof belongs to a vouched agent, so an
+	// unauthenticated flood never makes the callee read and hash bodies.
+	if err := checkContent(proof, vcfg.content); err != nil {
 		return nil, err
 	}
 

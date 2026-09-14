@@ -3,8 +3,10 @@ package pop
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -57,7 +59,130 @@ func (h *harness) goodPayload(t *testing.T, method, htu string) map[string]any {
 	if err != nil {
 		t.Fatalf("jti: %v", err)
 	}
-	return map[string]any{"htm": method, "htu": htu, "iat": h.now.Unix(), "jti": jti}
+	return map[string]any{
+		"htm": method, "htu": htu, "iat": h.now.Unix(), "jti": jti, "ans_content_digest": EmptyContentDigest,
+	}
+}
+
+func TestEmptyContentDigest(t *testing.T) {
+	if got := b64urlEncode(sha256.New().Sum(nil)); got != EmptyContentDigest {
+		t.Fatalf("EmptyContentDigest = %q, want %q", EmptyContentDigest, got)
+	}
+}
+
+// TestVerifyProof_ContentDigestClaim: ans_content_digest is required on every
+// proof and must match SHA-256 of the content the verifier received, where no
+// content means the empty octet string.
+func TestVerifyProof_ContentDigestClaim(t *testing.T) {
+	const method, rawURL = "POST", "https://callee.example/v1/x"
+	htu, err := normalizeHTU(rawURL)
+	if err != nil {
+		t.Fatalf("normalizeHTU: %v", err)
+	}
+	body := []byte(`{"amount":100}`)
+	bodyDigest := b64urlEncode(digestOf(body))
+	short := b64urlEncode(digestOf(body)[:31])
+	tests := []struct {
+		name     string
+		claim    any // nil omits the claim
+		received func() ([]byte, error)
+		wantErr  ErrorType
+	}{
+		{name: "empty digest, no content", claim: EmptyContentDigest},
+		{name: "digest of the received content", claim: bodyDigest, received: fixed(body)},
+		{name: "absent", wantErr: ErrMalformedProof},
+		{name: "not base64url", claim: "!!!", wantErr: ErrMalformedProof},
+		{name: "padded", claim: EmptyContentDigest + "=", wantErr: ErrMalformedProof},
+		{name: "wrong length", claim: short, wantErr: ErrMalformedProof},
+		{name: "not a string", claim: 1, wantErr: ErrMalformedProof},
+		{name: "tampered content", claim: bodyDigest, received: fixed([]byte(`{"amount":9000}`)),
+			wantErr: ErrContentBindingMismatch},
+		{name: "content added to an empty request", claim: EmptyContentDigest, received: fixed(body),
+			wantErr: ErrContentBindingMismatch},
+		{name: "content removed", claim: bodyDigest, wantErr: ErrContentBindingMismatch},
+		{name: "content unreadable", claim: bodyDigest,
+			received: func() ([]byte, error) { return nil, errors.New("disconnect") }, wantErr: ErrContentUnreadable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			p := h.goodPayload(t, method, htu)
+			delete(p, "ans_content_digest")
+			if tt.claim != nil {
+				p["ans_content_digest"] = tt.claim
+			}
+			_, err := VerifyProof(context.Background(), craftProof(t, h.agentKey, h.goodHeader(), p),
+				method, rawURL, h.now, DefaultPoPSkew, h.replay, WithReceivedContent(tt.received))
+			if tt.wantErr != "" {
+				assertProofErr(t, err, tt.wantErr)
+				if h.replay.Len() != 0 {
+					t.Errorf("rejected proof consumed a replay slot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyProof: %v", err)
+			}
+		})
+	}
+}
+
+// digestOf is SHA-256 of b as a slice, for building claims.
+func digestOf(b []byte) []byte {
+	sum := sha256.Sum256(b)
+	return sum[:]
+}
+
+// fixed returns a content reader that yields b.
+func fixed(b []byte) func() ([]byte, error) {
+	return func() ([]byte, error) { return b, nil }
+}
+
+// TestVerifyProof_ProfileClaim: ans_profile is optional and means revision 1
+// when absent; present, it must be a positive JSON integer naming a revision
+// this verifier implements. Unknown claims stay tolerated.
+func TestVerifyProof_ProfileClaim(t *testing.T) {
+	const method, rawURL = "POST", "https://callee.example/v1/x"
+	htu, err := normalizeHTU(rawURL)
+	if err != nil {
+		t.Fatalf("normalizeHTU: %v", err)
+	}
+	tests := []struct {
+		name    string
+		raw     string // JSON text of the claim; "" omits it
+		wantErr ErrorType
+	}{
+		{name: "absent means revision 1"},
+		{name: "explicit revision 1", raw: "1"},
+		{name: "revision 2 is unsupported", raw: "2", wantErr: ErrUnsupportedProfile},
+		{name: "revision 10 is unsupported", raw: "10", wantErr: ErrUnsupportedProfile},
+		{name: "zero is not a revision", raw: "0", wantErr: ErrMalformedProof},
+		{name: "negative", raw: "-1", wantErr: ErrMalformedProof},
+		{name: "fractional", raw: "1.5", wantErr: ErrMalformedProof},
+		{name: "string", raw: `"1"`, wantErr: ErrMalformedProof},
+		{name: "null", raw: "null", wantErr: ErrMalformedProof},
+		{name: "boolean", raw: "true", wantErr: ErrMalformedProof},
+		{name: "object", raw: "{}", wantErr: ErrMalformedProof},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			p := h.goodPayload(t, method, htu)
+			p["x-unknown-extension"] = "tolerated"
+			if tt.raw != "" {
+				p["ans_profile"] = json.RawMessage(tt.raw)
+			}
+			_, err := VerifyProof(context.Background(), craftProof(t, h.agentKey, h.goodHeader(), p),
+				method, rawURL, h.now, DefaultPoPSkew, h.replay)
+			if tt.wantErr != "" {
+				assertProofErr(t, err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyProof: %v", err)
+			}
+		})
+	}
 }
 
 func TestVerifyProof_Matrix(t *testing.T) {

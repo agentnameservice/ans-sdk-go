@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"time"
 )
 
@@ -56,7 +58,8 @@ func NewSigner(key *ecdsa.PrivateKey, certDER []byte, opts ...SignerOption) (*Si
 
 // proofOptions is the resolved per-proof configuration.
 type proofOptions struct {
-	ath string
+	ath           string
+	contentDigest [sha256.Size]byte
 }
 
 // ProofOption configures a single Sign call.
@@ -69,6 +72,21 @@ type ProofOption func(*proofOptions)
 // proof minted with a token is only accepted alongside that token.
 func WithAccessToken(token string) ProofOption {
 	return func(o *proofOptions) { o.ath = accessTokenHash(token) }
+}
+
+// WithContent binds the request content: the payload's ans_content_digest
+// becomes base64url(SHA-256(content)). Every proof carries the claim, and a
+// proof minted without WithContent or WithContentDigest binds empty content,
+// so a request that carries a body must bind it. AttachIdentity does this from
+// the request body; use this when minting proofs by hand.
+func WithContent(content []byte) ProofOption {
+	return func(o *proofOptions) { o.contentDigest = sha256.Sum256(content) }
+}
+
+// WithContentDigest binds request content by a SHA-256 digest the caller
+// computed itself, for content it streams rather than holds in memory.
+func WithContentDigest(digest [sha256.Size]byte) ProofOption {
+	return func(o *proofOptions) { o.contentDigest = digest }
 }
 
 // JKT returns the RFC 7638 thumbprint of the signer's public key — the value an
@@ -84,16 +102,17 @@ func withSignerClock(now func() time.Time) SignerOption {
 	return func(s *Signer) { s.now = now }
 }
 
-// Sign produces a compact DPoP proof JWS binding the HTTP method and target
-// URL, stamped with the current iat and a fresh jti. The header carries both
-// the bare public key (jwk) and the identity certificate (x5c). Pass
+// Sign produces a compact DPoP proof JWS binding the HTTP method, target URL,
+// and request content (empty unless WithContent or WithContentDigest says
+// otherwise), stamped with the current iat and a fresh jti. The header carries
+// both the bare public key (jwk) and the identity certificate (x5c). Pass
 // WithAccessToken to additionally bind an OAuth2 access token via ath. ctx is
 // honored for cancellation though signing is local and fast.
 func (s *Signer) Sign(ctx context.Context, method, rawURL string, opts ...ProofOption) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	var po proofOptions
+	po := proofOptions{contentDigest: sha256.Sum256(nil)}
 	for _, o := range opts {
 		o(&po)
 	}
@@ -112,11 +131,13 @@ func (s *Signer) Sign(ctx context.Context, method, rawURL string, opts ...ProofO
 		X5c: []string{base64.StdEncoding.EncodeToString(s.certDER)},
 	}
 	pl := &proofPayload{
-		HTM: method,
-		HTU: htu,
-		IAT: s.now().Unix(),
-		JTI: jti,
-		ATH: po.ath,
+		HTM:           method,
+		HTU:           htu,
+		IAT:           s.now().Unix(),
+		JTI:           jti,
+		ATH:           po.ath,
+		Profile:       json.RawMessage(profileRevision),
+		ContentDigest: b64urlEncode(po.contentDigest[:]),
 	}
 	headerB64, payloadB64, err := encodeProofParts(hdr, pl)
 	if err != nil {

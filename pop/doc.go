@@ -50,11 +50,21 @@
 // replay and redirection.
 //
 // The htu binding is only as trustworthy as the URL the callee compares
-// against. Middleware's fallback derives it from the request's Host header,
-// which the client controls; deployments MUST set WithExternalURL or
-// WithTrustedHosts so a proof captured from a call to another origin cannot be
-// presented here with a spoofed Host. Note also that htu excludes the query
-// string (RFC 9449 §4.2), so a proof does not bind request parameters.
+// against. The request's own Host header is client-controlled, so Middleware
+// refuses to start unless WithTrustedHosts or WithExternalURL supplies a
+// trusted authority; otherwise a proof captured from a call to another origin
+// could be presented here with a spoofed Host. htu excludes the query string
+// (RFC 9449 §4.2), so a proof does not bind request parameters.
+//
+// The request content is bound separately. Every proof carries
+// ans_content_digest, base64url(SHA-256(content)) over the request content as
+// sent — the digest of the empty octet string for a request without content —
+// and the verifier compares it with the content it received, after the
+// identity binding and before recording the jti. A hop that terminates TLS
+// therefore cannot rewrite a body, or add one to a request the caller sent
+// empty, on a first in-flight request. Middleware buffers the content up to
+// WithMaxContentBytes to do this and hands the verified bytes to the handler;
+// AttachIdentity computes the digest from the outbound request body.
 //
 // # RFC 9449 conformance and OAuth 2.0
 //
@@ -62,7 +72,10 @@
 // validates them via the jwk header and ignores the x5c. The profile adds two
 // restrictions the RFC permits a deployment to impose: ES256 only, and no
 // JOSE header parameters beyond {typ, alg, jwk, x5c} (strict decoding, so a
-// private-key "d" member or any extra field fails closed).
+// private-key "d" member or any extra field fails closed). It also adds two
+// payload claims, which the RFC allows: ans_profile, the profile revision
+// (absent means 1, the only revision defined; anything else is rejected), and
+// the required ans_content_digest.
 //
 // OAuth 2.0 composes on top, unchanged from the RFC. When a request presents
 // a DPoP-bound access token ("Authorization: DPoP <token>", RFC 9449 §7.1),

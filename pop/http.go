@@ -1,7 +1,11 @@
 package pop
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -12,6 +16,17 @@ import (
 
 // DPoPHeader is the HTTP header that carries the compact DPoP proof (RFC 9449).
 const DPoPHeader = "DPoP"
+
+// DefaultMaxContentBytes caps the request content Middleware buffers to verify
+// ans_content_digest when WithMaxContentBytes is not set: 1 MiB.
+const DefaultMaxContentBytes int64 = 1 << 20
+
+// The two URL schemes an authority can arrive under; each has a default port
+// that trustedKey and normalizeHTU drop.
+const (
+	schemeHTTPS = "https"
+	schemeHTTP  = "http"
+)
 
 // AccessTokenFromAuthorization returns the access token when an Authorization
 // header value presents one under the DPoP auth scheme (RFC 9449 §7.1). Scheme
@@ -60,11 +75,12 @@ func contextWithCaller(ctx context.Context, id *CallerIdentity) context.Context 
 }
 
 type middlewareConfig struct {
-	externalURL  func(*http.Request) string
-	externalSet  bool
-	trustedHosts map[string]bool
-	callerOpts   []CallerOption
-	logger       *slog.Logger
+	externalURL     func(*http.Request) string
+	externalSet     bool
+	trustedHosts    map[string]bool // keyed by trustedKey, under both schemes
+	callerOpts      []CallerOption
+	logger          *slog.Logger
+	maxContentBytes int64
 }
 
 // MiddlewareOption configures Middleware.
@@ -89,12 +105,10 @@ type MiddlewareOption func(*middlewareConfig)
 // proxy-set header the proxy strips from clients — never from raw
 // client-supplied X-Forwarded-* headers, or the authority can be forged.
 //
-// Every production deployment MUST set this or WithTrustedHosts. The fallback
-// derives the authority from the request's own Host header, which is
-// client-controlled: without one of these options an attacker holding a proof
-// captured from a call to another origin can present it here with a spoofed
-// Host and satisfy the htu check. Middleware logs a warning when neither is
-// configured.
+// Middleware requires this or WithTrustedHosts and panics at construction when
+// neither is set. The request's own Host header is client-controlled: were it
+// used unchecked, an attacker holding a proof captured from a call to another
+// origin could present it here with a spoofed Host and satisfy the htu check.
 func WithExternalURL(fn func(*http.Request) string) MiddlewareOption {
 	return func(c *middlewareConfig) {
 		if fn != nil {
@@ -126,9 +140,10 @@ func probeExternalURL(fn func(*http.Request) string) {
 // WithTrustedHosts restricts which authorities the htu comparison will accept,
 // closing the spoofed-Host hole described in WithExternalURL. Each entry is an
 // externally-visible authority ("api.example.com" or "api.example.com:8443"),
-// matched case-insensitively with the scheme's default port ignored, so
-// "api.example.com" and "api.example.com:443" are the same entry. A request
-// whose authority is not listed is rejected with 401.
+// matched case-insensitively with the request scheme's default port ignored:
+// under https, "api.example.com" and "api.example.com:443" are the same origin
+// while "api.example.com:80" is a different one. A request whose authority is
+// not listed is rejected with 401.
 //
 // This composes with WithExternalURL rather than being overridden by it: when
 // both are set, the allowlist constrains the authority that function returns.
@@ -138,13 +153,14 @@ func probeExternalURL(fn func(*http.Request) string) {
 func WithTrustedHosts(hosts ...string) MiddlewareOption {
 	return func(c *middlewareConfig) {
 		for _, h := range hosts {
-			if h = normalizeAuthority(h); h == "" {
+			if strings.TrimSpace(h) == "" {
 				continue
 			}
 			if c.trustedHosts == nil {
 				c.trustedHosts = make(map[string]bool)
 			}
-			c.trustedHosts[h] = true
+			c.trustedHosts[trustedKey(schemeHTTPS, h)] = true
+			c.trustedHosts[trustedKey(schemeHTTP, h)] = true
 		}
 		if len(hosts) > 0 && len(c.trustedHosts) == 0 {
 			panic("pop.WithTrustedHosts: every supplied host was empty")
@@ -152,18 +168,38 @@ func WithTrustedHosts(hosts ...string) MiddlewareOption {
 	}
 }
 
-// normalizeAuthority lowercases an authority and drops a default port, so
-// allowlist entries and request authorities are compared in the same form that
-// normalizeHTU produces.
-func normalizeAuthority(host string) string {
-	host = strings.ToLower(strings.TrimSpace(host))
-	switch {
-	case strings.HasSuffix(host, ":443"):
-		return strings.TrimSuffix(host, ":443")
-	case strings.HasSuffix(host, ":80"):
-		return strings.TrimSuffix(host, ":80")
-	default:
-		return host
+// trustedKey renders an authority for allowlist lookup under one scheme:
+// lowercased, with only that scheme's default port dropped, so "h:443" and "h"
+// coincide under https while "h:80" stays a distinct https origin. This is the
+// same port rule normalizeHTU applies to the target URL.
+func trustedKey(scheme, authority string) string {
+	authority = strings.ToLower(strings.TrimSpace(authority))
+	switch scheme {
+	case schemeHTTPS:
+		authority = strings.TrimSuffix(authority, ":443")
+	case schemeHTTP:
+		authority = strings.TrimSuffix(authority, ":80")
+	}
+	return scheme + "://" + authority
+}
+
+// requestScheme is the scheme a server-side request arrived under.
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return schemeHTTPS
+	}
+	return schemeHTTP
+}
+
+// WithMaxContentBytes caps the request content Middleware reads to verify
+// ans_content_digest; a request whose content exceeds it is rejected with 413
+// before any hashing. Non-positive values are ignored. Defaults to
+// DefaultMaxContentBytes.
+func WithMaxContentBytes(n int64) MiddlewareOption {
+	return func(c *middlewareConfig) {
+		if n > 0 {
+			c.maxContentBytes = n
+		}
 	}
 }
 
@@ -218,15 +254,15 @@ func (c *middlewareConfig) checkAuthority(r *http.Request) *ProofError {
 	if len(c.trustedHosts) == 0 {
 		return nil
 	}
-	host := r.Host
+	scheme, host := requestScheme(r), r.Host
 	if c.externalSet {
 		u, err := url.Parse(c.externalURL(r))
 		if err != nil {
 			return newErr(ErrHTTPBindingMismatch, "external URL is not parseable")
 		}
-		host = u.Host
+		scheme, host = strings.ToLower(u.Scheme), u.Host
 	}
-	if !c.trustedHosts[normalizeAuthority(host)] {
+	if !c.trustedHosts[trustedKey(scheme, host)] {
 		return newErr(ErrHTTPBindingMismatch, "request authority is not in the trusted set")
 	}
 	return nil
@@ -242,20 +278,27 @@ func (c *middlewareConfig) checkAuthority(r *http.Request) *ProofError {
 // automatically; the token's own OAuth validation (issuer, scopes, expiry)
 // remains the wrapped handler's concern.
 //
+// The request content is bound too: the proof's ans_content_digest must match
+// the content received, so once the caller is bound to a live identity
+// Middleware buffers the body (up to WithMaxContentBytes, else 413), compares
+// the digest before recording the proof's jti, and passes the verified bytes on
+// to the wrapped handler.
+//
 // It is fail-closed: any verification failure returns 401 and the wrapped
 // handler is not called. It AUTHENTICATES only; the wrapped handler must
 // authorize the CallerIdentity.
 //
-// Logging defaults to slog.Default() so the security warnings below and any
-// operational failure are visible without extra wiring; pass
+// Logging defaults to slog.Default() so rejections and operational failures are
+// visible without extra wiring; pass
 // WithMiddlewareLogger to redirect or silence them. Rejections log at INFO,
 // successful authentications at DEBUG, and a saturated replay cache or an
 // unclassified failure at ERROR.
 //
-// Panics if keys or replay is nil, or if the expected-peer configuration can
-// never be satisfied (a pin that is not an ans:// name, an empty allow-list):
-// a wiring mistake must fail at startup rather than per request inside the
-// handler.
+// Panics at construction on a wiring mistake, which must fail at startup rather
+// than per request inside the handler: a nil keys or replay, an expected-peer
+// configuration that can never be satisfied (a pin that is not an ans:// name,
+// an empty allow-list), or no trusted authority at all (neither WithTrustedHosts
+// nor WithExternalURL), since the request's own Host header is client-controlled.
 func Middleware(keys scitt.KeyLookup, replay ReplayCache, opts ...MiddlewareOption) func(http.Handler) http.Handler {
 	if keys == nil {
 		panic("pop.Middleware: nil scitt.KeyLookup")
@@ -264,8 +307,9 @@ func Middleware(keys scitt.KeyLookup, replay ReplayCache, opts ...MiddlewareOpti
 		panic("pop.Middleware: nil ReplayCache")
 	}
 	cfg := &middlewareConfig{
-		externalURL: defaultRequestURL,
-		logger:      slog.Default(),
+		externalURL:     defaultRequestURL,
+		logger:          slog.Default(),
+		maxContentBytes: DefaultMaxContentBytes,
 	}
 	for _, o := range opts {
 		o(cfg)
@@ -276,50 +320,90 @@ func Middleware(keys scitt.KeyLookup, replay ReplayCache, opts ...MiddlewareOpti
 	if err := checkCallerOptions(callerOpts); err != nil {
 		panic("pop.Middleware: " + err.Error())
 	}
-	log := cfg.logger.With("component", "pop")
 	if cfg.externalSet {
 		probeExternalURL(cfg.externalURL)
 	}
 	if !cfg.externalSet && len(cfg.trustedHosts) == 0 {
-		log.Warn("htu will be derived from the client-controlled Host header; " +
-			"set WithExternalURL or WithTrustedHosts before production")
+		panic("pop.Middleware: no trusted authority configured; set WithTrustedHosts or WithExternalURL " +
+			"so htu is never compared against the client-controlled Host header")
+	}
+	m := &middleware{
+		cfg:        cfg,
+		keys:       keys,
+		replay:     replay,
+		callerOpts: callerOpts,
+		log:        cfg.logger.With("component", "pop"),
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			hdrs, err := scitt.ExtractHeaders(r.Header)
-			if err != nil {
-				log.InfoContext(r.Context(), "request rejected",
-					"category", string(ErrScittHeaderInvalid), "err", err.Error())
-				writeUnauthorized(w)
+			id, content, ok := m.authenticate(w, r)
+			if !ok {
 				return
 			}
-			// RFC 9449 §4.3: reject a request carrying more than one DPoP header
-			// field. The same applies to Authorization, which drives the ath
-			// binding — otherwise this verifier reads the first value while a
-			// downstream hop may act on a different one.
-			if pe := cfg.preflight(r); pe != nil {
-				log.InfoContext(r.Context(), "request rejected",
-					"category", string(pe.Type), "err", pe.Message)
-				writeUnauthorized(w)
-				return
-			}
-			proof := r.Header.Get(DPoPHeader)
-			perReq := callerOpts
-			if tok, ok := AccessTokenFromAuthorization(r.Header.Get("Authorization")); ok {
-				perReq = append(append([]CallerOption{}, callerOpts...),
-					WithVerifyOptions(WithBoundAccessToken(tok)))
-			}
-			id, err := VerifyCaller(r.Context(), proof, hdrs, r.Method,
-				cfg.externalURL(r), keys, replay, perReq...)
-			if err != nil {
-				// VerifyCaller already logged the cause and its category.
-				writeUnauthorized(w)
-				return
-			}
+			r.Body = io.NopCloser(bytes.NewReader(content))
 			next.ServeHTTP(w, r.WithContext(contextWithCaller(r.Context(), id)))
 		})
 	}
+}
+
+// middleware is the verifier Middleware wires once at construction.
+type middleware struct {
+	cfg        *middlewareConfig
+	keys       scitt.KeyLookup
+	replay     ReplayCache
+	callerOpts []CallerOption
+	log        *slog.Logger
+}
+
+// authenticate runs the request-level preflight and VerifyCaller for one
+// request, writing the rejection response itself. On success it returns the
+// proven caller and the request content it consumed for the digest comparison.
+func (m *middleware) authenticate(w http.ResponseWriter, r *http.Request) (*CallerIdentity, []byte, bool) {
+	hdrs, err := scitt.ExtractHeaders(r.Header)
+	if err != nil {
+		m.log.InfoContext(r.Context(), "request rejected",
+			"category", string(ErrScittHeaderInvalid), "err", err.Error())
+		writeUnauthorized(w)
+		return nil, nil, false
+	}
+	// RFC 9449 §4.3: reject a request carrying more than one DPoP header
+	// field. The same applies to Authorization, which drives the ath
+	// binding — otherwise this verifier reads the first value while a
+	// downstream hop may act on a different one.
+	if pe := m.cfg.preflight(r); pe != nil {
+		m.log.InfoContext(r.Context(), "request rejected",
+			"category", string(pe.Type), "err", pe.Message)
+		writeUnauthorized(w)
+		return nil, nil, false
+	}
+	var content []byte
+	readContent := func() ([]byte, error) {
+		body, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, m.cfg.maxContentBytes))
+		if readErr != nil {
+			return nil, readErr
+		}
+		content = body
+		return body, nil
+	}
+	perReq := append([]CallerOption(nil), m.callerOpts...)
+	if tok, ok := AccessTokenFromAuthorization(r.Header.Get("Authorization")); ok {
+		perReq = append(perReq, WithVerifyOptions(WithBoundAccessToken(tok)))
+	}
+	perReq = append(perReq, WithVerifyOptions(WithReceivedContent(readContent)))
+	id, err := VerifyCaller(r.Context(), r.Header.Get(DPoPHeader), hdrs, r.Method,
+		m.cfg.externalURL(r), m.keys, m.replay, perReq...)
+	if err != nil {
+		// VerifyCaller already logged the cause and its category.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request content too large", http.StatusRequestEntityTooLarge)
+		} else {
+			writeUnauthorized(w)
+		}
+		return nil, nil, false
+	}
+	return id, content, true
 }
 
 // AttachIdentity adds the caller's identity to an outbound A2A request: a
@@ -329,6 +413,10 @@ func Middleware(keys scitt.KeyLookup, replay ReplayCache, opts ...MiddlewareOpti
 // If the request already presents a DPoP-bound OAuth2 access token
 // ("Authorization: DPoP <token>"), the proof is bound to it via ath — set the
 // Authorization header before calling AttachIdentity.
+//
+// The request body, if any, is read once so the proof can bind its digest
+// (ans_content_digest) and is restored as a re-readable body of known length;
+// a request without a body binds the empty-content digest.
 //
 // scittHeaders carries the caller's X-SCITT-Receipt and X-ANS-Status-Token —
 // obtain them from a scitt.HeaderSupplier; pop owns only the DPoP header. This
@@ -341,7 +429,11 @@ func AttachIdentity(req *http.Request, signer *Signer, scittHeaders http.Header)
 	if signer == nil {
 		return newErr(ErrMisconfigured, "nil signer")
 	}
-	var popts []ProofOption
+	digest, err := bindRequestContent(req)
+	if err != nil {
+		return err
+	}
+	popts := []ProofOption{WithContentDigest(digest)}
 	if tok, ok := AccessTokenFromAuthorization(req.Header.Get("Authorization")); ok {
 		popts = append(popts, WithAccessToken(tok))
 	}
@@ -358,15 +450,30 @@ func AttachIdentity(req *http.Request, signer *Signer, scittHeaders http.Header)
 	return nil
 }
 
+// bindRequestContent reads req's content so the proof can carry its digest,
+// then restores it as a re-readable body of known length. A request without
+// content binds the empty-content digest.
+func bindRequestContent(req *http.Request) ([sha256.Size]byte, error) {
+	if req.Body == nil || req.Body == http.NoBody {
+		return sha256.Sum256(nil), nil
+	}
+	content, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		return [sha256.Size]byte{}, wrapErr(ErrContentUnreadable, "read request content", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(content))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(content)), nil }
+	req.ContentLength = int64(len(content))
+	return sha256.Sum256(content), nil
+}
+
 // defaultRequestURL reconstructs the request URL from a server-side request
 // (whose URL is path-only) using its Host header. Host is client-controlled, so
-// this is only safe behind WithTrustedHosts; see WithExternalURL.
+// Middleware reaches this only behind WithTrustedHosts, whose allowlist has
+// vetted r.Host first; see WithExternalURL.
 func defaultRequestURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host + r.URL.RequestURI()
+	return requestScheme(r) + "://" + r.Host + r.URL.RequestURI()
 }
 
 // writeUnauthorized emits a fail-closed 401 with a DPoP challenge hint.
