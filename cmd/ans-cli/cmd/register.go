@@ -13,6 +13,7 @@ import (
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/csrvalidation"
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
@@ -111,10 +112,9 @@ func runRegisterWithParams(p *registerParams) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Read identity CSR
-	identityCSRData, err := os.ReadFile(p.identityCSR)
+	identityCSRData, err := readValidatedCSR(p.identityCSR, csrvalidation.IdentityRules(), "identity")
 	if err != nil {
-		return fmt.Errorf("failed to read identity CSR file: %w", err)
+		return err
 	}
 
 	// Read server CSR or certificate
@@ -125,9 +125,9 @@ func runRegisterWithParams(p *registerParams) error {
 			return fmt.Errorf("failed to read server certificate file: %w", err)
 		}
 	} else if p.serverCSR != "" {
-		serverCSRData, err = os.ReadFile(p.serverCSR)
+		serverCSRData, err = readValidatedCSR(p.serverCSR, csrvalidation.ServerRules(), "server")
 		if err != nil {
-			return fmt.Errorf("failed to read server CSR file: %w", err)
+			return err
 		}
 	}
 

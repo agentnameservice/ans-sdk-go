@@ -225,6 +225,7 @@ func main() {
   - ✅ Server Certificate Retrieval
   - ✅ CSR Submission (Identity & Server)
   - ✅ CSR Status Checking
+  - ✅ Client-side CSR preflight validation (`csrvalidation` package)
 - ✅ ACME Challenge Verification
 - ✅ DNS Record Verification
 - ✅ Event Stream (Pagination + Follow mode)

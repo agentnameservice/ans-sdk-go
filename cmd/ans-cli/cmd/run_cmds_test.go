@@ -2,7 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -626,10 +634,7 @@ func TestRunSubmitIdentityCSR_Success(t *testing.T) {
 
 	setupViperForTest(t, server.URL)
 
-	// Create a temp CSR file
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeIdentityCSR(t, t.TempDir())
 
 	err := runSubmitIdentityCSRWithParams("agent-123", csrFile)
 	if err != nil {
@@ -651,9 +656,7 @@ func TestRunSubmitIdentityCSR_JSONMode(t *testing.T) {
 	setupViperForTest(t, server.URL)
 	viper.Set("json", true)
 
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeIdentityCSR(t, t.TempDir())
 
 	err := runSubmitIdentityCSRWithParams("agent-123", csrFile)
 	if err != nil {
@@ -695,9 +698,7 @@ func TestRunSubmitServerCSR_Success(t *testing.T) {
 
 	setupViperForTest(t, server.URL)
 
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "server.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeServerCSR(t, t.TempDir())
 
 	err := runSubmitServerCSRWithParams("agent-123", csrFile)
 	if err != nil {
@@ -719,9 +720,7 @@ func TestRunSubmitServerCSR_JSONMode(t *testing.T) {
 	setupViperForTest(t, server.URL)
 	viper.Set("json", true)
 
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "server.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeServerCSR(t, t.TempDir())
 
 	err := runSubmitServerCSRWithParams("agent-123", csrFile)
 	if err != nil {
@@ -969,8 +968,7 @@ func TestRunRegisterWithParams_BadServerCSR(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -991,8 +989,7 @@ func TestRunRegisterWithParams_BadServerCert(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1013,8 +1010,7 @@ func TestRunRegisterWithParams_InvalidFunctions(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1046,8 +1042,7 @@ func TestRunRegisterWithParams_Success(t *testing.T) {
 	setupViperForTest(t, server.URL)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1079,8 +1074,7 @@ func TestRunRegisterWithParams_JSONMode(t *testing.T) {
 	viper.Set("json", true)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1111,10 +1105,8 @@ func TestRunRegisterWithParams_WithServerCSR(t *testing.T) {
 	setupViperForTest(t, server.URL)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	serverCSR := filepath.Join(tmpDir, "server.csr")
-	os.WriteFile(identityCSR, []byte("ID-CSR"), 0600)
-	os.WriteFile(serverCSR, []byte("SRV-CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
+	serverCSR := writeServerCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1146,9 +1138,8 @@ func TestRunRegisterWithParams_WithServerCert(t *testing.T) {
 	setupViperForTest(t, server.URL)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	identityCSR := writeIdentityCSR(t, tmpDir)
 	serverCert := filepath.Join(tmpDir, "server.cert")
-	os.WriteFile(identityCSR, []byte("ID-CSR"), 0600)
 	os.WriteFile(serverCert, []byte("CERT"), 0600)
 
 	err := runRegisterWithParams(&registerParams{
@@ -1378,8 +1369,7 @@ func TestRunRegisterWithParams_InvalidDiscoveryProfile(t *testing.T) {
 	viper.Set("api-version", "v2")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:              "name",
@@ -1403,8 +1393,7 @@ func TestRunRegisterWithParams_DiscoveryProfilesRequireV2(t *testing.T) {
 	setupViperForTest(t, "http://localhost") // api-version unset → flag default v1
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:              "name",
@@ -1451,8 +1440,7 @@ func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
 	viper.Set("api-version", "v2")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:              "name",
@@ -1480,4 +1468,171 @@ func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
 	if !ok || len(profiles) != 1 || profiles[0] != "ANS_DNSAID" {
 		t.Errorf("discoveryProfiles: got %v, want [ANS_DNSAID] (input normalized to upper case)", body["discoveryProfiles"])
 	}
+}
+
+// writeIdentityCSR writes an EC P-256 CSR that satisfies the identity intake rules.
+func writeIdentityCSR(t *testing.T, dir string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	return writeCSRFile(t, filepath.Join(dir, "identity.csr"), key, x509.ECDSAWithSHA256)
+}
+
+// writeServerCSR writes an RSA-2048 CSR that satisfies the server intake rules.
+func writeServerCSR(t *testing.T, dir string) string {
+	t.Helper()
+	return writeCSRFile(t, filepath.Join(dir, "server.csr"), newRSAKey(t, 2048), x509.SHA256WithRSA)
+}
+
+func newRSAKey(t *testing.T, bits int) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey(%d): %v", bits, err)
+	}
+	return key
+}
+
+func writeCSRFile(t *testing.T, path string, key crypto.Signer, sigAlg x509.SignatureAlgorithm) string {
+	t.Helper()
+	template := x509.CertificateRequest{
+		Subject:            pkix.Name{CommonName: "test.example.com"},
+		DNSNames:           []string{"test.example.com"},
+		SignatureAlgorithm: sigAlg,
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &template, key)
+	if err != nil {
+		t.Fatalf("CreateCertificateRequest: %v", err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+// noRegistryCalls returns a server that fails the test if any request reaches it.
+func noRegistryCalls(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("registry must not be called when preflight validation fails, got %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+}
+
+func TestRunSubmitCSR_PreflightRejectsBeforeNetwork(t *testing.T) {
+	server := noRegistryCalls(t)
+	defer server.Close()
+	setupViperForTest(t, server.URL)
+	dir := t.TempDir()
+
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		run     func(csrFile string) error
+		csrFile string
+		wantErr string
+	}{
+		{
+			name:    "identity CSR on P-384",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "id-p384.csr"), p384, x509.ECDSAWithSHA384),
+			wantErr: "EC key curve must be P-256",
+		},
+		{
+			name:    "identity CSR with RSA 1024",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "id-1024.csr"), newRSAKey(t, 1024), x509.SHA256WithRSA),
+			wantErr: "RSA key size must be 2048 or 3072 or 4096 bits",
+		},
+		{
+			name:    "server CSR with EC key",
+			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-ec.csr"), p256, x509.ECDSAWithSHA256),
+			wantErr: "CSR public key must use RSA, but was EC",
+		},
+		{
+			name:    "server CSR signed with SHA-384",
+			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-sha384.csr"), newRSAKey(t, 2048), x509.SHA384WithRSA),
+			wantErr: "CSR signature algorithm must be SHA256-RSA",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(tc.csrFile)
+			if err == nil || !strings.Contains(err.Error(), "preflight validation") || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want preflight failure containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunRegisterWithParams_Preflight(t *testing.T) {
+	dir := t.TempDir()
+	identityCSR := writeIdentityCSR(t, dir)
+	serverCSR := writeServerCSR(t, dir)
+	ecServerCSR := func() string {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatalf("ecdsa.GenerateKey: %v", err)
+		}
+		return writeCSRFile(t, filepath.Join(dir, "server-ec.csr"), key, x509.ECDSAWithSHA256)
+	}()
+	baseParams := func(identity, server string) *registerParams {
+		return &registerParams{
+			name: "Test Agent", host: "test.example.com", version: "1.0.0",
+			identityCSR: identity, serverCSR: server,
+			endpointURL: "https://test.example.com/mcp", endpointProto: "MCP", endpointTrans: []string{"STREAMABLE-HTTP"},
+		}
+	}
+
+	t.Run("EC identity and RSA server CSRs pass preflight and reach the registry", func(t *testing.T) {
+		var calls int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(&models.RegistrationPending{Status: "PENDING_DNS", ANSName: "ans://v1.0.0.test.example.com", AgentID: "agent-123"})
+		}))
+		defer server.Close()
+		setupViperForTest(t, server.URL)
+
+		if err := runRegisterWithParams(baseParams(identityCSR, serverCSR)); err != nil {
+			t.Fatalf("runRegisterWithParams() error = %v", err)
+		}
+		if calls != 1 {
+			t.Errorf("registry calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("EC server CSR fails preflight before the registry is called", func(t *testing.T) {
+		server := noRegistryCalls(t)
+		defer server.Close()
+		setupViperForTest(t, server.URL)
+
+		err := runRegisterWithParams(baseParams(identityCSR, ecServerCSR))
+		if err == nil || !strings.Contains(err.Error(), "server CSR failed preflight validation") {
+			t.Fatalf("error = %v, want server CSR preflight failure", err)
+		}
+	})
+
+	t.Run("missing identity CSR file", func(t *testing.T) {
+		setupViperForTest(t, "http://localhost")
+
+		err := runRegisterWithParams(baseParams(filepath.Join(dir, "missing.csr"), ""))
+		if err == nil || !strings.Contains(err.Error(), "failed to read identity CSR file") {
+			t.Fatalf("error = %v, want read failure", err)
+		}
+	})
 }
