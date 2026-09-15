@@ -20,6 +20,14 @@ import (
 	"github.com/agentnameservice/ans-sdk-go/keygen"
 )
 
+const (
+	testHost    = "test.example.com"
+	testOrg     = "TestOrg"
+	testCountry = "US"
+	testVersion = "1.0.0"
+	testANSURI  = "ans://v1.0.0.test.example.com"
+)
+
 func TestBuildGenerateCSRCmd(t *testing.T) {
 	cmd := buildGenerateCSRCmd()
 
@@ -42,7 +50,6 @@ func TestBuildGenerateCSRCmd(t *testing.T) {
 		{flag: "out-dir", wantDefault: "."},
 		{flag: "key-type", wantDefault: ""},
 		{flag: "key-size", wantDefault: "2048"},
-		{flag: "curve", wantDefault: DefaultECCurve},
 		{flag: "csr-type", wantDefault: DefaultCSRType},
 	}
 
@@ -57,6 +64,9 @@ func TestBuildGenerateCSRCmd(t *testing.T) {
 			}
 		})
 	}
+	if cmd.Flags().Lookup("curve") != nil {
+		t.Error("the curve flag was removed; only P-256 can be issued")
+	}
 }
 
 func TestNewKeyGenerator(t *testing.T) {
@@ -64,28 +74,24 @@ func TestNewKeyGenerator(t *testing.T) {
 		name      string
 		keyType   string
 		keySize   int
-		curve     string
 		wantLabel string
 		wantCurve elliptic.Curve // nil means an RSA key of keySize bits is expected
-		wantErr   bool
+		wantErr   string
 	}{
-		{name: "rsa", keyType: "rsa", keySize: 2048, curve: DefaultECCurve, wantLabel: "RSA 2048 bits"},
+		{name: "rsa", keyType: "rsa", keySize: 2048, wantLabel: "RSA 2048 bits"},
 		{name: "rsa is case-insensitive", keyType: "RSA", keySize: 2048, wantLabel: "RSA 2048 bits"},
-		{name: "ec P-256", keyType: "ec", curve: "P-256", wantLabel: "EC P-256", wantCurve: elliptic.P256()},
-		{name: "ec curve is case-insensitive", keyType: "EC", curve: "p-384", wantLabel: "EC P-384", wantCurve: elliptic.P384()},
-		{name: "ec P-521", keyType: "ec", curve: "P-521", wantLabel: "EC P-521", wantCurve: elliptic.P521()},
-		{name: "rsa below minimum size", keyType: "rsa", keySize: 1024, curve: DefaultECCurve, wantErr: true},
-		{name: "unknown key type", keyType: "dsa", keySize: 2048, curve: DefaultECCurve, wantErr: true},
-		{name: "unknown curve", keyType: "ec", curve: "secp256k1", wantErr: true},
-		{name: "empty curve", keyType: "ec", curve: "", wantErr: true},
+		{name: "ec is always P-256", keyType: "ec", wantLabel: "EC P-256", wantCurve: elliptic.P256()},
+		{name: "ec is case-insensitive", keyType: "EC", wantLabel: "EC P-256", wantCurve: elliptic.P256()},
+		{name: "rsa below minimum size", keyType: "rsa", keySize: 1024, wantErr: "invalid RSA key size"},
+		{name: "unknown key type", keyType: "dsa", keySize: 2048, wantErr: "invalid key type"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gen, label, err := newKeyGenerator(tc.keyType, tc.keySize, tc.curve)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+			gen, label, err := newKeyGenerator(tc.keyType, tc.keySize)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
 				}
 				if gen != nil {
 					t.Error("expected nil generator on error")
@@ -109,48 +115,41 @@ func TestNewKeyGenerator(t *testing.T) {
 }
 
 func TestRunGenerateCSR(t *testing.T) {
-	const (
-		host    = "test.example.com"
-		org     = "TestOrg"
-		country = "US"
-		version = "1.0.0"
-		ansURI  = "ans://v1.0.0.test.example.com"
-	)
-
 	tests := []struct {
 		name        string
 		keyType     string
 		keySize     int
-		curve       string
+		csrType     string
 		wantKeyPEM  string
 		wantPubAlgo x509.PublicKeyAlgorithm
 		wantSigAlgo x509.SignatureAlgorithm
 		wantCurve   elliptic.Curve
-		wantErr     string // substring expected in the error; empty means success
+		wantErr     string
 	}{
 		{
-			name: "rsa", keyType: "rsa", keySize: DefaultRSAKeySize, curve: DefaultECCurve,
+			name: "rsa forced for both", keyType: "rsa", keySize: DefaultRSAKeySize, csrType: "both",
 			wantKeyPEM: "RSA PRIVATE KEY", wantPubAlgo: x509.RSA, wantSigAlgo: x509.SHA256WithRSA,
 		},
 		{
-			name: "ec P-256", keyType: "ec", keySize: DefaultRSAKeySize, curve: "P-256",
-			wantKeyPEM: "EC PRIVATE KEY", wantPubAlgo: x509.ECDSA, wantSigAlgo: x509.ECDSAWithSHA256, wantCurve: elliptic.P256(),
+			name: "rsa 3072 identity only", keyType: "rsa", keySize: 3072, csrType: "identity",
+			wantKeyPEM: "RSA PRIVATE KEY", wantPubAlgo: x509.RSA, wantSigAlgo: x509.SHA256WithRSA,
 		},
 		{
-			name: "ec P-384", keyType: "ec", keySize: DefaultRSAKeySize, curve: "P-384",
-			wantKeyPEM: "EC PRIVATE KEY", wantPubAlgo: x509.ECDSA, wantSigAlgo: x509.ECDSAWithSHA384, wantCurve: elliptic.P384(),
+			name: "ec identity only", keyType: "ec", keySize: DefaultRSAKeySize, csrType: "identity",
+			wantKeyPEM: "EC PRIVATE KEY", wantPubAlgo: x509.ECDSA, wantSigAlgo: x509.ECDSAWithSHA256, wantCurve: elliptic.P256(),
 		},
-		{name: "rsa below minimum size", keyType: "rsa", keySize: 1024, curve: DefaultECCurve, wantErr: "invalid RSA key size"},
-		{name: "invalid key type", keyType: "dsa", keySize: DefaultRSAKeySize, curve: DefaultECCurve, wantErr: "invalid key type"},
-		{name: "invalid curve", keyType: "ec", keySize: DefaultRSAKeySize, curve: "P-999", wantErr: "invalid curve"},
+		{name: "rsa 3072 for both is refused for the server CSR", keyType: "rsa", keySize: 3072, csrType: "both", wantErr: "rejects this key for the server CSR"},
+		{name: "ec forced for both is refused for the server CSR", keyType: "ec", keySize: DefaultRSAKeySize, csrType: "both", wantErr: "rejects this key for the server CSR"},
+		{name: "rsa below minimum size", keyType: "rsa", keySize: 1024, csrType: "both", wantErr: "invalid RSA key size"},
+		{name: "invalid key type", keyType: "dsa", keySize: DefaultRSAKeySize, csrType: "both", wantErr: "invalid key type"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			outDir := filepath.Join(t.TempDir(), "out")
 			err := runGenerateCSR(&generateCSRParams{
-				host: host, org: org, country: country, version: version, outDir: outDir,
-				keyType: tc.keyType, keySize: tc.keySize, curve: tc.curve, csrType: DefaultCSRType,
+				host: testHost, org: testOrg, country: testCountry, version: testVersion, outDir: outDir,
+				keyType: tc.keyType, keySize: tc.keySize, csrType: tc.csrType,
 			})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
@@ -165,7 +164,11 @@ func TestRunGenerateCSR(t *testing.T) {
 				t.Fatalf("runGenerateCSR() error = %v", err)
 			}
 
-			for _, name := range []string{"identity", "server"} {
+			names, err := csrNames(tc.csrType)
+			if err != nil {
+				t.Fatalf("csrNames: %v", err)
+			}
+			for _, name := range names {
 				key := readPrivateKeyFile(t, filepath.Join(outDir, name+".key"), tc.wantKeyPEM)
 				assertKeyMatches(t, key, tc.keySize, tc.wantCurve)
 
@@ -176,20 +179,20 @@ func TestRunGenerateCSR(t *testing.T) {
 				if csr.SignatureAlgorithm != tc.wantSigAlgo {
 					t.Errorf("%s CSR signature algorithm = %v, want %v", name, csr.SignatureAlgorithm, tc.wantSigAlgo)
 				}
-				if csr.Subject.CommonName != host {
-					t.Errorf("%s CSR CN = %q, want %q", name, csr.Subject.CommonName, host)
+				if csr.Subject.CommonName != testHost {
+					t.Errorf("%s CSR CN = %q, want %q", name, csr.Subject.CommonName, testHost)
 				}
-				if len(csr.Subject.Organization) != 1 || csr.Subject.Organization[0] != org {
-					t.Errorf("%s CSR O = %v, want [%s]", name, csr.Subject.Organization, org)
+				if len(csr.Subject.Organization) != 1 || csr.Subject.Organization[0] != testOrg {
+					t.Errorf("%s CSR O = %v, want [%s]", name, csr.Subject.Organization, testOrg)
 				}
-				if len(csr.Subject.Country) != 1 || csr.Subject.Country[0] != country {
-					t.Errorf("%s CSR C = %v, want [%s]", name, csr.Subject.Country, country)
+				if len(csr.Subject.Country) != 1 || csr.Subject.Country[0] != testCountry {
+					t.Errorf("%s CSR C = %v, want [%s]", name, csr.Subject.Country, testCountry)
 				}
-				if len(csr.DNSNames) != 1 || csr.DNSNames[0] != host {
-					t.Errorf("%s CSR DNS SANs = %v, want [%s]", name, csr.DNSNames, host)
+				if len(csr.DNSNames) != 1 || csr.DNSNames[0] != testHost {
+					t.Errorf("%s CSR DNS SANs = %v, want [%s]", name, csr.DNSNames, testHost)
 				}
-				if len(csr.URIs) != 1 || csr.URIs[0].String() != ansURI {
-					t.Errorf("%s CSR URI SANs = %v, want [%s]", name, csr.URIs, ansURI)
+				if len(csr.URIs) != 1 || csr.URIs[0].String() != testANSURI {
+					t.Errorf("%s CSR URI SANs = %v, want [%s]", name, csr.URIs, testANSURI)
 				}
 			}
 		})
@@ -199,8 +202,8 @@ func TestRunGenerateCSR(t *testing.T) {
 func TestRunGenerateCSR_DefaultKeyTypes(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := runGenerateCSR(&generateCSRParams{
-		host: "test.example.com", org: "TestOrg", country: "US", version: "1.0.0", outDir: outDir,
-		keyType: "", keySize: DefaultRSAKeySize, curve: DefaultECCurve, csrType: DefaultCSRType,
+		host: testHost, org: testOrg, country: testCountry, version: testVersion, outDir: outDir,
+		keySize: DefaultRSAKeySize, csrType: DefaultCSRType,
 	})
 	if err != nil {
 		t.Fatalf("runGenerateCSR() error = %v", err)
@@ -216,45 +219,6 @@ func TestRunGenerateCSR_DefaultKeyTypes(t *testing.T) {
 	assertKeyMatches(t, serverKey, DefaultRSAKeySize, nil)
 	if csr := readCSRFile(t, filepath.Join(outDir, "server.csr")); csr.SignatureAlgorithm != x509.SHA256WithRSA {
 		t.Errorf("server CSR signature algorithm = %v, want %v", csr.SignatureAlgorithm, x509.SHA256WithRSA)
-	}
-}
-
-func TestRunGenerateCSR_InvalidOutDir(t *testing.T) {
-	// A path nested under a regular file can never be created as a directory.
-	tmpDir := t.TempDir()
-	fakePath := filepath.Join(tmpDir, "file.txt")
-	if err := os.WriteFile(fakePath, []byte("content"), 0600); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-
-	err := runGenerateCSR(&generateCSRParams{
-		host: "test.example.com", org: "TestOrg", country: "US", version: "1.0.0",
-		outDir: filepath.Join(fakePath, "subdir"), keyType: "ec", keySize: DefaultRSAKeySize, curve: DefaultECCurve,
-		csrType: DefaultCSRType,
-	})
-	if err == nil {
-		t.Fatal("expected error for invalid output directory, got nil")
-	}
-}
-
-func TestRunGenerateCSR_CreatesNestedDir(t *testing.T) {
-	outDir := filepath.Join(t.TempDir(), "a", "b", "c")
-
-	err := runGenerateCSR(&generateCSRParams{
-		host: "test.example.com", org: "TestOrg", country: "US", version: "1.0.0",
-		outDir: outDir, keyType: "ec", keySize: DefaultRSAKeySize, curve: DefaultECCurve,
-		csrType: DefaultCSRType,
-	})
-	if err != nil {
-		t.Fatalf("runGenerateCSR() error = %v", err)
-	}
-
-	info, err := os.Stat(outDir)
-	if err != nil {
-		t.Fatalf("expected output directory to exist: %v", err)
-	}
-	if !info.IsDir() {
-		t.Error("expected output path to be a directory")
 	}
 }
 
@@ -276,8 +240,8 @@ func TestRunGenerateCSR_CSRType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			outDir := filepath.Join(t.TempDir(), "out")
 			err := runGenerateCSR(&generateCSRParams{
-				host: "test.example.com", org: "TestOrg", country: "US", version: "1.0.0", outDir: outDir,
-				keyType: "ec", keySize: DefaultRSAKeySize, curve: DefaultECCurve, csrType: tc.csrType,
+				host: testHost, org: testOrg, country: testCountry, version: testVersion, outDir: outDir,
+				keySize: DefaultRSAKeySize, csrType: tc.csrType,
 			})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
@@ -305,6 +269,43 @@ func TestRunGenerateCSR_CSRType(t *testing.T) {
 	}
 }
 
+func TestRunGenerateCSR_InvalidOutDir(t *testing.T) {
+	// A path nested under a regular file can never be created as a directory.
+	tmpDir := t.TempDir()
+	fakePath := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(fakePath, []byte("content"), 0600); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	err := runGenerateCSR(&generateCSRParams{
+		host: testHost, org: testOrg, country: testCountry, version: testVersion,
+		outDir: filepath.Join(fakePath, "subdir"), keySize: DefaultRSAKeySize, csrType: DefaultCSRType,
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid output directory, got nil")
+	}
+}
+
+func TestRunGenerateCSR_CreatesNestedDir(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "a", "b", "c")
+
+	err := runGenerateCSR(&generateCSRParams{
+		host: testHost, org: testOrg, country: testCountry, version: testVersion,
+		outDir: outDir, keySize: DefaultRSAKeySize, csrType: "identity",
+	})
+	if err != nil {
+		t.Fatalf("runGenerateCSR() error = %v", err)
+	}
+
+	info, err := os.Stat(outDir)
+	if err != nil {
+		t.Fatalf("expected output directory to exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected output path to be a directory")
+	}
+}
+
 // stubSigner is a crypto.Signer whose public key type x509 does not support,
 // forcing x509.CreateCertificateRequest to fail after key generation succeeds.
 type stubSigner struct{}
@@ -316,7 +317,6 @@ func (stubSigner) Sign(_ io.Reader, _ []byte, _ crypto.SignerOpts) ([]byte, erro
 }
 
 func TestGenerateCSR(t *testing.T) {
-	const ansURI = "ans://v1.0.0.host.example.com"
 	ecP256 := func() (crypto.Signer, error) { return keygen.GenerateECKeyPair(keygen.CurveP256()) }
 	ed25519Key := func() (crypto.Signer, error) {
 		_, key, err := ed25519.GenerateKey(rand.Reader)
@@ -331,22 +331,22 @@ func TestGenerateCSR(t *testing.T) {
 		setup   func(t *testing.T, outDir string) // optional precondition applied to outDir
 		wantErr string                            // substring expected in the error; empty means success
 	}{
-		{name: "ec key", ansURI: ansURI, newKey: ecP256},
+		{name: "ec key", ansURI: testANSURI, newKey: ecP256},
 		{
-			name: "key generation fails", ansURI: ansURI,
+			name: "key generation fails", ansURI: testANSURI,
 			newKey:  func() (crypto.Signer, error) { return nil, errors.New("entropy exhausted") },
 			wantErr: "failed to generate private key",
 		},
 		{name: "unparseable ANS URI", ansURI: "ans://v1.0.0.bad host", newKey: ecP256, wantErr: "failed to parse ANS URI"},
 		{
-			name: "signer x509 cannot use", ansURI: ansURI,
+			name: "signer x509 cannot use", ansURI: testANSURI,
 			newKey:  func() (crypto.Signer, error) { return stubSigner{}, nil },
 			wantErr: "failed to create CSR",
 		},
-		{name: "key type keygen cannot encode", ansURI: ansURI, newKey: ed25519Key, wantErr: "failed to write private key"},
-		{name: "unwritable output directory", ansURI: ansURI, newKey: ecP256, outDir: "/dev/null/nodir", wantErr: "failed to write private key"},
+		{name: "key type keygen cannot encode", ansURI: testANSURI, newKey: ed25519Key, wantErr: "failed to write private key"},
+		{name: "unwritable output directory", ansURI: testANSURI, newKey: ecP256, outDir: "/dev/null/nodir", wantErr: "failed to write private key"},
 		{
-			name: "CSR path is a directory", ansURI: ansURI, newKey: ecP256,
+			name: "CSR path is a directory", ansURI: testANSURI, newKey: ecP256,
 			setup: func(t *testing.T, outDir string) {
 				t.Helper()
 				if err := os.Mkdir(filepath.Join(outDir, "test.csr"), 0750); err != nil {
@@ -367,7 +367,7 @@ func TestGenerateCSR(t *testing.T) {
 				tc.setup(t, outDir)
 			}
 
-			err := generateCSR("test", "host.example.com", "TestOrg", "US", tc.ansURI, tc.newKey, outDir)
+			err := generateCSR("test", testHost, testOrg, testCountry, tc.ansURI, tc.newKey, outDir)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErr)

@@ -636,7 +636,7 @@ func TestRunSubmitIdentityCSR_Success(t *testing.T) {
 
 	csrFile := writeIdentityCSR(t, t.TempDir())
 
-	err := runSubmitIdentityCSRWithParams("agent-123", csrFile)
+	err := runSubmitIdentityCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitIdentityCSRWithParams() error = %v", err)
 	}
@@ -658,7 +658,7 @@ func TestRunSubmitIdentityCSR_JSONMode(t *testing.T) {
 
 	csrFile := writeIdentityCSR(t, t.TempDir())
 
-	err := runSubmitIdentityCSRWithParams("agent-123", csrFile)
+	err := runSubmitIdentityCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitIdentityCSRWithParams() JSON mode error = %v", err)
 	}
@@ -670,7 +670,7 @@ func TestRunSubmitIdentityCSR_NoAPIKey(t *testing.T) {
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
-	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr")
+	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr", false)
 	if err == nil {
 		t.Fatal("runSubmitIdentityCSRWithParams() expected error for missing API key")
 	}
@@ -679,7 +679,7 @@ func TestRunSubmitIdentityCSR_NoAPIKey(t *testing.T) {
 func TestRunSubmitIdentityCSR_BadFile(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
-	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr")
+	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr", false)
 	if err == nil {
 		t.Fatal("runSubmitIdentityCSRWithParams() expected error for bad file")
 	}
@@ -700,7 +700,7 @@ func TestRunSubmitServerCSR_Success(t *testing.T) {
 
 	csrFile := writeServerCSR(t, t.TempDir())
 
-	err := runSubmitServerCSRWithParams("agent-123", csrFile)
+	err := runSubmitServerCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitServerCSRWithParams() error = %v", err)
 	}
@@ -722,7 +722,7 @@ func TestRunSubmitServerCSR_JSONMode(t *testing.T) {
 
 	csrFile := writeServerCSR(t, t.TempDir())
 
-	err := runSubmitServerCSRWithParams("agent-123", csrFile)
+	err := runSubmitServerCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitServerCSRWithParams() JSON mode error = %v", err)
 	}
@@ -731,7 +731,7 @@ func TestRunSubmitServerCSR_JSONMode(t *testing.T) {
 func TestRunSubmitServerCSR_BadFile(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
-	err := runSubmitServerCSRWithParams("agent-123", "/nonexistent/file.csr")
+	err := runSubmitServerCSRWithParams("agent-123", "/nonexistent/file.csr", false)
 	if err == nil {
 		t.Fatal("runSubmitServerCSRWithParams() expected error for bad file")
 	}
@@ -1544,27 +1544,27 @@ func TestRunSubmitCSR_PreflightRejectsBeforeNetwork(t *testing.T) {
 	}{
 		{
 			name:    "identity CSR on P-384",
-			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f) },
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
 			csrFile: writeCSRFile(t, filepath.Join(dir, "id-p384.csr"), p384, x509.ECDSAWithSHA384),
 			wantErr: "EC key curve must be P-256",
 		},
 		{
 			name:    "identity CSR with RSA 1024",
-			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f) },
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
 			csrFile: writeCSRFile(t, filepath.Join(dir, "id-1024.csr"), newRSAKey(t, 1024), x509.SHA256WithRSA),
 			wantErr: "RSA key size must be 2048 or 3072 or 4096 bits",
 		},
 		{
 			name:    "server CSR with EC key",
-			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f) },
+			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f, false) },
 			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-ec.csr"), p256, x509.ECDSAWithSHA256),
-			wantErr: "CSR public key must use RSA, but was EC",
+			wantErr: "CSR public key must use RSA, but was 'EC'",
 		},
 		{
 			name:    "server CSR signed with SHA-384",
-			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f) },
+			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f, false) },
 			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-sha384.csr"), newRSAKey(t, 2048), x509.SHA384WithRSA),
-			wantErr: "CSR signature algorithm must be SHA256-RSA",
+			wantErr: "CSR signature algorithm must be SHA256WITHRSA",
 		},
 	}
 
@@ -1635,4 +1635,29 @@ func TestRunRegisterWithParams_Preflight(t *testing.T) {
 			t.Fatalf("error = %v, want read failure", err)
 		}
 	})
+}
+
+func TestRunSubmitIdentityCSR_SkipPreflight(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(&models.CsrSubmissionResponse{CsrID: "csr-skip-123"})
+	}))
+	defer server.Close()
+	setupViperForTest(t, server.URL)
+
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	csrFile := writeCSRFile(t, filepath.Join(t.TempDir(), "id-p384.csr"), p384, x509.ECDSAWithSHA384)
+
+	if err := runSubmitIdentityCSRWithParams("agent-123", csrFile, true); err != nil {
+		t.Fatalf("runSubmitIdentityCSRWithParams(skipPreflight) error = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("registry calls = %d, want 1 when preflight is skipped", calls)
+	}
 }

@@ -554,7 +554,7 @@ func TestRunSubmitIdentityCSR_ServerError(t *testing.T) {
 			tmpDir := t.TempDir()
 			csrFile := writeIdentityCSR(t, tmpDir)
 
-			err := runSubmitIdentityCSRWithParams(tt.agentID, csrFile)
+			err := runSubmitIdentityCSRWithParams(tt.agentID, csrFile, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runSubmitIdentityCSRWithParams() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -609,7 +609,7 @@ func TestRunSubmitServerCSR(t *testing.T) {
 			tmpDir := t.TempDir()
 			csrFile := writeServerCSR(t, tmpDir)
 
-			err := runSubmitServerCSRWithParams(tt.agentID, csrFile)
+			err := runSubmitServerCSRWithParams(tt.agentID, csrFile, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runSubmitServerCSRWithParams() error = %v, wantErr %v", err, tt.wantErr)
 			}

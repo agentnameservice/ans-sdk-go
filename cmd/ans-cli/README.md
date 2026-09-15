@@ -112,7 +112,7 @@ OAuth access tokens expire; for long-lived automation and `events --follow`, pre
 
 ### generate-csr
 
-Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the GoDaddy-operated ANS registry accepts (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them.
+Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the GoDaddy-operated ANS registry accepts (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them. A key the registry would reject for a CSR type (for example `--key-size 3072` or `--key-type ec` together with a server CSR) is refused before anything is written; the error names the accepted keys.
 
 ```bash
 ans-cli generate-csr \
@@ -140,9 +140,8 @@ ans-cli generate-csr \
 - `--version` (required): Agent version for ANS URI (e.g., 1.0.0)
 - `--country`: Country code (default: US)
 - `--out-dir`: Output directory (default: current directory)
-- `--key-type`: Force one key algorithm for every generated CSR, `rsa` or `ec` (unset: EC P-256 for identity, RSA for server)
-- `--key-size`: RSA key size in bits, minimum 2048; ignored for `--key-type ec` (default: 2048)
-- `--curve`: EC curve for `--key-type ec`: `P-256`, `P-384`, or `P-521` (default: P-256)
+- `--key-type`: Force one key algorithm for every generated CSR, `rsa` or `ec` (unset: EC P-256 for identity, RSA for server). EC keys are always P-256, the only curve the registry issues identity certificates for.
+- `--key-size`: RSA key size in bits, minimum 2048; ignored for EC keys (default: 2048)
 - `--csr-type`: Which CSRs to generate: `identity`, `server`, or `both` (default: both)
 
 **Output** (only the selected CSR types are written):
@@ -382,14 +381,16 @@ ans-cli submit-server-csr <agentId> --csr-file ./new-server.csr
 
 ### CSR preflight validation
 
-`register`, `submit-identity-csr`, and `submit-server-csr` check each CSR against the registry's intake rules before making the authenticated request, so a CSR the registry would reject fails locally with the same guidance. The rules mirror the GoDaddy-operated registry:
+`register`, `submit-identity-csr`, and `submit-server-csr` check each CSR against the registry's intake rules before making the authenticated request, so a CSR the registry would reject fails locally with equivalent guidance. The rules follow the registry's `CsrValidationRules.kt`:
 
 | CSR | Public key | Signature algorithm |
 |-----|------------|---------------------|
 | Identity | RSA 2048, 3072, or 4096 bits, or EC P-256 | SHA-256, SHA-384, or SHA-512 with RSA or ECDSA |
 | Server | RSA 2048 or 4096 bits | SHA-256 with RSA |
 
-The CSR must also be a well-formed PEM `CERTIFICATE REQUEST` whose self-signature verifies. Subject and SAN checks (CN and DNS SAN equal to the agent host, URI SAN equal to the `ans://` name) stay with the registry, which reports them in its 422 response.
+The CSR file must contain exactly one well-formed PEM `CERTIFICATE REQUEST` block whose self-signature verifies; a file that also carries a private key is refused rather than uploaded. Subject and SAN checks (CN and DNS SAN equal to the agent host, URI SAN equal to the `ans://` name) stay with the registry, which reports them in its 422 response.
+
+EC P-256 identity CSRs are accepted by registry builds that include the EC change (gdcorp-engineering/ans-registry-poc#1258, deployed to the dev environment on 2026-09-15); OTE and production reject them with a 422 until that change reaches them. When the SDK's copy of the rules lags the registry, `--skip-preflight` submits the CSR unchecked and lets the registry decide.
 
 The same rules are available to SDK users through the `csrvalidation` package (`csrvalidation.Validate(csrPEM, csrvalidation.IdentityRules())`), for example to check a BYOC CSR before submission.
 
