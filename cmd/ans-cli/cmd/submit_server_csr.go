@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/csrvalidation"
 	"github.com/spf13/cobra"
 )
 
@@ -44,9 +45,9 @@ func runSubmitServerCSRWithParams(agentID, csrFile string) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	csrData, err := os.ReadFile(csrFile)
+	csrData, err := readValidatedCSR(csrFile, csrvalidation.ServerRules(), "server")
 	if err != nil {
-		return fmt.Errorf("failed to read CSR file: %w", err)
+		return err
 	}
 
 	ctx := context.Background()
