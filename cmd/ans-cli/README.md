@@ -112,7 +112,7 @@ OAuth access tokens expire; for long-lived automation and `events --follow`, pre
 
 ### generate-csr
 
-Generate RSA key pairs and Certificate Signing Requests (CSRs) for both identity and server certificates.
+Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the GoDaddy-operated ANS registry accepts (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them.
 
 ```bash
 ans-cli generate-csr \
@@ -123,19 +123,35 @@ ans-cli generate-csr \
   --out-dir ./certs
 ```
 
+Identity CSR only (for example to renew an identity certificate with `submit-identity-csr`):
+
+```bash
+ans-cli generate-csr \
+  --host myagent.example.com \
+  --org "Example Corp" \
+  --version 1.0.0 \
+  --csr-type identity \
+  --out-dir ./certs-renewal
+```
+
 **Flags:**
 - `--host` (required): Agent host domain
 - `--org` (required): Organization name
 - `--version` (required): Agent version for ANS URI (e.g., 1.0.0)
 - `--country`: Country code (default: US)
 - `--out-dir`: Output directory (default: current directory)
-- `--key-size`: RSA key size in bits (default: 2048)
+- `--key-type`: Force one key algorithm for every generated CSR, `rsa` or `ec` (unset: EC P-256 for identity, RSA for server)
+- `--key-size`: RSA key size in bits, minimum 2048; ignored for `--key-type ec` (default: 2048)
+- `--curve`: EC curve for `--key-type ec`: `P-256`, `P-384`, or `P-521` (default: P-256)
+- `--csr-type`: Which CSRs to generate: `identity`, `server`, or `both` (default: both)
 
-**Output:**
-- `identity.key` - Private key for identity certificate
+**Output** (only the selected CSR types are written):
+- `identity.key` - Private key for identity certificate (`EC PRIVATE KEY` PEM by default, `RSA PRIVATE KEY` with `--key-type rsa`)
 - `identity.csr` - CSR for identity certificate
-- `server.key` - Private key for server certificate
+- `server.key` - Private key for server certificate (`RSA PRIVATE KEY` PEM by default)
 - `server.csr` - CSR for server certificate
+
+Existing files with these names in `--out-dir` are overwritten, so use a fresh directory when generating a second key pair for an agent.
 
 ### register
 
