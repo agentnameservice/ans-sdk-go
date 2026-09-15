@@ -38,9 +38,14 @@ jobs:
 
       - name: Check coverage threshold
         run: |
+          # Programs under examples/ are demonstrations exercised end-to-end by their
+          # run.sh scripts, not by unit tests; exclude them from the library coverage
+          # gate so demo main() code neither dilutes nor masks the real threshold.
+          grep -v '/examples/' coverage.out > coverage.lib.out
+
           # Parse the total coverage percentage from the coverage report
-          COVERAGE=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $NF}' | tr -d '%')
-          echo "Total coverage: ${COVERAGE}%"
+          COVERAGE=$(go tool cover -func=coverage.lib.out | grep '^total:' | awk '{print $NF}' | tr -d '%')
+          echo "Total coverage (excluding examples/): ${COVERAGE}%"
 
           # Fail if coverage is below 90%
           THRESHOLD=90
