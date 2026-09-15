@@ -46,7 +46,7 @@ The API key remains the default path; when both are set, the OAuth token takes p
 ### Register an agent (end-to-end)
 
 ```bash
-# 1. Generate identity + server CSRs
+# 1. Generate identity + server CSRs (EC P-256 identity key, RSA-2048 server key)
 ans-cli generate-csr \
   --host myagent.example.com \
   --org "Example Corp" \
