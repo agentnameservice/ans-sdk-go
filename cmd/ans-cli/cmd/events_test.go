@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -554,10 +552,9 @@ func TestRunSubmitIdentityCSR_ServerError(t *testing.T) {
 			setupViperForTest(t, server.URL)
 
 			tmpDir := t.TempDir()
-			csrFile := filepath.Join(tmpDir, "identity.csr")
-			os.WriteFile(csrFile, []byte("CSR-DATA"), 0600)
+			csrFile := writeIdentityCSR(t, tmpDir)
 
-			err := runSubmitIdentityCSRWithParams(tt.agentID, csrFile)
+			err := runSubmitIdentityCSRWithParams(tt.agentID, csrFile, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runSubmitIdentityCSRWithParams() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -610,10 +607,9 @@ func TestRunSubmitServerCSR(t *testing.T) {
 			}
 
 			tmpDir := t.TempDir()
-			csrFile := filepath.Join(tmpDir, "server.csr")
-			os.WriteFile(csrFile, []byte("CSR-DATA"), 0600)
+			csrFile := writeServerCSR(t, tmpDir)
 
-			err := runSubmitServerCSRWithParams(tt.agentID, csrFile)
+			err := runSubmitServerCSRWithParams(tt.agentID, csrFile, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("runSubmitServerCSRWithParams() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -661,8 +657,7 @@ func TestRunRegisterWithParams(t *testing.T) {
 			setupViperForTest(t, server.URL)
 
 			tmpDir := t.TempDir()
-			identityCSR := filepath.Join(tmpDir, "identity.csr")
-			os.WriteFile(identityCSR, []byte("CSR-DATA"), 0600)
+			identityCSR := writeIdentityCSR(t, tmpDir)
 
 			err := runRegisterWithParams(&registerParams{
 				name:          "name",
