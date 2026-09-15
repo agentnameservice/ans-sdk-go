@@ -364,6 +364,19 @@ ans-cli submit-server-csr <agentId> --csr-file ./new-server.csr
 **Flags:**
 - `--csr-file` (required): Path to CSR PEM file
 
+### CSR preflight validation
+
+`register`, `submit-identity-csr`, and `submit-server-csr` check each CSR against the registry's intake rules before making the authenticated request, so a CSR the registry would reject fails locally with the same guidance. The rules mirror the GoDaddy-operated registry:
+
+| CSR | Public key | Signature algorithm |
+|-----|------------|---------------------|
+| Identity | RSA 2048, 3072, or 4096 bits, or EC P-256 | SHA-256, SHA-384, or SHA-512 with RSA or ECDSA |
+| Server | RSA 2048 or 4096 bits | SHA-256 with RSA |
+
+The CSR must also be a well-formed PEM `CERTIFICATE REQUEST` whose self-signature verifies. Subject and SAN checks (CN and DNS SAN equal to the agent host, URI SAN equal to the `ans://` name) stay with the registry, which reports them in its 422 response.
+
+The same rules are available to SDK users through the `csrvalidation` package (`csrvalidation.Validate(csrPEM, csrvalidation.IdentityRules())`), for example to check a BYOC CSR before submission.
+
 ### get-identity-certs
 
 List all identity certificates associated with an agent.
