@@ -14,7 +14,10 @@ import (
 )
 
 func buildSubmitIdentityCSRCmd() *cobra.Command {
-	var submitIdentityCsrFile string
+	var (
+		submitIdentityCsrFile string
+		skipPreflight         bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "submit-identity-csr <agentId>",
@@ -22,17 +25,18 @@ func buildSubmitIdentityCSRCmd() *cobra.Command {
 		Long:  `Submit a Certificate Signing Request (CSR) to obtain a new identity certificate for an agent.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return runSubmitIdentityCSRWithParams(args[0], submitIdentityCsrFile)
+			return runSubmitIdentityCSRWithParams(args[0], submitIdentityCsrFile, skipPreflight)
 		},
 	}
 
 	cmd.Flags().StringVar(&submitIdentityCsrFile, "csr-file", "", "Path to CSR PEM file (required)")
+	cmd.Flags().BoolVar(&skipPreflight, "skip-preflight", false, "Submit the CSR without checking it against the registry's intake rules first")
 	_ = cmd.MarkFlagRequired("csr-file")
 
 	return cmd
 }
 
-func runSubmitIdentityCSRWithParams(agentID, csrFile string) error {
+func runSubmitIdentityCSRWithParams(agentID, csrFile string, skipPreflight bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -47,7 +51,7 @@ func runSubmitIdentityCSRWithParams(agentID, csrFile string) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	csrData, err := readValidatedCSR(csrFile, csrvalidation.IdentityRules(), "identity")
+	csrData, err := readValidatedCSR(csrFile, csrvalidation.IdentityRules(), "identity", skipPreflight)
 	if err != nil {
 		return err
 	}
