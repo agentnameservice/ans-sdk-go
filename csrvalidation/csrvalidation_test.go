@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"strings"
@@ -71,7 +72,12 @@ func TestValidate(t *testing.T) {
 
 func TestValidate_InputShape(t *testing.T) {
 	good := newCSR(t, ecKey(elliptic.P256())(t), x509.ECDSAWithSHA256)
+	goodBlock, _ := pem.Decode(good)
 	privateKeyBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: []byte{0x30, 0x00}})
+	malformedBlock := []byte("-----BEGIN CERTIFICATE REQUEST-----\nnot base64!\n-----END CERTIFICATE REQUEST-----\n")
+	unterminatedBlock := []byte("-----BEGIN CERTIFICATE REQUEST-----\nMIIBAA==\n")
+	withHeader := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Headers: map[string]string{"Proc-Type": "4,ENCRYPTED"}, Bytes: goodBlock.Bytes})
+	unwrapped := []byte("-----BEGIN CERTIFICATE REQUEST-----\n" + base64.StdEncoding.EncodeToString(goodBlock.Bytes) + "\n-----END CERTIFICATE REQUEST-----\n")
 
 	tests := []struct {
 		name    string
@@ -83,8 +89,13 @@ func TestValidate_InputShape(t *testing.T) {
 		{name: "garbage DER", csrPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: []byte("garbage")}), wantErr: ErrInvalidCSR},
 		{name: "private key bundled after the CSR", csrPEM: append(append([]byte{}, good...), privateKeyBlock...), wantErr: ErrInvalidCSR},
 		{name: "text before the CSR", csrPEM: append([]byte("Certificate Request:\n"), good...), wantErr: ErrInvalidCSR},
+		{name: "malformed leading block before the CSR", csrPEM: append(append([]byte{}, malformedBlock...), good...), wantErr: ErrInvalidCSR},
+		{name: "unterminated leading block before the CSR", csrPEM: append(append([]byte{}, unterminatedBlock...), good...), wantErr: ErrInvalidCSR},
+		{name: "PEM headers inside the block", csrPEM: withHeader, wantErr: ErrInvalidCSR},
 		{name: "tampered subject breaks the self-signature", csrPEM: tamperCommonName(t, good), wantErr: ErrSignature},
 		{name: "surrounding whitespace is fine", csrPEM: append(append([]byte("\n\n"), good...), []byte("\n\n")...)},
+		{name: "CRLF line endings are fine", csrPEM: bytes.ReplaceAll(good, []byte("\n"), []byte("\r\n"))},
+		{name: "unwrapped base64 is fine", csrPEM: unwrapped},
 	}
 
 	for _, tc := range tests {

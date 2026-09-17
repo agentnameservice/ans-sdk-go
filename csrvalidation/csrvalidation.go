@@ -89,9 +89,9 @@ func ServerRules() Rules {
 // block and nothing else, and applies Check. It returns the parsed request so
 // callers can inspect the subject and SANs.
 func Validate(csrPEM []byte, rules Rules) (*x509.CertificateRequest, error) {
-	block, rest := pem.Decode(csrPEM)
-	if block == nil || block.Type != pemTypeCSR || !startsWithCSRBlock(csrPEM) || len(bytes.TrimSpace(rest)) != 0 {
-		return nil, fmt.Errorf("%w: expected exactly one PEM %q block with nothing before or after it", ErrInvalidCSR, pemTypeCSR)
+	block, err := decodeSingleCSRBlock(csrPEM)
+	if err != nil {
+		return nil, err
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
@@ -103,8 +103,22 @@ func Validate(csrPEM []byte, rules Rules) (*x509.CertificateRequest, error) {
 	return csr, nil
 }
 
-func startsWithCSRBlock(csrPEM []byte) bool {
-	return bytes.HasPrefix(bytes.TrimSpace(csrPEM), []byte("-----BEGIN "+pemTypeCSR+"-----"))
+// decodeSingleCSRBlock returns the CERTIFICATE REQUEST block that makes up the
+// whole of csrPEM. pem.Decode skips a malformed or unterminated block and
+// returns the next well-formed one, so the input is also compared, whitespace
+// aside, with the canonical encoding of the block it returned: anything it
+// skipped, and anything before or after the block, makes the two differ.
+func decodeSingleCSRBlock(csrPEM []byte) (*pem.Block, error) {
+	block, _ := pem.Decode(csrPEM)
+	if block == nil || block.Type != pemTypeCSR || len(block.Headers) != 0 ||
+		!bytes.Equal(withoutWhitespace(csrPEM), withoutWhitespace(pem.EncodeToMemory(block))) {
+		return nil, fmt.Errorf("%w: expected exactly one PEM %q block with nothing before or after it", ErrInvalidCSR, pemTypeCSR)
+	}
+	return block, nil
+}
+
+func withoutWhitespace(b []byte) []byte {
+	return bytes.Join(bytes.Fields(b), nil)
 }
 
 // Check applies the rules to an already parsed request and verifies its

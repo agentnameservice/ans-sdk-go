@@ -1497,6 +1497,11 @@ func newRSAKey(t *testing.T, bits int) *rsa.PrivateKey {
 
 func writeCSRFile(t *testing.T, path string, key crypto.Signer, sigAlg x509.SignatureAlgorithm) string {
 	t.Helper()
+	return writeFile(t, path, newCSRPEM(t, key, sigAlg))
+}
+
+func newCSRPEM(t *testing.T, key crypto.Signer, sigAlg x509.SignatureAlgorithm) []byte {
+	t.Helper()
 	template := x509.CertificateRequest{
 		Subject:            pkix.Name{CommonName: "test.example.com"},
 		DNSNames:           []string{"test.example.com"},
@@ -1506,7 +1511,12 @@ func writeCSRFile(t *testing.T, path string, key crypto.Signer, sigAlg x509.Sign
 	if err != nil {
 		t.Fatalf("CreateCertificateRequest: %v", err)
 	}
-	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0600); err != nil {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+}
+
+func writeFile(t *testing.T, path string, data []byte) string {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return path
@@ -1535,6 +1545,10 @@ func TestRunSubmitCSR_PreflightRejectsBeforeNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ecdsa.GenerateKey: %v", err)
 	}
+	const (
+		malformedCSRBlock    = "-----BEGIN CERTIFICATE REQUEST-----\nnot base64!\n-----END CERTIFICATE REQUEST-----\n"
+		unterminatedCSRBlock = "-----BEGIN CERTIFICATE REQUEST-----\nMIIBAA==\n"
+	)
 
 	tests := []struct {
 		name    string
@@ -1565,6 +1579,18 @@ func TestRunSubmitCSR_PreflightRejectsBeforeNetwork(t *testing.T) {
 			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f, false) },
 			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-sha384.csr"), newRSAKey(t, 2048), x509.SHA384WithRSA),
 			wantErr: "CSR signature algorithm must be SHA256WITHRSA",
+		},
+		{
+			name:    "identity CSR file with a malformed leading block",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
+			csrFile: writeFile(t, filepath.Join(dir, "id-malformed-lead.csr"), append([]byte(malformedCSRBlock), newCSRPEM(t, p256, x509.ECDSAWithSHA256)...)),
+			wantErr: "expected exactly one PEM",
+		},
+		{
+			name:    "identity CSR file with an unterminated leading block",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
+			csrFile: writeFile(t, filepath.Join(dir, "id-unterminated-lead.csr"), append([]byte(unterminatedCSRBlock), newCSRPEM(t, p256, x509.ECDSAWithSHA256)...)),
+			wantErr: "expected exactly one PEM",
 		},
 	}
 
