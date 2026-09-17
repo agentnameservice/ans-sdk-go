@@ -13,6 +13,7 @@ import (
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/csrvalidation"
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +33,7 @@ type registerParams struct {
 	endpointTrans                           []string
 	functionFlags                           []string
 	discoveryProfiles                       []string
+	skipPreflight                           bool
 }
 
 func buildRegisterCmd() *cobra.Command {
@@ -61,6 +63,8 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	cmd.Flags().StringArrayVar(&p.functionFlags, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
 	cmd.Flags().StringSliceVar(&p.discoveryProfiles, "discovery-profiles", nil,
 		"DNS record families the RA asks the operator to publish: ANS_DNSAID, ANS_TXT, or both (requires --api-version v2; omitted = server default ANS_DNSAID)")
+
+	cmd.Flags().BoolVar(&p.skipPreflight, "skip-preflight", false, "Submit the CSRs without checking them against the registry's intake rules first")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("host")
@@ -111,10 +115,9 @@ func runRegisterWithParams(p *registerParams) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Read identity CSR
-	identityCSRData, err := os.ReadFile(p.identityCSR)
+	identityCSRData, err := readValidatedCSR(p.identityCSR, csrvalidation.IdentityRules(), "identity", p.skipPreflight)
 	if err != nil {
-		return fmt.Errorf("failed to read identity CSR file: %w", err)
+		return err
 	}
 
 	// Read server CSR or certificate
@@ -125,9 +128,9 @@ func runRegisterWithParams(p *registerParams) error {
 			return fmt.Errorf("failed to read server certificate file: %w", err)
 		}
 	} else if p.serverCSR != "" {
-		serverCSRData, err = os.ReadFile(p.serverCSR)
+		serverCSRData, err = readValidatedCSR(p.serverCSR, csrvalidation.ServerRules(), "server", p.skipPreflight)
 		if err != nil {
-			return fmt.Errorf("failed to read server CSR file: %w", err)
+			return err
 		}
 	}
 

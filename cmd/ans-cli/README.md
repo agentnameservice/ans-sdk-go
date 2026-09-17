@@ -112,7 +112,7 @@ OAuth access tokens expire; for long-lived automation and `events --follow`, pre
 
 ### generate-csr
 
-Generate RSA key pairs and Certificate Signing Requests (CSRs) for both identity and server certificates.
+Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the GoDaddy-operated ANS registry accepts (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them. A key the registry would reject for a CSR type (for example `--key-size 3072` or `--key-type ec` together with a server CSR) is refused before anything is written; the error names the accepted keys.
 
 ```bash
 ans-cli generate-csr \
@@ -123,19 +123,34 @@ ans-cli generate-csr \
   --out-dir ./certs
 ```
 
+Identity CSR only (for example to renew an identity certificate with `submit-identity-csr`):
+
+```bash
+ans-cli generate-csr \
+  --host myagent.example.com \
+  --org "Example Corp" \
+  --version 1.0.0 \
+  --csr-type identity \
+  --out-dir ./certs-renewal
+```
+
 **Flags:**
 - `--host` (required): Agent host domain
 - `--org` (required): Organization name
 - `--version` (required): Agent version for ANS URI (e.g., 1.0.0)
 - `--country`: Country code (default: US)
 - `--out-dir`: Output directory (default: current directory)
-- `--key-size`: RSA key size in bits (default: 2048)
+- `--key-type`: Force one key algorithm for every generated CSR, `rsa` or `ec` (unset: EC P-256 for identity, RSA for server). EC keys are always P-256, the only curve the registry issues identity certificates for.
+- `--key-size`: RSA key size in bits, minimum 2048; ignored for EC keys (default: 2048)
+- `--csr-type`: Which CSRs to generate: `identity`, `server`, or `both` (default: both)
 
-**Output:**
-- `identity.key` - Private key for identity certificate
+**Output** (only the selected CSR types are written):
+- `identity.key` - Private key for identity certificate (`EC PRIVATE KEY` PEM by default, `RSA PRIVATE KEY` with `--key-type rsa`)
 - `identity.csr` - CSR for identity certificate
-- `server.key` - Private key for server certificate
+- `server.key` - Private key for server certificate (`RSA PRIVATE KEY` PEM by default)
 - `server.csr` - CSR for server certificate
+
+Existing files with these names in `--out-dir` are overwritten, so use a fresh directory when generating a second key pair for an agent.
 
 ### register
 
@@ -363,6 +378,21 @@ ans-cli submit-server-csr <agentId> --csr-file ./new-server.csr
 
 **Flags:**
 - `--csr-file` (required): Path to CSR PEM file
+
+### CSR preflight validation
+
+`register`, `submit-identity-csr`, and `submit-server-csr` check each CSR against the registry's intake rules before making the authenticated request, so a CSR the registry would reject fails locally with equivalent guidance. The rules match the registry's intake policy:
+
+| CSR | Public key | Signature algorithm |
+|-----|------------|---------------------|
+| Identity | RSA 2048, 3072, or 4096 bits, or EC P-256 | SHA-256, SHA-384, or SHA-512 with RSA or ECDSA |
+| Server | RSA 2048 or 4096 bits | SHA-256 with RSA |
+
+The CSR file must contain exactly one well-formed PEM `CERTIFICATE REQUEST` block whose self-signature verifies; a file that also carries a private key is refused rather than uploaded. Subject and SAN checks (CN and DNS SAN equal to the agent host, URI SAN equal to the `ans://` name) stay with the registry, which reports them in its 422 response.
+
+EC P-256 identity CSRs require a registry deployment with EC support; a registry without it rejects them with a 422. When the SDK's copy of the rules lags the registry, `--skip-preflight` submits the CSR unchecked and lets the registry decide.
+
+The same rules are available to SDK users through the `csrvalidation` package (`csrvalidation.Validate(csrPEM, csrvalidation.IdentityRules())`), for example to check a BYOC CSR before submission.
 
 ### get-identity-certs
 
