@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -182,7 +183,11 @@ func (c *HTTPClient) fetchBytes(ctx context.Context, url string) ([]byte, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, mapStatusCodeToError(resp.StatusCode)
+		terr := mapStatusCodeToError(resp.StatusCode)
+		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusTooManyRequests {
+			terr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		}
+		return nil, terr
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -231,4 +236,30 @@ func mapStatusCodeToError(code int) *TransportError {
 			Message:    fmt.Sprintf("unexpected status code %d", code),
 		}
 	}
+}
+
+// maxRetryAfter caps the wait taken from a Retry-After header. A server asking
+// for more is treated as asking for a day.
+const maxRetryAfter = 24 * time.Hour
+
+// parseRetryAfter converts a Retry-After header value (RFC 9110 section 10.2.3)
+// into a wait relative to now, capped at maxRetryAfter. Both the delta-seconds
+// and the HTTP-date forms are accepted; an absent, malformed, or already-elapsed
+// value yields zero.
+func parseRetryAfter(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseUint(header, 10, 64); err == nil {
+		if secs > uint64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
+		return time.Duration(secs) * time.Second
+	}
+	at, err := http.ParseTime(header)
+	if err != nil {
+		return 0
+	}
+	return min(max(at.Sub(now), 0), maxRetryAfter)
 }

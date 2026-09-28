@@ -755,3 +755,112 @@ func assertTransportError(t *testing.T, err error, wantType TransportErrorType, 
 		t.Errorf("status code = %d, want %d", transportErr.StatusCode, wantStatusCode)
 	}
 }
+
+func TestParseRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.September, 28, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name   string
+		header string
+		want   time.Duration
+	}{
+		{name: "absent header yields zero", header: "", want: 0},
+		{name: "delta-seconds", header: "30", want: 30 * time.Second},
+		{name: "zero delta-seconds", header: "0", want: 0},
+		{name: "surrounding whitespace is tolerated", header: "  15 ", want: 15 * time.Second},
+		{name: "negative delta is ignored", header: "-5", want: 0},
+		{name: "fractional delta is ignored", header: "1.5", want: 0},
+		{name: "garbage is ignored", header: "soon", want: 0},
+		{name: "delta at the cap is kept", header: "86400", want: 24 * time.Hour},
+		{name: "delta above the cap is clamped to a day", header: "86401", want: 24 * time.Hour},
+		{name: "absurd delta is clamped to a day", header: "99999999999", want: 24 * time.Hour},
+		{name: "HTTP-date in the future", header: now.Add(90 * time.Second).Format(http.TimeFormat), want: 90 * time.Second},
+		{name: "RFC 850 date is accepted", header: now.Add(2 * time.Minute).Format(time.RFC850), want: 2 * time.Minute},
+		{name: "HTTP-date in the past yields zero", header: now.Add(-time.Minute).Format(http.TimeFormat), want: 0},
+		{name: "HTTP-date beyond the cap is clamped to a day", header: now.Add(48 * time.Hour).Format(http.TimeFormat), want: 24 * time.Hour},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseRetryAfter(tt.header, now); got != tt.want {
+				t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHTTPClientRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		serverStatus int
+		retryAfter   func() string
+		wantMin      time.Duration
+		wantMax      time.Duration
+	}{
+		{
+			name:         "503 with delta-seconds",
+			serverStatus: http.StatusServiceUnavailable,
+			retryAfter:   func() string { return "30" },
+			wantMin:      30 * time.Second,
+			wantMax:      30 * time.Second,
+		},
+		{
+			name:         "429 with delta-seconds",
+			serverStatus: http.StatusTooManyRequests,
+			retryAfter:   func() string { return "2" },
+			wantMin:      2 * time.Second,
+			wantMax:      2 * time.Second,
+		},
+		{
+			name:         "503 with HTTP-date",
+			serverStatus: http.StatusServiceUnavailable,
+			retryAfter:   func() string { return time.Now().Add(time.Minute).UTC().Format(http.TimeFormat) },
+			wantMin:      30 * time.Second,
+			wantMax:      time.Minute,
+		},
+		{
+			name:         "503 without the header leaves zero",
+			serverStatus: http.StatusServiceUnavailable,
+			retryAfter:   func() string { return "" },
+		},
+		{
+			name:         "500 does not parse the header",
+			serverStatus: http.StatusInternalServerError,
+			retryAfter:   func() string { return "30" },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if v := tt.retryAfter(); v != "" {
+					w.Header().Set("Retry-After", v)
+				}
+				w.WriteHeader(tt.serverStatus)
+			}))
+			defer server.Close()
+
+			client, err := NewHTTPClient(server.URL, WithAllowInsecureTransport())
+			if err != nil {
+				t.Fatalf("NewHTTPClient() error = %v", err)
+			}
+			_, err = client.FetchReceipt(context.Background(), "agent-1")
+			assertTransportError(t, err, TransportErrHTTPError, tt.serverStatus)
+
+			var transportErr *TransportError
+			if !errors.As(err, &transportErr) {
+				t.Fatalf("expected TransportError, got %T", err)
+			}
+			if transportErr.RetryAfter < tt.wantMin || transportErr.RetryAfter > tt.wantMax {
+				t.Errorf("RetryAfter = %v, want within [%v, %v]", transportErr.RetryAfter, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}

@@ -1,6 +1,9 @@
 package scitt
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // CoseErrorType represents the type of COSE_Sign1 parsing error.
 type CoseErrorType int
@@ -224,6 +227,10 @@ type TransportError struct {
 	Type       TransportErrorType
 	Message    string
 	StatusCode int
+	// RetryAfter is the wait the server requested through a Retry-After header
+	// on a 503 or 429 response, capped at 24 hours; zero when the header was
+	// absent or malformed.
+	RetryAfter time.Duration
 	Cause      error
 }
 
@@ -237,7 +244,11 @@ func (e *TransportError) Error() string {
 	case TransportErrNotSupported:
 		return fmt.Sprintf("not supported: %s", e.Message)
 	case TransportErrHTTPError:
-		return fmt.Sprintf("HTTP error (%d): %s", e.StatusCode, e.Message)
+		msg := fmt.Sprintf("HTTP error (%d): %s", e.StatusCode, e.Message)
+		if e.RetryAfter > 0 {
+			msg += fmt.Sprintf(" (retry after %v)", e.RetryAfter)
+		}
+		return msg
 	case TransportErrBase64Decode:
 		return fmt.Sprintf("base64 decode failed: %s", e.Message)
 	default:

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCoseErrorMessages(t *testing.T) {
@@ -388,6 +389,16 @@ func TestTransportErrorMessages(t *testing.T) {
 			name:     "HTTP error",
 			err:      &TransportError{Type: TransportErrHTTPError, Message: "server error", StatusCode: 500},
 			contains: "HTTP error (500): server error",
+		},
+		{
+			name:     "HTTP error with Retry-After",
+			err:      &TransportError{Type: TransportErrHTTPError, Message: "unexpected status code 503", StatusCode: 503, RetryAfter: 30 * time.Second},
+			contains: "HTTP error (503): unexpected status code 503 (retry after 30s)",
+		},
+		{
+			name:     "HTTP error without Retry-After omits the hint",
+			err:      &TransportError{Type: TransportErrHTTPError, Message: "unexpected status code 503", StatusCode: 503},
+			contains: "HTTP error (503): unexpected status code 503",
 		},
 		{
 			name:     "base64 decode",
