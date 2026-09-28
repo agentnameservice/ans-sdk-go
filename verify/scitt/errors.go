@@ -272,3 +272,56 @@ func (e *TransportError) ShouldFallbackToBadge() bool {
 		return false
 	}
 }
+
+// CheckpointErrorType represents the type of checkpoint note parsing error or
+// checkpoint-to-receipt binding failure.
+type CheckpointErrorType int
+
+const (
+	// CheckpointErrOversizedInput indicates the note exceeds MaxCheckpointNoteSize.
+	CheckpointErrOversizedInput CheckpointErrorType = iota
+	// CheckpointErrMalformed indicates the note does not have the signed-note shape:
+	// a body, a blank line, and one or more well-formed signature lines.
+	CheckpointErrMalformed
+	// CheckpointErrInvalidSize indicates the tree size line is not a decimal uint64.
+	CheckpointErrInvalidSize
+	// CheckpointErrInvalidRootHash indicates the root hash line is not the base64 of 32 bytes.
+	CheckpointErrInvalidRootHash
+	// CheckpointErrSizeMismatch indicates a receipt's tree size differs from the checkpoint's.
+	CheckpointErrSizeMismatch
+	// CheckpointErrRootMismatch indicates a receipt's root differs from the checkpoint's.
+	CheckpointErrRootMismatch
+)
+
+// CheckpointError represents a checkpoint note parsing failure or a receipt
+// the checkpoint does not cover.
+type CheckpointError struct {
+	Type    CheckpointErrorType
+	Message string
+	Cause   error
+}
+
+// Error implements the error interface.
+func (e *CheckpointError) Error() string {
+	switch e.Type {
+	case CheckpointErrOversizedInput:
+		return fmt.Sprintf("checkpoint oversized input: %s", e.Message)
+	case CheckpointErrMalformed:
+		return fmt.Sprintf("malformed checkpoint: %s", e.Message)
+	case CheckpointErrInvalidSize:
+		return fmt.Sprintf("invalid checkpoint size: %s", e.Message)
+	case CheckpointErrInvalidRootHash:
+		return fmt.Sprintf("invalid checkpoint root hash: %s", e.Message)
+	case CheckpointErrSizeMismatch:
+		return fmt.Sprintf("checkpoint size mismatch: %s", e.Message)
+	case CheckpointErrRootMismatch:
+		return fmt.Sprintf("checkpoint root mismatch: %s", e.Message)
+	default:
+		return fmt.Sprintf("checkpoint error: %s", e.Message)
+	}
+}
+
+// Unwrap returns the underlying cause.
+func (e *CheckpointError) Unwrap() error {
+	return e.Cause
+}

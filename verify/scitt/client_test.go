@@ -418,6 +418,10 @@ func TestMockClient(t *testing.T) {
 var _ Client = (*MockClient)(nil)
 var _ Client = (*HTTPClient)(nil)
 
+// Verify both clients also fetch checkpoints.
+var _ CheckpointFetcher = (*MockClient)(nil)
+var _ CheckpointFetcher = (*HTTPClient)(nil)
+
 func assertClientResult(t *testing.T, got, want []byte, err error, wantErr bool, wantErrType TransportErrorType, wantStatusCode int) {
 	t.Helper()
 
@@ -548,6 +552,7 @@ func TestCustomHeadersSentOnAllEndpoints(t *testing.T) {
 		{name: "receipt includes custom headers", method: "receipt"},
 		{name: "status includes custom headers", method: "status"},
 		{name: "rootkeys includes custom headers", method: "rootkeys"},
+		{name: "checkpoint includes custom headers", method: "checkpoint"},
 	}
 
 	for _, tt := range tests {
@@ -582,6 +587,8 @@ func TestCustomHeadersSentOnAllEndpoints(t *testing.T) {
 				_, _ = client.FetchStatusToken(ctx, "agent-1")
 			case "rootkeys":
 				_, _ = client.FetchRootKeys(ctx)
+			case "checkpoint":
+				_, _ = client.FetchCheckpoint(ctx)
 			}
 
 			if receivedHeader != "secret-123" {
@@ -860,6 +867,167 @@ func TestHTTPClientRetryAfter(t *testing.T) {
 			}
 			if transportErr.RetryAfter < tt.wantMin || transportErr.RetryAfter > tt.wantMax {
 				t.Errorf("RetryAfter = %v, want within [%v, %v]", transportErr.RetryAfter, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestHTTPClientFetchCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	note := []byte("log.example\n42\n" + strings.Repeat("A", 43) + "=\n\n— log.example AAAAAAE=\n")
+
+	tests := []struct {
+		name           string
+		serverStatus   int
+		serverBody     []byte
+		retryAfter     func() string
+		wantBytes      []byte
+		wantErr        bool
+		wantErrType    TransportErrorType
+		wantStatusCode int
+		wantRetryMin   time.Duration
+		wantRetryMax   time.Duration
+		errContains    string
+	}{
+		{
+			name:         "200 returns the note bytes verbatim",
+			serverStatus: http.StatusOK,
+			serverBody:   note,
+			wantBytes:    note,
+		},
+		{
+			name:           "404 maps to not found",
+			serverStatus:   http.StatusNotFound,
+			wantErr:        true,
+			wantErrType:    TransportErrNotFound,
+			wantStatusCode: http.StatusNotFound,
+		},
+		{
+			name:           "503 with Retry-After delta-seconds",
+			serverStatus:   http.StatusServiceUnavailable,
+			retryAfter:     func() string { return "30" },
+			wantErr:        true,
+			wantErrType:    TransportErrHTTPError,
+			wantStatusCode: http.StatusServiceUnavailable,
+			wantRetryMin:   30 * time.Second,
+			wantRetryMax:   30 * time.Second,
+		},
+		{
+			name:           "429 with Retry-After HTTP-date",
+			serverStatus:   http.StatusTooManyRequests,
+			retryAfter:     func() string { return time.Now().Add(time.Minute).UTC().Format(http.TimeFormat) },
+			wantErr:        true,
+			wantErrType:    TransportErrHTTPError,
+			wantStatusCode: http.StatusTooManyRequests,
+			wantRetryMin:   30 * time.Second,
+			wantRetryMax:   time.Minute,
+		},
+		{
+			name:         "response over the byte cap is rejected",
+			serverStatus: http.StatusOK,
+			serverBody:   make([]byte, maxResponseBytes+1),
+			wantErr:      true,
+			wantErrType:  TransportErrHTTPError,
+			errContains:  "exceeds maximum size",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/checkpoint" {
+					t.Errorf("request path = %q, want %q", r.URL.Path, "/checkpoint")
+				}
+				if tt.retryAfter != nil {
+					w.Header().Set("Retry-After", tt.retryAfter())
+				}
+				w.WriteHeader(tt.serverStatus)
+				if tt.serverBody != nil {
+					_, _ = w.Write(tt.serverBody)
+				}
+			}))
+			defer server.Close()
+
+			client, err := NewHTTPClient(server.URL, WithAllowInsecureTransport())
+			if err != nil {
+				t.Fatalf("NewHTTPClient() error = %v", err)
+			}
+			got, err := client.FetchCheckpoint(context.Background())
+			assertClientResult(t, got, tt.wantBytes, err, tt.wantErr, tt.wantErrType, tt.wantStatusCode)
+			if !tt.wantErr {
+				return
+			}
+			if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.errContains)
+			}
+			var transportErr *TransportError
+			if !errors.As(err, &transportErr) {
+				t.Fatalf("expected TransportError, got %T", err)
+			}
+			if transportErr.RetryAfter < tt.wantRetryMin || transportErr.RetryAfter > tt.wantRetryMax {
+				t.Errorf("RetryAfter = %v, want within [%v, %v]", transportErr.RetryAfter, tt.wantRetryMin, tt.wantRetryMax)
+			}
+		})
+	}
+}
+
+func TestMockClientFetchCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	configured := &TransportError{Type: TransportErrHTTPError, StatusCode: http.StatusServiceUnavailable, Message: "down"}
+
+	tests := []struct {
+		name        string
+		setup       func() *MockClient
+		wantBytes   []byte
+		wantErr     error
+		wantErrType TransportErrorType
+	}{
+		{
+			name:      "configured note is returned",
+			setup:     func() *MockClient { return NewMockClient().WithCheckpoint([]byte("note-bytes")) },
+			wantBytes: []byte("note-bytes"),
+		},
+		{
+			name:      "empty note is still a configured note",
+			setup:     func() *MockClient { return NewMockClient().WithCheckpoint([]byte{}) },
+			wantBytes: []byte{},
+		},
+		{
+			name:        "unconfigured checkpoint is not found",
+			setup:       NewMockClient,
+			wantErrType: TransportErrNotFound,
+		},
+		{
+			name: "configured error wins over a configured note",
+			setup: func() *MockClient {
+				return NewMockClient().WithCheckpoint([]byte("n")).WithError("checkpoint", configured)
+			},
+			wantErr: configured,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := tt.setup().FetchCheckpoint(context.Background())
+			switch {
+			case tt.wantErr != nil:
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("error = %v, want %v", err, tt.wantErr)
+				}
+			case tt.wantBytes == nil:
+				assertTransportError(t, err, tt.wantErrType, http.StatusNotFound)
+			default:
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got == nil || string(got) != string(tt.wantBytes) {
+					t.Errorf("got %q, want %q", got, tt.wantBytes)
+				}
 			}
 		})
 	}

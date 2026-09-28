@@ -18,6 +18,13 @@ type Client interface {
 	FetchRootKeys(ctx context.Context) ([]string, error)
 }
 
+// CheckpointFetcher fetches a transparency log's latest signed checkpoint note,
+// the raw text VerifyCheckpoint parses. Client implementations are not required
+// to fetch checkpoints; *HTTPClient and *MockClient implement both interfaces.
+type CheckpointFetcher interface {
+	FetchCheckpoint(ctx context.Context) ([]byte, error)
+}
+
 const (
 	defaultTimeout   = 30 * time.Second
 	maxResponseBytes = 2 << 20 // 2 MiB
@@ -154,6 +161,12 @@ func (c *HTTPClient) FetchRootKeys(ctx context.Context) ([]string, error) {
 		}
 	}
 	return keys, nil
+}
+
+// FetchCheckpoint retrieves the log's latest signed checkpoint note.
+func (c *HTTPClient) FetchCheckpoint(ctx context.Context) ([]byte, error) {
+	u := fmt.Sprintf("%s/checkpoint", c.baseURL)
+	return c.fetchBytes(ctx, u)
 }
 
 func (c *HTTPClient) fetchBytes(ctx context.Context, url string) ([]byte, error) {

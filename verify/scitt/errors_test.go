@@ -528,3 +528,90 @@ func TestErrorsWorkWithErrorsIs(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckpointErrorMessages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      *CheckpointError
+		contains string
+	}{
+		{
+			name:     "oversized input",
+			err:      &CheckpointError{Type: CheckpointErrOversizedInput, Message: "note exceeds 65536 bytes"},
+			contains: "checkpoint oversized input: note exceeds 65536 bytes",
+		},
+		{
+			name:     "malformed",
+			err:      &CheckpointError{Type: CheckpointErrMalformed, Message: "missing separator"},
+			contains: "malformed checkpoint: missing separator",
+		},
+		{
+			name:     "invalid size",
+			err:      &CheckpointError{Type: CheckpointErrInvalidSize, Message: `parse "x"`},
+			contains: `invalid checkpoint size: parse "x"`,
+		},
+		{
+			name:     "invalid root hash",
+			err:      &CheckpointError{Type: CheckpointErrInvalidRootHash, Message: "got 31 bytes"},
+			contains: "invalid checkpoint root hash: got 31 bytes",
+		},
+		{
+			name:     "size mismatch",
+			err:      &CheckpointError{Type: CheckpointErrSizeMismatch, Message: "receipt tree size 41, checkpoint size 42"},
+			contains: "checkpoint size mismatch: receipt tree size 41, checkpoint size 42",
+		},
+		{
+			name:     "root mismatch",
+			err:      &CheckpointError{Type: CheckpointErrRootMismatch, Message: "roots differ"},
+			contains: "checkpoint root mismatch: roots differ",
+		},
+		{
+			name:     "unknown type",
+			err:      &CheckpointError{Type: CheckpointErrorType(99), Message: "unexpected"},
+			contains: "checkpoint error: unexpected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.err.Error()
+			if !strings.Contains(got, tt.contains) {
+				t.Errorf("Error() = %q, want containing %q", got, tt.contains)
+			}
+		})
+	}
+}
+
+func TestCheckpointErrorUnwrap(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("illegal base64 data")
+	tests := []struct {
+		name      string
+		err       *CheckpointError
+		wantCause error
+	}{
+		{
+			name:      "with cause",
+			err:       &CheckpointError{Type: CheckpointErrInvalidRootHash, Message: "decode", Cause: cause},
+			wantCause: cause,
+		},
+		{
+			name:      "nil cause",
+			err:       &CheckpointError{Type: CheckpointErrMalformed, Message: "no separator"},
+			wantCause: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.err.Unwrap(); !errorEqual(got, tt.wantCause) {
+				t.Errorf("Unwrap() = %v, want %v", got, tt.wantCause)
+			}
+		})
+	}
+}
