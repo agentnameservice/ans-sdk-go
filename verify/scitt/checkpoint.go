@@ -154,13 +154,11 @@ func VerifyCheckpoint(note []byte, keys KeyLookup) (*Checkpoint, error) {
 					Message: "checkpoint signature did not verify",
 				}
 			}
-			if envelopeOnly == nil {
-				envelopeOnly = &SignatureError{
-					Type:    SigErrSignatureInvalid,
-					Kid:     s.kid,
-					Message: "only a JWS envelope under the trusted key; no ECDSA signature verified",
-				}
-			}
+			envelopeOnly = firstError(envelopeOnly, &SignatureError{
+				Type:    SigErrSignatureInvalid,
+				Kid:     s.kid,
+				Message: "only a JWS envelope under the trusted key; no ECDSA signature verified",
+			})
 			continue
 		}
 		if err := bindCheckpointSigner(cp.Origin, s.name, key); err != nil {
@@ -321,6 +319,15 @@ func bindCheckpointSigner(origin, signer string, key *TrustedKey) error {
 		}
 	}
 	return nil
+}
+
+// firstError keeps the first error seen, so the reported key hash is the
+// first offending line's, as the unknown-key path reports.
+func firstError(current, candidate error) error {
+	if current != nil {
+		return current
+	}
+	return candidate
 }
 
 func malformedf(format string, args ...any) *CheckpointError {
