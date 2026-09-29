@@ -105,14 +105,17 @@ type checkpointSignature struct {
 //	[further signature lines]
 //
 // Each signature line names its key by the 4-byte key hash that /root-keys
-// advertises. For every line whose key the lookup knows, the signature is
-// checked as ASN.1 DER ECDSA over SHA-256 of the body, then as fixed-width
-// r||s. The checkpoint is accepted once one line verifies and both its signer
-// name and the note's origin equal that key's Name. Lines for unknown keys are
+// advertises. Every line is examined, as golang.org/x/mod/sumdb/note.Open does,
+// so the result does not depend on line order. For every line whose key the
+// lookup knows, the signature is checked as ASN.1 DER ECDSA over SHA-256 of the
+// body, then as fixed-width r||s; a verifying line must also carry a signer name
+// equal to the note's origin and to that key's Name, or the note is rejected
+// with SigErrIssuerMismatch. The checkpoint is accepted when at least one line
+// verifies, and KeyID names the first such key. Lines for unknown keys are
 // skipped. A line under a known key that does not verify is tolerated only when
 // its payload is a compact JWS envelope, which the log emits under the same key
 // hash as its ECDSA signature; any other failing line under a known key rejects
-// the note with SigErrSignatureInvalid.
+// the note with SigErrSignatureInvalid wherever it appears.
 //
 // When no line verifies, the error is a *SignatureError: SigErrUnknownKeyID
 // naming the first unknown key hash when the note carried one, with the
@@ -145,6 +148,18 @@ func VerifyCheckpoint(note []byte, keys KeyLookup) (*Checkpoint, error) {
 		return nil, err
 	}
 
+	if err := verifyCheckpointSignatures(cp, body, sigs, keys); err != nil {
+		return nil, err
+	}
+	return cp, nil
+}
+
+// verifyCheckpointSignatures examines every signature line and records in cp
+// the first trusted key that verified. A failing line under a trusted key, or a
+// verifying line whose signer name does not bind, rejects the note wherever it
+// appears, so acceptance does not depend on line order.
+func verifyCheckpointSignatures(cp *Checkpoint, body []byte, sigs []checkpointSignature, keys KeyLookup) error {
+	var verified bool
 	var unknownKid *[4]byte
 	var unknownErr, envelopeOnly error
 	for _, s := range sigs {
@@ -158,7 +173,7 @@ func VerifyCheckpoint(note []byte, keys KeyLookup) (*Checkpoint, error) {
 		}
 		if !verifyCheckpointSignature(key.Key, body, s.sig) {
 			if !bytes.HasPrefix(s.sig, []byte(jwsHeaderMarker)) {
-				return nil, &SignatureError{
+				return &SignatureError{
 					Type:    SigErrSignatureInvalid,
 					Kid:     s.kid,
 					Message: "checkpoint signature did not verify",
@@ -172,21 +187,26 @@ func VerifyCheckpoint(note []byte, keys KeyLookup) (*Checkpoint, error) {
 			continue
 		}
 		if err := bindCheckpointSigner(cp.Origin, s.name, key); err != nil {
-			return nil, err
+			return err
 		}
-		cp.KeyID = key.Kid
-		return cp, nil
+		if !verified {
+			cp.KeyID = key.Kid
+			verified = true
+		}
 	}
 
+	if verified {
+		return nil
+	}
 	if unknownKid != nil {
-		return nil, &SignatureError{
+		return &SignatureError{
 			Type:    SigErrUnknownKeyID,
 			Kid:     *unknownKid,
 			Message: "no checkpoint signature under a trusted key",
 			Cause:   unknownErr,
 		}
 	}
-	return nil, envelopeOnly
+	return envelopeOnly
 }
 
 // validateNoteText rejects a note that is not valid UTF-8 or that holds a

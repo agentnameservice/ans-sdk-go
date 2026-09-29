@@ -115,9 +115,14 @@ func TestVerifyCheckpoint(t *testing.T) {
 	root := sha256.Sum256([]byte("root"))
 	s := newCheckpointSigner(t, origin)
 	other := newCheckpointSigner(t, "other.example")
+	rotated := newCheckpointSigner(t, origin)
 	keys := s.keyStore(t)
 
 	bothKeys, err := NewKeyStore([]string{s.rootKeysLine(t), other.rootKeysLine(t)})
+	if err != nil {
+		t.Fatalf("NewKeyStore: %v", err)
+	}
+	rotationKeys, err := NewKeyStore([]string{s.rootKeysLine(t), rotated.rootKeysLine(t)})
 	if err != nil {
 		t.Fatalf("NewKeyStore: %v", err)
 	}
@@ -130,6 +135,7 @@ func TestVerifyCheckpoint(t *testing.T) {
 	jwsLine := signatureLine(origin, s.kid, []byte("eyJhbGciOiJFUzI1NiJ9.eyJvcmlnaW4iOiJsb2cifQ.c2ln"))
 	otherJWSLine := signatureLine(other.name, other.kid, []byte("eyJhbGciOiJFUzI1NiJ9.eyJvcmlnaW4iOiJvdGhlciJ9.c2ln"))
 	tamperedLine := signatureLine(origin, s.kid, s.signASN1(t, checkpointBody(origin, 41, root)))
+	rotatedLine := signatureLine(origin, rotated.kid, rotated.signASN1(t, body))
 
 	rootB64 := base64.StdEncoding.EncodeToString(root[:])
 	rawBody := func(lines ...string) []byte { return []byte(strings.Join(lines, "\n") + "\n") }
@@ -175,6 +181,23 @@ func TestVerifyCheckpoint(t *testing.T) {
 			want: verified,
 		},
 		{
+			name: "same-kid envelope after the verifying line is skipped",
+			note: signedNote(body, validLine, jwsLine),
+			want: verified,
+		},
+		{
+			name: "two rotation keys sign: the first verifying line's key is reported",
+			note: signedNote(body, validLine, rotatedLine),
+			keys: rotationKeys,
+			want: verified,
+		},
+		{
+			name: "two rotation keys sign in the other order: the first verifying line's key is reported",
+			note: signedNote(body, rotatedLine, validLine),
+			keys: rotationKeys,
+			want: &Checkpoint{Origin: origin, Size: 42, RootHash: root, KeyID: rotated.kid},
+		},
+		{
 			name: "extension lines are part of the signed body",
 			note: signedNote(extBody, signatureLine(origin, s.kid, s.signASN1(t, extBody))),
 			want: verified,
@@ -205,6 +228,13 @@ func TestVerifyCheckpoint(t *testing.T) {
 		{
 			name:        "failing non-envelope line under a known key rejects before a later valid line",
 			note:        signedNote(body, tamperedLine, validLine),
+			wantSigErr:  ptr(SigErrSignatureInvalid),
+			wantKid:     s.kid,
+			errContains: "did not verify",
+		},
+		{
+			name:        "failing non-envelope line under a known key rejects after an earlier valid line",
+			note:        signedNote(body, validLine, tamperedLine),
 			wantSigErr:  ptr(SigErrSignatureInvalid),
 			wantKid:     s.kid,
 			errContains: "did not verify",
@@ -247,6 +277,13 @@ func TestVerifyCheckpoint(t *testing.T) {
 		{
 			name:        "wrong-name verifying line rejects before a later correct line",
 			note:        signedNote(body, wrongNameLine, validLine),
+			wantSigErr:  ptr(SigErrIssuerMismatch),
+			wantKid:     s.kid,
+			errContains: `signer "someone.else"`,
+		},
+		{
+			name:        "wrong-name verifying line rejects after an earlier correct line",
+			note:        signedNote(body, validLine, wrongNameLine),
 			wantSigErr:  ptr(SigErrIssuerMismatch),
 			wantKid:     s.kid,
 			errContains: `signer "someone.else"`,
