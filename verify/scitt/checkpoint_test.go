@@ -512,24 +512,19 @@ func TestCheckpointCovers(t *testing.T) {
 			receipt: &VerifiedReceipt{TreeSize: 42, RootHash: root},
 		},
 		{
-			name:    "receipt from a smaller tree",
-			receipt: &VerifiedReceipt{TreeSize: 41, RootHash: root},
+			name:    "receipt minted at size 41 and returned unchanged after the log advanced to 42",
+			receipt: &VerifiedReceipt{TreeSize: 41, RootHash: otherRoot},
 			wantErr: ptr(CheckpointErrSizeMismatch),
 		},
 		{
-			name:    "receipt from a larger tree",
-			receipt: &VerifiedReceipt{TreeSize: 43, RootHash: root},
+			name:    "checkpoint older than the receipt",
+			receipt: &VerifiedReceipt{TreeSize: 43, RootHash: otherRoot},
 			wantErr: ptr(CheckpointErrSizeMismatch),
 		},
 		{
 			name:    "same size, different root",
 			receipt: &VerifiedReceipt{TreeSize: 42, RootHash: otherRoot},
 			wantErr: ptr(CheckpointErrRootMismatch),
-		},
-		{
-			name:    "different size and root reports the size",
-			receipt: &VerifiedReceipt{TreeSize: 1, RootHash: otherRoot},
-			wantErr: ptr(CheckpointErrSizeMismatch),
 		},
 	}
 

@@ -287,7 +287,8 @@ const (
 	CheckpointErrInvalidSize
 	// CheckpointErrInvalidRootHash indicates the root hash line is not the base64 of 32 bytes.
 	CheckpointErrInvalidRootHash
-	// CheckpointErrSizeMismatch indicates a receipt's tree size differs from the checkpoint's.
+	// CheckpointErrSizeMismatch indicates a receipt's tree size differs from the
+	// checkpoint's. The receipt is not thereby invalid; see Checkpoint.Covers.
 	CheckpointErrSizeMismatch
 	// CheckpointErrRootMismatch indicates a receipt's root differs from the checkpoint's.
 	CheckpointErrRootMismatch

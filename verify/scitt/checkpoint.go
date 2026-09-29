@@ -55,8 +55,19 @@ type Checkpoint struct {
 // in constant time. Callers must separately confirm that the receipt's key
 // names this log: the Name of the key that verified the receipt equals Origin.
 //
-// A checkpoint for a larger tree does not cover the receipt even when the leaf
-// is in that tree. Relating the two heads needs an RFC 6962 section 2.1.2
+// A nil result proves that the log signed a tree head containing the receipt's
+// event at that size, which the receipt's own signature does not establish (see
+// VerifyReceipt). It does not prove that the log is honest or consistent: the
+// checkpoint is signed by the same log that signed the receipt, so a log that
+// shows different trees to different clients is detected only by comparing
+// checkpoints across clients or with a witness.
+//
+// A size mismatch is the normal outcome when the receipt was minted against an
+// earlier checkpoint than the one the caller holds. A log may mint a receipt
+// once, against the first checkpoint that covers its leaf, and return it
+// unchanged afterwards, so the receipt's TreeSize stays fixed while /checkpoint
+// advances. The receipt is not invalid; relating the two heads needs the
+// checkpoint signed at the receipt's TreeSize or an RFC 6962 section 2.1.2
 // consistency proof, which this package does not verify.
 func (c *Checkpoint) Covers(r *VerifiedReceipt) error {
 	if r.TreeSize != c.Size {
@@ -109,13 +120,12 @@ type checkpointSignature struct {
 // and retry; SigErrSignatureInvalid otherwise. Structural problems are reported
 // as *CheckpointError before any signature is examined.
 //
-// RootHash is the root the log signed for a tree of Size leaves. It is
-// comparable with a receipt's VerifiedReceipt.RootHash only when Size equals
-// the receipt's TreeSize and Origin equals the Name of the key that verified
-// the receipt; Covers performs the size and root comparison. /checkpoint serves
-// the latest tree head, so a receipt issued against an earlier tree needs an
-// RFC 6962 section 2.1.2 consistency proof between the two heads, which this
-// package does not verify.
+// A nil error proves that a key the caller trusts signed this tree head. It
+// does not prove that the head extends the log's earlier heads or that other
+// clients are shown the same head; both need consistency proofs or witnesses
+// outside this package. RootHash is comparable with a receipt's RootHash only
+// at equal tree size and when Origin equals the Name of the key that verified
+// the receipt; Covers performs that comparison and states what it proves.
 func VerifyCheckpoint(note []byte, keys KeyLookup) (*Checkpoint, error) {
 	if len(note) > MaxCheckpointNoteSize {
 		return nil, &CheckpointError{
