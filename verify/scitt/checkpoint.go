@@ -154,10 +154,12 @@ func VerifyCheckpoint(note []byte, keys KeyLookup) (*Checkpoint, error) {
 					Message: "checkpoint signature did not verify",
 				}
 			}
-			envelopeOnly = &SignatureError{
-				Type:    SigErrSignatureInvalid,
-				Kid:     s.kid,
-				Message: "only a JWS envelope under the trusted key; no ECDSA signature verified",
+			if envelopeOnly == nil {
+				envelopeOnly = &SignatureError{
+					Type:    SigErrSignatureInvalid,
+					Kid:     s.kid,
+					Message: "only a JWS envelope under the trusted key; no ECDSA signature verified",
+				}
 			}
 			continue
 		}

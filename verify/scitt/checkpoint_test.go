@@ -128,6 +128,7 @@ func TestVerifyCheckpoint(t *testing.T) {
 	wrongNameLine := signatureLine("someone.else", s.kid, s.signASN1(t, body))
 	// A compact-JWS envelope carrying the same key hash, as the log's additional signer emits.
 	jwsLine := signatureLine(origin, s.kid, []byte("eyJhbGciOiJFUzI1NiJ9.eyJvcmlnaW4iOiJsb2cifQ.c2ln"))
+	otherJWSLine := signatureLine(other.name, other.kid, []byte("eyJhbGciOiJFUzI1NiJ9.eyJvcmlnaW4iOiJvdGhlciJ9.c2ln"))
 	tamperedLine := signatureLine(origin, s.kid, s.signASN1(t, checkpointBody(origin, 41, root)))
 
 	rootB64 := base64.StdEncoding.EncodeToString(root[:])
@@ -217,6 +218,14 @@ func TestVerifyCheckpoint(t *testing.T) {
 		{
 			name:        "same-kid envelope alone does not verify",
 			note:        signedNote(body, jwsLine),
+			wantSigErr:  ptr(SigErrSignatureInvalid),
+			wantKid:     s.kid,
+			errContains: "only a JWS envelope",
+		},
+		{
+			name:        "first of two envelope lines under different pinned keys is the one reported",
+			note:        signedNote(body, jwsLine, otherJWSLine),
+			keys:        bothKeys,
 			wantSigErr:  ptr(SigErrSignatureInvalid),
 			wantKid:     s.kid,
 			errContains: "only a JWS envelope",
