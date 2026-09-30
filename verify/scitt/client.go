@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +16,13 @@ type Client interface {
 	FetchReceipt(ctx context.Context, agentID string) ([]byte, error)
 	FetchStatusToken(ctx context.Context, agentID string) ([]byte, error)
 	FetchRootKeys(ctx context.Context) ([]string, error)
+}
+
+// CheckpointFetcher fetches a transparency log's latest signed checkpoint note,
+// the raw text VerifyCheckpoint parses. Client implementations are not required
+// to fetch checkpoints; *HTTPClient and *MockClient implement both interfaces.
+type CheckpointFetcher interface {
+	FetchCheckpoint(ctx context.Context) ([]byte, error)
 }
 
 const (
@@ -155,6 +163,12 @@ func (c *HTTPClient) FetchRootKeys(ctx context.Context) ([]string, error) {
 	return keys, nil
 }
 
+// FetchCheckpoint retrieves the log's latest signed checkpoint note.
+func (c *HTTPClient) FetchCheckpoint(ctx context.Context) ([]byte, error) {
+	u := fmt.Sprintf("%s/checkpoint", c.baseURL)
+	return c.fetchBytes(ctx, u)
+}
+
 func (c *HTTPClient) fetchBytes(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -182,7 +196,11 @@ func (c *HTTPClient) fetchBytes(ctx context.Context, url string) ([]byte, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, mapStatusCodeToError(resp.StatusCode)
+		terr := mapStatusCodeToError(resp.StatusCode)
+		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusTooManyRequests {
+			terr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		}
+		return nil, terr
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -231,4 +249,30 @@ func mapStatusCodeToError(code int) *TransportError {
 			Message:    fmt.Sprintf("unexpected status code %d", code),
 		}
 	}
+}
+
+// maxRetryAfter caps the wait taken from a Retry-After header. A server asking
+// for more is treated as asking for a day.
+const maxRetryAfter = 24 * time.Hour
+
+// parseRetryAfter converts a Retry-After header value (RFC 9110 section 10.2.3)
+// into a wait relative to now, capped at maxRetryAfter. Both the delta-seconds
+// and the HTTP-date forms are accepted; an absent, malformed, or already-elapsed
+// value yields zero.
+func parseRetryAfter(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseUint(header, 10, 64); err == nil {
+		if secs > uint64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
+		return time.Duration(secs) * time.Second
+	}
+	at, err := http.ParseTime(header)
+	if err != nil {
+		return 0
+	}
+	return min(max(at.Sub(now), 0), maxRetryAfter)
 }

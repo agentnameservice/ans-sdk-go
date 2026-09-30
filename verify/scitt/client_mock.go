@@ -10,6 +10,7 @@ type MockClient struct {
 	receipts     map[string][]byte
 	statusTokens map[string][]byte
 	rootKeys     []string
+	checkpoint   []byte
 	errors       map[string]error
 }
 
@@ -40,8 +41,15 @@ func (m *MockClient) WithRootKeys(keys []string) *MockClient {
 	return m
 }
 
+// WithCheckpoint configures the checkpoint note response.
+func (m *MockClient) WithCheckpoint(note []byte) *MockClient {
+	m.checkpoint = note
+	return m
+}
+
 // WithError configures an error for the given key.
-// Use agentID for receipt/token errors, "root-keys" for root key errors.
+// Use agentID for receipt/token errors, "root-keys" for root key errors, and
+// "checkpoint" for checkpoint errors.
 func (m *MockClient) WithError(key string, err error) *MockClient {
 	m.errors[key] = err
 	return m
@@ -89,5 +97,20 @@ func (m *MockClient) FetchRootKeys(_ context.Context) ([]string, error) {
 		Type:       TransportErrNotFound,
 		StatusCode: http.StatusNotFound,
 		Message:    "root keys not found",
+	}
+}
+
+// FetchCheckpoint returns the configured checkpoint note or error.
+func (m *MockClient) FetchCheckpoint(_ context.Context) ([]byte, error) {
+	if err, ok := m.errors["checkpoint"]; ok {
+		return nil, err
+	}
+	if m.checkpoint != nil {
+		return m.checkpoint, nil
+	}
+	return nil, &TransportError{
+		Type:       TransportErrNotFound,
+		StatusCode: http.StatusNotFound,
+		Message:    "checkpoint not found",
 	}
 }
