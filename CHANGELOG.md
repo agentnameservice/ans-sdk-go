@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.19](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.18...v0.1.19) (2026-10-01)
+
+
+### Features
+
+* **scitt:** fetch and verify the log's signed checkpoint ([#86](https://github.com/agentnameservice/ans-sdk-go/issues/86)) ([3333efb](https://github.com/agentnameservice/ans-sdk-go/commit/3333efbd31b6cbfefd7d748d242309af03036427))
+
+
+### Miscellaneous
+
+* **deps:** bump github.com/fxamacker/cbor/v2 from 2.9.3 to 2.9.4 ([#85](https://github.com/agentnameservice/ans-sdk-go/issues/85)) ([0cdacf1](https://github.com/agentnameservice/ans-sdk-go/commit/0cdacf1d56ce228e4503d1995d840d07771efc32))
+
 ## [0.1.18](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.17...v0.1.18) (2026-09-17)
 
 
