@@ -9,23 +9,21 @@ import (
 
 func TestLoad(t *testing.T) {
 	tests := []struct {
-		name           string
-		setup          func()
-		wantBaseURL    string
-		wantAPIKey     string
-		wantOAuthToken string
-		wantVerbose    bool
-		wantJSON       bool
+		name                string
+		setup               func()
+		wantBaseURL         string
+		wantAPIKey          string
+		wantToken           string
+		wantTokenDeprecated bool
+		wantLegacyIgnored   bool
+		wantVerbose         bool
+		wantJSON            bool
 	}{
 		{
 			name: "default values",
 			setup: func() {
 				viper.Reset()
 			},
-			wantBaseURL: "",
-			wantAPIKey:  "",
-			wantVerbose: false,
-			wantJSON:    false,
 		},
 		{
 			name: "with all values set",
@@ -33,15 +31,15 @@ func TestLoad(t *testing.T) {
 				viper.Reset()
 				viper.Set("base-url", "https://api.example.com")
 				viper.Set("api-key", "test-key:test-secret")
-				viper.Set("oauth-token", "test-oauth-token")
+				viper.Set("token", "test-token")
 				viper.Set("verbose", true)
 				viper.Set("json", true)
 			},
-			wantBaseURL:    "https://api.example.com",
-			wantAPIKey:     "test-key:test-secret",
-			wantOAuthToken: "test-oauth-token",
-			wantVerbose:    true,
-			wantJSON:       true,
+			wantBaseURL: "https://api.example.com",
+			wantAPIKey:  "test-key:test-secret",
+			wantToken:   "test-token",
+			wantVerbose: true,
+			wantJSON:    true,
 		},
 		{
 			name: "with partial values",
@@ -51,25 +49,67 @@ func TestLoad(t *testing.T) {
 				viper.Set("verbose", true)
 			},
 			wantBaseURL: "https://api.test.com",
-			wantAPIKey:  "",
 			wantVerbose: true,
-			wantJSON:    false,
 		},
 		{
-			name: "oauth token is trimmed",
+			name: "token is trimmed",
 			setup: func() {
 				viper.Reset()
-				viper.Set("oauth-token", "  padded-token\n")
+				viper.Set("token", "  padded-token\n")
 			},
-			wantOAuthToken: "padded-token",
+			wantToken: "padded-token",
 		},
 		{
-			name: "whitespace-only oauth token is treated as unset",
+			name: "whitespace-only token is treated as unset",
+			setup: func() {
+				viper.Reset()
+				viper.Set("token", "   \t\n")
+			},
+		},
+		{
+			name: "deprecated oauth-token key is used when token is unset",
+			setup: func() {
+				viper.Reset()
+				viper.Set("oauth-token", "legacy-token")
+			},
+			wantToken:           "legacy-token",
+			wantTokenDeprecated: true,
+		},
+		{
+			name: "token key wins over a different deprecated value and flags the collision",
+			setup: func() {
+				viper.Reset()
+				viper.Set("token", "new-token")
+				viper.Set("oauth-token", "legacy-token")
+			},
+			wantToken:         "new-token",
+			wantLegacyIgnored: true,
+		},
+		{
+			name: "identical value under both names is not a collision",
+			setup: func() {
+				viper.Reset()
+				viper.Set("token", "same-token")
+				viper.Set("oauth-token", " same-token ")
+			},
+			wantToken: "same-token",
+		},
+		{
+			name: "whitespace-only token falls back to the deprecated key and is trimmed",
+			setup: func() {
+				viper.Reset()
+				viper.Set("token", "  ")
+				viper.Set("oauth-token", "  legacy-token\n")
+			},
+			wantToken:           "legacy-token",
+			wantTokenDeprecated: true,
+		},
+		{
+			name: "whitespace-only deprecated token is treated as unset",
 			setup: func() {
 				viper.Reset()
 				viper.Set("oauth-token", "   \t\n")
 			},
-			wantOAuthToken: "",
 		},
 	}
 
@@ -92,8 +132,14 @@ func TestLoad(t *testing.T) {
 			if cfg.APIKey != tt.wantAPIKey {
 				t.Errorf("APIKey = %q, want %q", cfg.APIKey, tt.wantAPIKey)
 			}
-			if cfg.OAuthToken != tt.wantOAuthToken {
-				t.Errorf("OAuthToken = %q, want %q", cfg.OAuthToken, tt.wantOAuthToken)
+			if cfg.Token != tt.wantToken {
+				t.Errorf("Token = %q, want %q", cfg.Token, tt.wantToken)
+			}
+			if cfg.TokenFromDeprecatedName != tt.wantTokenDeprecated {
+				t.Errorf("TokenFromDeprecatedName = %v, want %v", cfg.TokenFromDeprecatedName, tt.wantTokenDeprecated)
+			}
+			if cfg.DeprecatedTokenIgnored != tt.wantLegacyIgnored {
+				t.Errorf("DeprecatedTokenIgnored = %v, want %v", cfg.DeprecatedTokenIgnored, tt.wantLegacyIgnored)
 			}
 			if cfg.Verbose != tt.wantVerbose {
 				t.Errorf("Verbose = %v, want %v", cfg.Verbose, tt.wantVerbose)
@@ -107,31 +153,34 @@ func TestLoad(t *testing.T) {
 
 func TestRequireCredentials(t *testing.T) {
 	tests := []struct {
-		name      string
-		cfg       *Config
-		wantErr   bool
-		wantInMsg []string
+		name         string
+		cfg          *Config
+		wantErr      bool
+		wantInMsg    []string
+		wantNotInMsg []string
 	}{
 		{
 			name:    "neither credential set",
 			cfg:     &Config{},
 			wantErr: true,
 			wantInMsg: []string{
-				"--oauth-token", "ANS_OAUTH_TOKEN",
+				"--token", "ANS_TOKEN", "Personal Access Token",
 				"--api-key", "ANS_API_KEY",
 			},
+			// Guidance must steer users to the current names only.
+			wantNotInMsg: []string{"--oauth-token", "ANS_OAUTH_TOKEN"},
 		},
 		{
 			name: "API key only",
 			cfg:  &Config{APIKey: "key:secret"},
 		},
 		{
-			name: "OAuth token only",
-			cfg:  &Config{OAuthToken: "tok"},
+			name: "token only",
+			cfg:  &Config{Token: "tok"},
 		},
 		{
 			name: "both credentials set",
-			cfg:  &Config{APIKey: "key:secret", OAuthToken: "tok"},
+			cfg:  &Config{APIKey: "key:secret", Token: "tok"},
 		},
 	}
 
@@ -152,6 +201,11 @@ func TestRequireCredentials(t *testing.T) {
 			for _, want := range tt.wantInMsg {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("RequireCredentials() error = %q, want it to mention %q", err.Error(), want)
+				}
+			}
+			for _, notWant := range tt.wantNotInMsg {
+				if strings.Contains(err.Error(), notWant) {
+					t.Errorf("RequireCredentials() error = %q, must not mention deprecated name %q", err.Error(), notWant)
 				}
 			}
 		})

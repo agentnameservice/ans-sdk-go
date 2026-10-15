@@ -35,13 +35,13 @@ export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
 ```
 
-Or authenticate with an OAuth 2.0 access token instead of an API key:
+Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key:
 
 ```bash
-export ANS_OAUTH_TOKEN="your-oauth-token"
+export ANS_TOKEN="your-token"
 ```
 
-The API key remains the default path; when both are set, the OAuth token takes precedence.
+The API key remains the default path; when both are set, the bearer token takes precedence. `ANS_OAUTH_TOKEN` and `--oauth-token` still work as deprecated aliases of `ANS_TOKEN` and `--token`; the current names always win when both are set, and the CLI prints a note to stderr whenever a deprecated name is used or carries a different token.
 
 ### Register an agent (end-to-end)
 
@@ -252,7 +252,7 @@ func main() {
 ### Authentication Methods
 - ✅ JWT Bearer Token
 - ✅ API Key (Public gateway endpoints)
-- ✅ OAuth 2.0 Bearer Token (static via `WithBearerToken`, refreshable via `WithTokenSource`)
+- ✅ Bearer Token — Personal Access Token (PAT) or OAuth 2.0 access token (static via `WithBearerToken`, refreshable via `WithTokenSource`)
 - ✅ Custom HTTP Client support
 
 ## Configuration
@@ -278,7 +278,7 @@ client, err := ans.NewClient(
 | `WithBaseURL(url string)` | Set the API base URL | `ans.WithBaseURL("https://api.godaddy.com")` |
 | `WithJWT(token string)` | Set JWT authentication | `ans.WithJWT("eyJhbGciOi...")` |
 | `WithAPIKey(key, secret string)` | Set API key authentication (public gateway) | `ans.WithAPIKey("key", "secret")` |
-| `WithBearerToken(token string)` | Set a static OAuth 2.0 bearer token | `ans.WithBearerToken("your-oauth-token")` |
+| `WithBearerToken(token string)` | Set a static bearer token (a PAT or OAuth 2.0 access token) | `ans.WithBearerToken("your-token")` |
 | `WithTokenSource(ts ans.TokenSource)` | Set a refreshable OAuth 2.0 token source | `ans.WithTokenSource(mySource)` |
 | `WithTimeout(duration time.Duration)` | Set HTTP client timeout | `ans.WithTimeout(60 * time.Second)` |
 | `WithVerbose(verbose bool)` | Enable verbose logging | `ans.WithVerbose(true)` |
@@ -291,14 +291,14 @@ Auth options are last-wins: applying any of `WithJWT`, `WithAPIKey`, `WithBearer
 
 `WithAPIVersion(ans.APIVersionV2)` routes the agent-lifecycle and certificate methods through the RA's V2 lane (`/v2/ans/agents/...`). The request/response shapes are identical to V1; the lane matters because **DNS discovery profiles** are a V2 feature: on V2 the `AgentRegistrationRequest.DiscoveryProfiles` field selects which DNS record families the RA asks the operator to publish (`models.DiscoveryProfileANSDNSAID` — RFC 9460 SVCB records, the server default — and/or `models.DiscoveryProfileANSTXT`, the legacy `_ans` TXT shape). The V1 lane ignores the field and always emits the ANS_TXT family. The equivalent CLI switches are `--api-version v2` (also `ANS_API_VERSION`) and `register --discovery-profiles ANS_DNSAID,ANS_TXT`.
 
-### OAuth 2.0 Bearer Tokens
+### Bearer Tokens (PATs and OAuth 2.0)
 
-For a static access token, use `WithBearerToken` — every request sends `Authorization: Bearer <token>`:
+For a static token — a Personal Access Token (PAT) or an OAuth 2.0 access token — use `WithBearerToken`; every request sends `Authorization: Bearer <token>`:
 
 ```go
 client, err := ans.NewClient(
     ans.WithBaseURL("https://api.godaddy.com"),
-    ans.WithBearerToken(os.Getenv("ANS_OAUTH_TOKEN")),
+    ans.WithBearerToken(os.Getenv("ANS_TOKEN")),
 )
 ```
 

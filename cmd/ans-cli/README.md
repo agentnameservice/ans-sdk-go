@@ -98,15 +98,16 @@ The CLI can be configured using environment variables or command-line flags:
 
 | Environment Variable | Flag | Description | Default |
 |---------------------|------|-------------|---------|
-| `ANS_API_KEY` | `--api-key` | API key for authentication | (required unless `ANS_OAUTH_TOKEN` is set) |
-| `ANS_OAUTH_TOKEN` | `--oauth-token` | OAuth 2.0 bearer token; takes precedence over the API key | (unset) |
+| `ANS_API_KEY` | `--api-key` | API key (`key:secret`) for authentication | (required unless `ANS_TOKEN` is set) |
+| `ANS_TOKEN` | `--token` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token; takes precedence over the API key | (unset) |
+| `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated alias of `ANS_TOKEN` / `--token`; prints a migration note and loses to the current names when both are set | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
 
-Prefer the environment variables over the `--api-key`/`--oauth-token` flags — command-line arguments are visible to other local processes (`ps`) and are saved in shell history. When both credentials are configured, the CLI prints a note to stderr saying the OAuth token is being used.
+Prefer the environment variables over the `--api-key`/`--token` flags — command-line arguments are visible to other local processes (`ps`) and are saved in shell history. When both credentials are configured, the CLI prints a note to stderr saying the bearer token is being used; if a deprecated name carries a different token than `ANS_TOKEN`/`--token`, the current name wins and the CLI says so.
 
-OAuth access tokens expire; for long-lived automation and `events --follow`, prefer `ANS_API_KEY` or refresh the token before each invocation.
+Bearer tokens can expire; for long-lived automation and `events --follow`, use a credential that outlives the run or refresh the token before each invocation.
 
 ## Commands
 
@@ -502,9 +503,9 @@ export ANS_API_KEY="your-api-key"
 ans-cli search --name "Analyzer"
 ```
 
-### Authenticate with an OAuth 2.0 bearer token
+### Authenticate with a bearer token (PAT or OAuth 2.0)
 ```bash
-export ANS_OAUTH_TOKEN="your-oauth-token"
+export ANS_TOKEN="your-token"
 ans-cli status 550e8400-e29b-41d4-a716-446655440000
 ```
 

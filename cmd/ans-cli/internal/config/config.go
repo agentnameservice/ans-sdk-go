@@ -9,12 +9,22 @@ import (
 
 // Config represents application configuration
 type Config struct {
-	BaseURL    string
-	APIKey     string //nolint:gosec // G117 - config struct field definition, not logged
-	OAuthToken string //nolint:gosec // G117 - config struct field definition, not logged
-	APIVersion string
-	Verbose    bool
-	JSON       bool
+	BaseURL string
+	APIKey  string //nolint:gosec // G117 - config struct field definition, not logged
+	// Token is the bearer credential — a Personal Access Token or an OAuth 2.0
+	// access token — sent verbatim as "Authorization: Bearer <token>".
+	Token string
+	// TokenFromDeprecatedName reports that Token was supplied through the
+	// legacy --oauth-token/ANS_OAUTH_TOKEN names, so the CLI can print a
+	// one-line migration note.
+	TokenFromDeprecatedName bool
+	// DeprecatedTokenIgnored reports that the legacy names carried a
+	// different value than --token/ANS_TOKEN and lost, so the CLI can say
+	// which credential it is using.
+	DeprecatedTokenIgnored bool
+	APIVersion             string
+	Verbose                bool
+	JSON                   bool
 }
 
 // Load loads configuration from environment and flags
@@ -24,13 +34,25 @@ func Load() (*Config, error) {
 		APIKey:  viper.GetString("api-key"),
 		// Trimmed at the boundary so a padded or whitespace-only token from
 		// env plumbing is treated as unset and never wins precedence.
-		OAuthToken: strings.TrimSpace(viper.GetString("oauth-token")),
+		Token: strings.TrimSpace(viper.GetString("token")),
 		// Normalized here so "V2" from env plumbing selects the lane;
 		// value validation happens in cmd.createClient where the SDK
 		// option can reject with proper guidance.
 		APIVersion: strings.ToLower(strings.TrimSpace(viper.GetString("api-version"))),
 		Verbose:    viper.GetBool("verbose"),
 		JSON:       viper.GetBool("json"),
+	}
+
+	// The current names always win, even over a typed --oauth-token when
+	// ANS_TOKEN is exported; the legacy value is used only when they resolve
+	// to nothing, and reported when it would have selected another identity.
+	legacy := strings.TrimSpace(viper.GetString("oauth-token"))
+	switch {
+	case cfg.Token == "":
+		cfg.Token = legacy
+		cfg.TokenFromDeprecatedName = legacy != ""
+	case legacy != "" && legacy != cfg.Token:
+		cfg.DeprecatedTokenIgnored = true
 	}
 
 	// Default the API version exactly once, here: an explicit
@@ -44,16 +66,16 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// ErrNoCredentials is returned when neither an OAuth token nor an API key is
+// ErrNoCredentials is returned when neither a bearer token nor an API key is
 // configured. It is the single source of truth for the guidance message —
 // cmd.authOption returns it directly for its no-credentials branch.
-var ErrNoCredentials = errors.New("OAuth token or API key is required. Set --oauth-token/ANS_OAUTH_TOKEN or --api-key/ANS_API_KEY")
+var ErrNoCredentials = errors.New("a bearer token or API key is required. Set --token/ANS_TOKEN (Personal Access Token or OAuth 2.0 access token) or --api-key/ANS_API_KEY (key:secret)")
 
-// RequireCredentials returns ErrNoCredentials when neither an OAuth token nor
+// RequireCredentials returns ErrNoCredentials when neither a bearer token nor
 // an API key is configured. Commands call this before any other validation so
 // users get clear guidance instead of a late failure.
 func (c *Config) RequireCredentials() error {
-	if c.OAuthToken == "" && c.APIKey == "" {
+	if c.Token == "" && c.APIKey == "" {
 		return ErrNoCredentials
 	}
 	return nil

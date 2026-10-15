@@ -16,18 +16,24 @@ const (
 )
 
 // createClient creates an ANS client using the configured credentials.
-// The OAuth bearer token takes precedence over the API key when both are set.
+// The bearer token takes precedence over the API key when both are set.
 func createClient(cfg *config.Config) (*ans.Client, error) {
 	authOpt, method, err := authOption(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// The ambiguous both-set configuration always gets a notice (method name
-	// only, never the token) so an unexpected 401 is diagnosable without -v.
-	// Diagnostics go to stderr so JSON output on stdout stays parseable.
-	if cfg.OAuthToken != "" && cfg.APIKey != "" {
-		fmt.Fprintln(os.Stderr, "Note: both an OAuth token and an API key are configured; using the OAuth bearer token")
+	// Diagnostics go to stderr so JSON output on stdout stays parseable, and
+	// they name the credential method only (never the value) so an
+	// unexpected 401 is diagnosable without -v.
+	if cfg.TokenFromDeprecatedName {
+		fmt.Fprintln(os.Stderr, "Note: --oauth-token and ANS_OAUTH_TOKEN are deprecated; use --token or ANS_TOKEN")
+	}
+	if cfg.DeprecatedTokenIgnored {
+		fmt.Fprintln(os.Stderr, "Note: both --token/ANS_TOKEN and the deprecated --oauth-token/ANS_OAUTH_TOKEN are set; using --token/ANS_TOKEN")
+	}
+	if cfg.Token != "" && cfg.APIKey != "" {
+		fmt.Fprintln(os.Stderr, "Note: both a bearer token and an API key are configured; using the bearer token")
 	}
 	if cfg.Verbose {
 		fmt.Fprintf(os.Stderr, "Using %s authentication\n", method)
@@ -47,11 +53,11 @@ func createClient(cfg *config.Config) (*ans.Client, error) {
 }
 
 // authOption selects the credential to use and returns the SDK option, a
-// display name for auth-method notices, and any error. The OAuth token wins
+// display name for auth-method notices, and any error. The bearer token wins
 // over the API key when both are set.
 func authOption(cfg *config.Config) (ans.Option, string, error) {
-	if cfg.OAuthToken != "" {
-		return ans.WithBearerToken(cfg.OAuthToken), "OAuth bearer token", nil
+	if cfg.Token != "" {
+		return ans.WithBearerToken(cfg.Token), "bearer token", nil
 	}
 
 	if cfg.APIKey == "" {
@@ -63,7 +69,7 @@ func authOption(cfg *config.Config) (ans.Option, string, error) {
 	// API key format: key:secret
 	parts := strings.SplitN(cfg.APIKey, ":", apiKeyParts)
 	if len(parts) != apiKeyParts {
-		return nil, "", errors.New("invalid API key format, expected key:secret")
+		return nil, "", errors.New("invalid API key format, expected key:secret (for a Personal Access Token, set --token/ANS_TOKEN instead)")
 	}
 
 	return ans.WithAPIKey(parts[0], parts[1]), "API key", nil
