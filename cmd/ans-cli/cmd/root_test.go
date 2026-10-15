@@ -244,8 +244,10 @@ func TestRootCmdCredentialFlagBindings(t *testing.T) {
 
 // TestRootCmdTokenFlagParsing drives the credential inputs through cobra's
 // own argument parsing and pins the precedence contract: explicit flags beat
-// environment variables, the hidden alias still works, and two explicit token
-// flags are rejected rather than silently ordered.
+// environment variables, the hidden alias still works, two explicit token
+// flags are rejected rather than silently ordered, and an explicitly empty
+// --token-file is rejected before any request instead of falling back to an
+// exported credential.
 func TestRootCmdTokenFlagParsing(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -280,15 +282,23 @@ func TestRootCmdTokenFlagParsing(t *testing.T) {
 			args:      []string{"--oauth-token", "legacy-tok"},
 			wantErr:   "cannot both be set",
 		},
+		{
+			name:     "explicitly empty --token-file is rejected and sends no request",
+			envToken: "env-tok",
+			args:     []string{"--token-file", ""},
+			wantErr:  "empty path",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var mu sync.Mutex
 			var gotAuth string
+			var requests int
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				gotAuth = r.Header.Get("Authorization")
+				requests++
 				mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(&models.AgentDetails{AgentID: "agent-123"})
@@ -324,6 +334,12 @@ func TestRootCmdTokenFlagParsing(t *testing.T) {
 			if tt.wantErr != "" {
 				if execErr == nil || !strings.Contains(execErr.Error(), tt.wantErr) {
 					t.Fatalf("Execute(%v) error = %v, want substring %q", args, execErr, tt.wantErr)
+				}
+				mu.Lock()
+				sent := requests
+				mu.Unlock()
+				if sent != 0 {
+					t.Errorf("Execute(%v) sent %d request(s) before failing, want none", args, sent)
 				}
 				return
 			}

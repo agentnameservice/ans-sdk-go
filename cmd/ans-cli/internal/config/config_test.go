@@ -149,6 +149,23 @@ func TestLoad(t *testing.T) {
 			wantToken: "stdin-token",
 		},
 		{
+			name: "explicitly empty --token-file is rejected instead of falling back to ANS_TOKEN or the API key",
+			setup: func(*testing.T) {
+				viper.Set("token-file", "")
+				viper.Set("token", "env-token")
+				viper.Set("api-key", "key:secret")
+			},
+			wantErr: "--token-file: empty path",
+		},
+		{
+			name: "whitespace-only --token-file is rejected",
+			setup: func(*testing.T) {
+				viper.Set("token-file", "  ")
+				viper.Set("token", "env-token")
+			},
+			wantErr: "--token-file: empty path",
+		},
+		{
 			name: "--token-file and --oauth-token together are rejected",
 			setup: func(t *testing.T) {
 				viper.Set("token-file", writeTokenFile(t, "file-token"))

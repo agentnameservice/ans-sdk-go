@@ -74,6 +74,13 @@ func load(stdin io.Reader) (*Config, error) {
 // whitespace-only token from env plumbing is treated as unset.
 func (c *Config) resolveToken(stdin io.Reader) error {
 	tokenFile := viper.GetString("token-file")
+	// An explicitly empty --token-file is a scripting mistake, typically
+	// --token-file "$TOKEN_FILE" with the variable unset. Falling back to an
+	// exported credential would run the command under another identity, and
+	// could send that credential to whatever --base-url the script targets.
+	if viper.IsSet("token-file") && strings.TrimSpace(tokenFile) == "" {
+		return errors.New(`--token-file: empty path; pass a file, "-" for stdin, or omit the flag to use ANS_TOKEN`)
+	}
 	legacyFlag := strings.TrimSpace(viper.GetString("oauth-token"))
 	envToken := strings.TrimSpace(viper.GetString("token"))
 	legacyEnv := strings.TrimSpace(viper.GetString("oauth-token-env"))
