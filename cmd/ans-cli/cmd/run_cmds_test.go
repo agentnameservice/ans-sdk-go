@@ -26,12 +26,14 @@ import (
 )
 
 // setupViperForTest sets viper values needed for config.Load() and registers cleanup.
-// oauth-token is explicitly zeroed so a developer's exported ANS_OAUTH_TOKEN
-// cannot leak into tests through viper's env binding.
+// Every token key is explicitly zeroed so a developer's exported ANS_TOKEN or
+// ANS_OAUTH_TOKEN cannot leak into tests through viper's env bindings.
 func setupViperForTest(t *testing.T, serverURL string) {
 	t.Helper()
 	viper.Set("api-key", "testkey:testsecret")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", serverURL)
 	viper.Set("api-version", "v1")
 	viper.Set("verbose", false)
@@ -86,7 +88,9 @@ func TestRunStatus_JSONMode(t *testing.T) {
 
 func TestRunStatus_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -161,7 +165,9 @@ func TestRunSearchWithParams_JSONMode(t *testing.T) {
 
 func TestRunSearchWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -264,7 +270,9 @@ func TestRunResolve_JSONMode(t *testing.T) {
 
 func TestRunResolve_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -335,7 +343,9 @@ func TestRunRevoke_JSONMode(t *testing.T) {
 
 func TestRunRevoke_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -415,7 +425,9 @@ func TestRunCsrStatus_JSONMode(t *testing.T) {
 
 func TestRunCsrStatus_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -471,7 +483,9 @@ func TestRunVerifyACME_JSONMode(t *testing.T) {
 
 func TestRunVerifyACME_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -527,7 +541,9 @@ func TestRunVerifyDNS_JSONMode(t *testing.T) {
 
 func TestRunVerifyDNS_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -666,7 +682,9 @@ func TestRunSubmitIdentityCSR_JSONMode(t *testing.T) {
 
 func TestRunSubmitIdentityCSR_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -785,7 +803,9 @@ func TestRunEventsWithParams_JSONMode(t *testing.T) {
 
 func TestRunEventsWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -929,7 +949,9 @@ func TestRunBadgeWithParams_ServerError(t *testing.T) {
 
 func TestRunRegisterWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1228,7 +1250,7 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 	return <-outCh, <-errCh
 }
 
-func TestRunStatus_OAuthToken(t *testing.T) {
+func TestRunStatus_Token(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1241,14 +1263,14 @@ func TestRunStatus_OAuthToken(t *testing.T) {
 	defer server.Close()
 
 	viper.Set("api-key", "")
-	viper.Set("oauth-token", "tok")
+	viper.Set("token", "tok")
 	viper.Set("base-url", server.URL)
 	t.Cleanup(func() { viper.Reset() })
 
 	cmd := buildStatusCmd()
 	cmd.SetArgs([]string{"agent-123"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("runStatus() with OAuth token error = %v", err)
+		t.Fatalf("runStatus() with bearer token error = %v", err)
 	}
 
 	mu.Lock()
@@ -1258,7 +1280,7 @@ func TestRunStatus_OAuthToken(t *testing.T) {
 	}
 }
 
-func TestRunStatus_OAuthPrecedence(t *testing.T) {
+func TestRunStatus_TokenPrecedence(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1271,7 +1293,7 @@ func TestRunStatus_OAuthPrecedence(t *testing.T) {
 	defer server.Close()
 
 	setupViperForTest(t, server.URL)
-	viper.Set("oauth-token", "secret-oauth-value")
+	viper.Set("token", "secret-token-value")
 	viper.Set("json", true)
 
 	stdout, stderr := captureOutput(t, func() {
@@ -1285,14 +1307,14 @@ func TestRunStatus_OAuthPrecedence(t *testing.T) {
 	mu.Lock()
 	gotAuthCopy := gotAuth
 	mu.Unlock()
-	if gotAuthCopy != "Bearer secret-oauth-value" {
-		t.Errorf("Authorization header = %q, want %q (OAuth must win over API key)", gotAuthCopy, "Bearer secret-oauth-value")
+	if gotAuthCopy != "Bearer secret-token-value" {
+		t.Errorf("Authorization header = %q, want %q (bearer token must win over API key)", gotAuthCopy, "Bearer secret-token-value")
 	}
 
-	if !strings.Contains(stderr, "using the OAuth bearer token") {
+	if !strings.Contains(stderr, "using the bearer token") {
 		t.Errorf("stderr = %q, want the both-credentials notice", stderr)
 	}
-	if strings.Contains(stderr, "secret-oauth-value") {
+	if strings.Contains(stderr, "secret-token-value") {
 		t.Errorf("stderr leaks the token value: %q", stderr)
 	}
 
@@ -1302,7 +1324,7 @@ func TestRunStatus_OAuthPrecedence(t *testing.T) {
 	}
 }
 
-func TestRunStatus_OAuthExpired401(t *testing.T) {
+func TestRunStatus_TokenExpired401(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -1315,7 +1337,7 @@ func TestRunStatus_OAuthExpired401(t *testing.T) {
 	defer server.Close()
 
 	viper.Set("api-key", "")
-	viper.Set("oauth-token", "expired-tok")
+	viper.Set("token", "expired-tok")
 	viper.Set("base-url", server.URL)
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1335,7 +1357,9 @@ func TestRunStatus_OAuthExpired401(t *testing.T) {
 // credentials AND an invalid reason, the credential error must win.
 func TestRunRevoke_CredentialErrorBeforeArgValidation(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1343,20 +1367,33 @@ func TestRunRevoke_CredentialErrorBeforeArgValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("runRevoke() expected error")
 	}
-	if !strings.Contains(err.Error(), "OAuth token or API key is required") {
+	if !strings.Contains(err.Error(), "bearer token or API key is required") {
 		t.Errorf("error = %q, want the credentials error before reason validation", err.Error())
 	}
 }
 
-func TestInitConfig_OAuthTokenEnv(t *testing.T) {
-	viper.Reset()
-	t.Setenv("ANS_OAUTH_TOKEN", "env-tok")
-	t.Cleanup(func() { viper.Reset() })
+func TestInitConfig_TokenEnvBindings(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVar   string
+		viperKey string
+	}{
+		{name: "ANS_TOKEN binds to the token key", envVar: "ANS_TOKEN", viperKey: "token"},
+		{name: "ANS_OAUTH_TOKEN binds to its own env-only key", envVar: "ANS_OAUTH_TOKEN", viperKey: "oauth-token-env"},
+	}
 
-	initConfig()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv(tt.envVar, "env-tok")
+			t.Cleanup(func() { viper.Reset() })
 
-	if got := viper.GetString("oauth-token"); got != "env-tok" {
-		t.Errorf("viper oauth-token = %q, want %q (ANS_OAUTH_TOKEN env binding)", got, "env-tok")
+			initConfig()
+
+			if got := viper.GetString(tt.viperKey); got != "env-tok" {
+				t.Errorf("viper %q = %q, want %q (%s env binding)", tt.viperKey, got, "env-tok", tt.envVar)
+			}
+		})
 	}
 }
 
@@ -1422,7 +1459,7 @@ func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
 
 	// Captures are written in the handler goroutine and read from the
 	// test goroutine; the mutex is the happens-before edge (mirrors
-	// TestRunStatus_OAuthToken).
+	// TestRunStatus_Token).
 	var mu sync.Mutex
 	var gotPath string
 	var gotBody []byte
@@ -1685,5 +1722,111 @@ func TestRunSubmitIdentityCSR_SkipPreflight(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("registry calls = %d, want 1 when preflight is skipped", calls)
+	}
+}
+
+// TestRunStatus_DeprecatedTokenName pins the migration contract for the
+// deprecated --oauth-token flag and ANS_OAUTH_TOKEN variable: both still
+// authenticate, the explicit flag beats any environment value, ANS_TOKEN
+// beats ANS_OAUTH_TOKEN, every deprecated use or collision prints exactly
+// one note, and no note ever echoes a token.
+func TestRunStatus_DeprecatedTokenName(t *testing.T) {
+	tests := []struct {
+		name       string
+		envToken   string // ANS_TOKEN
+		legacyEnv  string // ANS_OAUTH_TOKEN
+		legacyFlag string // --oauth-token
+		wantAuth   string
+		wantNote   string // substring of the single expected stderr note; empty means no note
+	}{
+		{
+			name:       "deprecated flag alone authenticates with a deprecation note",
+			legacyFlag: "legacy-tok",
+			wantAuth:   "Bearer legacy-tok",
+			wantNote:   "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:      "deprecated variable alone authenticates with a deprecation note",
+			legacyEnv: "legacy-tok",
+			wantAuth:  "Bearer legacy-tok",
+			wantNote:  "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:       "deprecated flag beats an exported ANS_TOKEN",
+			envToken:   "env-tok",
+			legacyFlag: "legacy-tok",
+			wantAuth:   "Bearer legacy-tok",
+			wantNote:   "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:      "ANS_TOKEN wins over a different ANS_OAUTH_TOKEN and says so",
+			envToken:  "env-tok",
+			legacyEnv: "legacy-tok",
+			wantAuth:  "Bearer env-tok",
+			wantNote:  "using ANS_TOKEN",
+		},
+		{
+			name:      "identical values under both variables need no note",
+			envToken:  "same-tok",
+			legacyEnv: "same-tok",
+			wantAuth:  "Bearer same-tok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var gotAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				gotAuth = r.Header.Get("Authorization")
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(&models.AgentDetails{AgentID: "agent-123"})
+			}))
+			defer server.Close()
+
+			viper.Set("api-key", "")
+			viper.Set("token", tt.envToken)
+			viper.Set("oauth-token-env", tt.legacyEnv)
+			viper.Set("oauth-token", tt.legacyFlag)
+			viper.Set("base-url", server.URL)
+			t.Cleanup(func() { viper.Reset() })
+
+			_, stderr := captureOutput(t, func() {
+				cmd := buildStatusCmd()
+				cmd.SetArgs([]string{"agent-123"})
+				if err := cmd.Execute(); err != nil {
+					t.Errorf("runStatus() error = %v", err)
+				}
+			})
+
+			mu.Lock()
+			gotAuthCopy := gotAuth
+			mu.Unlock()
+			if gotAuthCopy != tt.wantAuth {
+				t.Errorf("Authorization header = %q, want %q", gotAuthCopy, tt.wantAuth)
+			}
+
+			assertSingleNote(t, stderr, tt.wantNote)
+			for _, secret := range []string{tt.envToken, tt.legacyEnv, tt.legacyFlag} {
+				if secret != "" && strings.Contains(stderr, secret) {
+					t.Errorf("stderr leaks a token value: %q", stderr)
+				}
+			}
+		})
+	}
+}
+
+// assertSingleNote checks that stderr carries exactly one "Note:" line
+// containing wantNote, or none at all when wantNote is empty.
+func assertSingleNote(t *testing.T, stderr, wantNote string) {
+	t.Helper()
+	notes := strings.Count(stderr, "Note:")
+	switch {
+	case wantNote == "" && notes != 0:
+		t.Errorf("stderr = %q, want no note", stderr)
+	case wantNote != "" && (notes != 1 || !strings.Contains(stderr, wantNote)):
+		t.Errorf("stderr = %q, want exactly one note containing %q", stderr, wantNote)
 	}
 }
