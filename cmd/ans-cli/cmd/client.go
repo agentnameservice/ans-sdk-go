@@ -27,10 +27,10 @@ func createClient(cfg *config.Config) (*ans.Client, error) {
 	// they name the credential method only (never the value) so an
 	// unexpected 401 is diagnosable without -v.
 	if cfg.TokenFromDeprecatedName {
-		fmt.Fprintln(os.Stderr, "Note: --oauth-token and ANS_OAUTH_TOKEN are deprecated; use --token or ANS_TOKEN")
+		fmt.Fprintln(os.Stderr, "Note: --oauth-token and ANS_OAUTH_TOKEN are deprecated; use ANS_TOKEN or --token-file")
 	}
 	if cfg.DeprecatedTokenIgnored {
-		fmt.Fprintln(os.Stderr, "Note: both --token/ANS_TOKEN and the deprecated --oauth-token/ANS_OAUTH_TOKEN are set; using --token/ANS_TOKEN")
+		fmt.Fprintln(os.Stderr, "Note: both ANS_TOKEN and the deprecated ANS_OAUTH_TOKEN are set; using ANS_TOKEN")
 	}
 	if cfg.Token != "" && cfg.APIKey != "" {
 		fmt.Fprintln(os.Stderr, "Note: both a bearer token and an API key are configured; using the bearer token")
@@ -69,7 +69,7 @@ func authOption(cfg *config.Config) (ans.Option, string, error) {
 	// API key format: key:secret
 	parts := strings.SplitN(cfg.APIKey, ":", apiKeyParts)
 	if len(parts) != apiKeyParts {
-		return nil, "", errors.New("invalid API key format, expected key:secret (for a Personal Access Token, set --token/ANS_TOKEN instead)")
+		return nil, "", errors.New("invalid API key format, expected key:secret (for a Personal Access Token, set ANS_TOKEN or use --token-file instead)")
 	}
 
 	return ans.WithAPIKey(parts[0], parts[1]), "API key", nil

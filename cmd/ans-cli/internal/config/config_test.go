@@ -1,16 +1,29 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
 )
 
+// writeTokenFile creates a token file in a per-test directory and returns its path.
+func writeTokenFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	return path
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name                string
-		setup               func()
+		setup               func(t *testing.T)
+		stdin               string
 		wantBaseURL         string
 		wantAPIKey          string
 		wantToken           string
@@ -18,17 +31,15 @@ func TestLoad(t *testing.T) {
 		wantLegacyIgnored   bool
 		wantVerbose         bool
 		wantJSON            bool
+		wantErr             string
 	}{
 		{
-			name: "default values",
-			setup: func() {
-				viper.Reset()
-			},
+			name:  "default values",
+			setup: func(*testing.T) {},
 		},
 		{
 			name: "with all values set",
-			setup: func() {
-				viper.Reset()
+			setup: func(*testing.T) {
 				viper.Set("base-url", "https://api.example.com")
 				viper.Set("api-key", "test-key:test-secret")
 				viper.Set("token", "test-token")
@@ -43,8 +54,7 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name: "with partial values",
-			setup: func() {
-				viper.Reset()
+			setup: func(*testing.T) {
 				viper.Set("base-url", "https://api.test.com")
 				viper.Set("verbose", true)
 			},
@@ -52,78 +62,145 @@ func TestLoad(t *testing.T) {
 			wantVerbose: true,
 		},
 		{
-			name: "token is trimmed",
-			setup: func() {
-				viper.Reset()
+			name: "ANS_TOKEN is trimmed",
+			setup: func(*testing.T) {
 				viper.Set("token", "  padded-token\n")
 			},
 			wantToken: "padded-token",
 		},
 		{
-			name: "whitespace-only token is treated as unset",
-			setup: func() {
-				viper.Reset()
+			name: "whitespace-only ANS_TOKEN is treated as unset",
+			setup: func(*testing.T) {
 				viper.Set("token", "   \t\n")
 			},
 		},
 		{
-			name: "deprecated oauth-token key is used when token is unset",
-			setup: func() {
-				viper.Reset()
-				viper.Set("oauth-token", "legacy-token")
+			name: "deprecated ANS_OAUTH_TOKEN is used when nothing else is set",
+			setup: func(*testing.T) {
+				viper.Set("oauth-token-env", "legacy-token")
 			},
 			wantToken:           "legacy-token",
 			wantTokenDeprecated: true,
 		},
 		{
-			name: "token key wins over a different deprecated value and flags the collision",
-			setup: func() {
-				viper.Reset()
+			name: "ANS_TOKEN wins over a different ANS_OAUTH_TOKEN and flags the collision",
+			setup: func(*testing.T) {
 				viper.Set("token", "new-token")
-				viper.Set("oauth-token", "legacy-token")
+				viper.Set("oauth-token-env", "legacy-token")
 			},
 			wantToken:         "new-token",
 			wantLegacyIgnored: true,
 		},
 		{
-			name: "identical value under both names is not a collision",
-			setup: func() {
-				viper.Reset()
+			name: "identical ANS_TOKEN and ANS_OAUTH_TOKEN are not a collision",
+			setup: func(*testing.T) {
 				viper.Set("token", "same-token")
-				viper.Set("oauth-token", " same-token ")
+				viper.Set("oauth-token-env", " same-token ")
 			},
 			wantToken: "same-token",
 		},
 		{
-			name: "whitespace-only token falls back to the deprecated key and is trimmed",
-			setup: func() {
-				viper.Reset()
+			name: "whitespace-only ANS_TOKEN falls back to ANS_OAUTH_TOKEN",
+			setup: func(*testing.T) {
 				viper.Set("token", "  ")
-				viper.Set("oauth-token", "  legacy-token\n")
+				viper.Set("oauth-token-env", "  legacy-token\n")
 			},
 			wantToken:           "legacy-token",
 			wantTokenDeprecated: true,
 		},
 		{
-			name: "whitespace-only deprecated token is treated as unset",
-			setup: func() {
-				viper.Reset()
-				viper.Set("oauth-token", "   \t\n")
+			name: "whitespace-only ANS_OAUTH_TOKEN is treated as unset",
+			setup: func(*testing.T) {
+				viper.Set("oauth-token-env", "   \t\n")
 			},
+		},
+		{
+			name: "deprecated --oauth-token flag beats ANS_TOKEN",
+			setup: func(*testing.T) {
+				viper.Set("oauth-token", "flag-token")
+				viper.Set("token", "env-token")
+				viper.Set("oauth-token-env", "legacy-env-token")
+			},
+			wantToken:           "flag-token",
+			wantTokenDeprecated: true,
+		},
+		{
+			name: "--token-file beats ANS_TOKEN and the deprecated names",
+			setup: func(t *testing.T) {
+				viper.Set("token-file", writeTokenFile(t, "file-token\n"))
+				viper.Set("token", "env-token")
+				viper.Set("oauth-token-env", "legacy-token")
+			},
+			wantToken: "file-token",
+		},
+		{
+			name: "--token-file content is trimmed",
+			setup: func(t *testing.T) {
+				viper.Set("token-file", writeTokenFile(t, "  file-token \n\n"))
+			},
+			wantToken: "file-token",
+		},
+		{
+			name: "--token-file - reads stdin",
+			setup: func(*testing.T) {
+				viper.Set("token-file", "-")
+			},
+			stdin:     "stdin-token\n",
+			wantToken: "stdin-token",
+		},
+		{
+			name: "--token-file and --oauth-token together are rejected",
+			setup: func(t *testing.T) {
+				viper.Set("token-file", writeTokenFile(t, "file-token"))
+				viper.Set("oauth-token", "flag-token")
+			},
+			wantErr: "--token-file and --oauth-token cannot both be set",
+		},
+		{
+			name: "missing token file is an error",
+			setup: func(t *testing.T) {
+				viper.Set("token-file", filepath.Join(t.TempDir(), "missing"))
+			},
+			wantErr: "--token-file: open ",
+		},
+		{
+			name: "empty token file is an error",
+			setup: func(t *testing.T) {
+				viper.Set("token-file", writeTokenFile(t, "\n"))
+			},
+			wantErr: "no token found",
+		},
+		{
+			name: "empty stdin is an error",
+			setup: func(*testing.T) {
+				viper.Set("token-file", "-")
+			},
+			stdin:   "",
+			wantErr: "--token-file -: no token found",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setup()
+			viper.Reset()
+			t.Cleanup(func() { viper.Reset() })
+			tt.setup(t)
 
-			cfg, err := Load()
-			if err != nil {
-				t.Fatalf("Load() unexpected error: %v", err)
+			cfg, err := load(strings.NewReader(tt.stdin))
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("load() expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("load() error = %q, want substring %q", err.Error(), tt.wantErr)
+				}
+				return
 			}
-
+			if err != nil {
+				t.Fatalf("load() unexpected error: %v", err)
+			}
 			if cfg == nil {
-				t.Fatal("Load() returned nil config")
+				t.Fatal("load() returned nil config")
 			}
 
 			if cfg.BaseURL != tt.wantBaseURL {
@@ -151,6 +228,23 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// TestLoad_PublicEntryPoint covers the exported wrapper, which only differs
+// from load by reading the real stdin; without --token-file it must not
+// touch stdin at all.
+func TestLoad_PublicEntryPoint(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(func() { viper.Reset() })
+	viper.Set("api-key", "key:secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.APIKey != "key:secret" || cfg.Token != "" {
+		t.Errorf("Load() = APIKey %q Token %q, want key:secret and no token", cfg.APIKey, cfg.Token)
+	}
+}
+
 func TestRequireCredentials(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -164,7 +258,7 @@ func TestRequireCredentials(t *testing.T) {
 			cfg:     &Config{},
 			wantErr: true,
 			wantInMsg: []string{
-				"--token", "ANS_TOKEN", "Personal Access Token",
+				"ANS_TOKEN", "--token-file", "Personal Access Token",
 				"--api-key", "ANS_API_KEY",
 			},
 			// Guidance must steer users to the current names only.

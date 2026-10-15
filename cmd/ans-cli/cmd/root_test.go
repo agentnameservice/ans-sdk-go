@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -56,7 +58,7 @@ func TestBuildRootCmd(t *testing.T) {
 	}
 
 	// Verify persistent flags exist
-	persistentFlags := []string{"api-key", "token", "oauth-token", "base-url", "verbose", "json"}
+	persistentFlags := []string{"api-key", "token-file", "oauth-token", "base-url", "verbose", "json"}
 	for _, flagName := range persistentFlags {
 		if cmd.PersistentFlags().Lookup(flagName) == nil {
 			t.Errorf("missing persistent flag %q", flagName)
@@ -161,23 +163,28 @@ func TestRun(t *testing.T) {
 }
 
 // TestRootCmdTokenFlags pins the user-facing contract for the bearer-token
-// credential: --token is the advertised flag and its help names both token
-// kinds users actually hold, while --oauth-token survives only as a hidden
-// alias so existing scripts keep working without being recommended.
+// credential: the token itself is never a command-line value on the
+// documented path (--token-file reads a file or stdin, ANS_TOKEN covers the
+// environment), while --oauth-token survives only as a hidden alias so
+// existing scripts keep working without being recommended.
 func TestRootCmdTokenFlags(t *testing.T) {
 	t.Cleanup(func() { viper.Reset() })
 	cmd := buildRootCmd()
 
-	tokenFlag := cmd.PersistentFlags().Lookup("token")
-	if tokenFlag == nil {
-		t.Fatal("missing --token flag")
+	if cmd.PersistentFlags().Lookup("token") != nil {
+		t.Error("--token must not exist: tokens come from ANS_TOKEN or --token-file, never from an argument")
 	}
-	if tokenFlag.Hidden {
-		t.Error("--token must be visible in help")
+
+	fileFlag := cmd.PersistentFlags().Lookup("token-file")
+	if fileFlag == nil {
+		t.Fatal("missing --token-file flag")
 	}
-	for _, want := range []string{"Personal Access Token (PAT)", "OAuth 2.0", "ANS_TOKEN", "--api-key"} {
-		if !strings.Contains(tokenFlag.Usage, want) {
-			t.Errorf("--token usage = %q, want it to mention %q", tokenFlag.Usage, want)
+	if fileFlag.Hidden {
+		t.Error("--token-file must be visible in help")
+	}
+	for _, want := range []string{"Personal Access Token (PAT)", "OAuth 2.0", "stdin", "ANS_TOKEN", "--api-key"} {
+		if !strings.Contains(fileFlag.Usage, want) {
+			t.Errorf("--token-file usage = %q, want it to mention %q", fileFlag.Usage, want)
 		}
 	}
 
@@ -196,14 +203,14 @@ func TestRootCmdTokenFlags(t *testing.T) {
 		t.Fatalf("--help returned error: %v", err)
 	}
 	help := out.String()
-	for _, want := range []string{"--token", "ANS_TOKEN", "Personal Access Token (PAT)"} {
+	for _, want := range []string{"--token-file", "ANS_TOKEN", "Personal Access Token (PAT)"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("--help output missing %q\noutput: %s", want, help)
 		}
 	}
-	for _, notWant := range []string{"--oauth-token", "ANS_OAUTH_TOKEN"} {
+	for _, notWant := range []string{"--oauth-token", "ANS_OAUTH_TOKEN", "--token string"} {
 		if strings.Contains(help, notWant) {
-			t.Errorf("--help output still advertises deprecated name %q\noutput: %s", notWant, help)
+			t.Errorf("--help output still advertises %q\noutput: %s", notWant, help)
 		}
 	}
 }
@@ -214,8 +221,8 @@ func TestRootCmdCredentialFlagBindings(t *testing.T) {
 		flag     string
 		viperKey string
 	}{
-		{name: "--token binds to the token key", flag: "token", viperKey: "token"},
-		{name: "--oauth-token keeps binding to the legacy key", flag: "oauth-token", viperKey: "oauth-token"},
+		{name: "--token-file binds to the token-file key", flag: "token-file", viperKey: "token-file"},
+		{name: "--oauth-token binds to its flag-only key", flag: "oauth-token", viperKey: "oauth-token"},
 		{name: "--api-key binds to the api-key key", flag: "api-key", viperKey: "api-key"},
 	}
 
@@ -235,35 +242,43 @@ func TestRootCmdCredentialFlagBindings(t *testing.T) {
 	}
 }
 
-// TestRootCmdTokenFlagParsing drives the credential flags through cobra's
-// own argument parsing, hidden alias included, and pins the precedence
-// contract against an exported ANS_TOKEN: the current name wins and the
-// CLI says so.
+// TestRootCmdTokenFlagParsing drives the credential inputs through cobra's
+// own argument parsing and pins the precedence contract: explicit flags beat
+// environment variables, the hidden alias still works, and two explicit token
+// flags are rejected rather than silently ordered.
 func TestRootCmdTokenFlagParsing(t *testing.T) {
 	tests := []struct {
-		name     string
-		envToken string
-		args     []string
-		wantAuth string
-		wantNote string // substring of the single expected stderr note; empty means no note
+		name      string
+		envToken  string // exported as ANS_TOKEN
+		tokenFile string // when non-empty, written to a temp file passed via --token-file
+		args      []string
+		wantAuth  string
+		wantNote  string // substring of the single expected stderr note; empty means no note
+		wantErr   string
 	}{
 		{
-			name:     "--token authenticates silently",
-			args:     []string{"--token", "flag-tok"},
-			wantAuth: "Bearer flag-tok",
+			name:     "ANS_TOKEN alone authenticates silently",
+			envToken: "env-tok",
+			wantAuth: "Bearer env-tok",
 		},
 		{
-			name:     "hidden --oauth-token still parses and prints the deprecation note",
-			args:     []string{"--oauth-token", "legacy-tok"},
-			wantAuth: "Bearer legacy-tok",
-			wantNote: "deprecated; use --token or ANS_TOKEN",
+			name:      "--token-file beats an exported ANS_TOKEN without a note",
+			envToken:  "env-tok",
+			tokenFile: "file-tok\n",
+			wantAuth:  "Bearer file-tok",
 		},
 		{
-			name:     "exported ANS_TOKEN wins over a typed --oauth-token and says so",
+			name:     "hidden --oauth-token beats an exported ANS_TOKEN and prints the deprecation note",
 			envToken: "env-tok",
 			args:     []string{"--oauth-token", "legacy-tok"},
-			wantAuth: "Bearer env-tok",
-			wantNote: "using --token/ANS_TOKEN",
+			wantAuth: "Bearer legacy-tok",
+			wantNote: "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:      "--token-file and --oauth-token together are rejected",
+			tokenFile: "file-tok",
+			args:      []string{"--oauth-token", "legacy-tok"},
+			wantErr:   "cannot both be set",
 		},
 	}
 
@@ -288,16 +303,33 @@ func TestRootCmdTokenFlagParsing(t *testing.T) {
 			t.Setenv("ANS_OAUTH_TOKEN", "")
 			t.Setenv("ANS_TOKEN", tt.envToken)
 
-			args := append([]string{"--base-url", server.URL, "status"}, tt.args...)
+			args := []string{"--base-url", server.URL, "status"}
+			if tt.tokenFile != "" {
+				path := filepath.Join(t.TempDir(), "token")
+				if err := os.WriteFile(path, []byte(tt.tokenFile), 0o600); err != nil {
+					t.Fatalf("write token file: %v", err)
+				}
+				args = append(args, "--token-file", path)
+			}
+			args = append(args, tt.args...)
 			args = append(args, "agent-123")
 
+			var execErr error
 			_, stderr := captureOutput(t, func() {
 				cmd := buildRootCmd()
 				cmd.SetArgs(args)
-				if err := cmd.Execute(); err != nil {
-					t.Errorf("Execute(%v) error = %v", args, err)
-				}
+				execErr = cmd.Execute()
 			})
+
+			if tt.wantErr != "" {
+				if execErr == nil || !strings.Contains(execErr.Error(), tt.wantErr) {
+					t.Fatalf("Execute(%v) error = %v, want substring %q", args, execErr, tt.wantErr)
+				}
+				return
+			}
+			if execErr != nil {
+				t.Fatalf("Execute(%v) error = %v", args, execErr)
+			}
 
 			mu.Lock()
 			gotAuthCopy := gotAuth
@@ -307,7 +339,7 @@ func TestRootCmdTokenFlagParsing(t *testing.T) {
 			}
 
 			assertSingleNote(t, stderr, tt.wantNote)
-			for _, secret := range []string{"flag-tok", "legacy-tok", "env-tok"} {
+			for _, secret := range []string{"env-tok", "legacy-tok", "file-tok"} {
 				if strings.Contains(stderr, secret) {
 					t.Errorf("stderr leaks a token value: %q", stderr)
 				}

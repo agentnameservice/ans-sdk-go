@@ -98,14 +98,14 @@ The CLI can be configured using environment variables or command-line flags:
 
 | Environment Variable | Flag | Description | Default |
 |---------------------|------|-------------|---------|
-| `ANS_API_KEY` | `--api-key` | API key (`key:secret`) for authentication | (required unless `ANS_TOKEN` is set) |
-| `ANS_TOKEN` | `--token` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token; takes precedence over the API key | (unset) |
-| `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated alias of `ANS_TOKEN` / `--token`; prints a migration note and loses to the current names when both are set | (unset) |
+| `ANS_API_KEY` | `--api-key` | API key (`key:secret`) for authentication | (required unless a bearer token is set) |
+| `ANS_TOKEN` | `--token-file` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token. The flag reads it from a file, or from stdin when `-`; takes precedence over the API key | (unset) |
+| `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated; still accepted and prints a migration note | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
 
-Prefer the environment variables over the `--api-key`/`--token` flags — command-line arguments are visible to other local processes (`ps`) and are saved in shell history. When both credentials are configured, the CLI prints a note to stderr saying the bearer token is being used; if a deprecated name carries a different token than `ANS_TOKEN`/`--token`, the current name wins and the CLI says so.
+Keep tokens out of command-line arguments — they are visible to other local processes (`ps`) and saved in shell history. Use `ANS_TOKEN` in a shell, or `--token-file` (a path, or `-` for stdin) in scripts and CI; prefer `ANS_API_KEY` over the `--api-key` flag for the same reason. Explicit flags take precedence over environment variables, and a bearer token takes precedence over the API key — when both credentials are configured the CLI prints a note to stderr saying the bearer token is being used. When both `ANS_TOKEN` and the deprecated `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
 
 Bearer tokens can expire; for long-lived automation and `events --follow`, use a credential that outlives the run or refresh the token before each invocation.
 
@@ -507,6 +507,10 @@ ans-cli search --name "Analyzer"
 ```bash
 export ANS_TOKEN="your-token"
 ans-cli status 550e8400-e29b-41d4-a716-446655440000
+
+# or keep the token out of the environment: read it from a file, or from stdin with "-"
+ans-cli status 550e8400-e29b-41d4-a716-446655440000 --token-file ~/.config/ans/token
+my-secret-store get ans-token | ans-cli status 550e8400-e29b-41d4-a716-446655440000 --token-file -
 ```
 
 ### Get agent status in JSON format

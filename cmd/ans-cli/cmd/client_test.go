@@ -41,7 +41,7 @@ func TestCreateClient(t *testing.T) {
 				APIKey:     "a-personal-access-token-pasted-into-the-wrong-variable",
 			},
 			wantErr:   true,
-			errSubstr: "set --token/ANS_TOKEN instead",
+			errSubstr: "set ANS_TOKEN or use --token-file instead",
 		},
 		{
 			name: "no credentials at all",
@@ -178,7 +178,7 @@ func TestAuthOption(t *testing.T) {
 			name:      "malformed API key error points PAT holders at --token",
 			cfg:       &config.Config{APIKey: "no-colon-here"},
 			wantErr:   true,
-			errSubstr: "set --token/ANS_TOKEN instead",
+			errSubstr: "set ANS_TOKEN or use --token-file instead",
 		},
 	}
 

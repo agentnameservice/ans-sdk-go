@@ -279,6 +279,7 @@ func TestRunEventsWithParams(t *testing.T) {
 				viper.Set("api-key", "invalid-no-colon")
 				viper.Set("token", "")
 				viper.Set("oauth-token", "")
+				viper.Set("oauth-token-env", "")
 				viper.Set("base-url", "http://localhost")
 				t.Cleanup(func() { viper.Reset() })
 			},
@@ -577,6 +578,7 @@ func TestRunSubmitServerCSR(t *testing.T) {
 				viper.Set("api-key", "")
 				viper.Set("token", "")
 				viper.Set("oauth-token", "")
+				viper.Set("oauth-token-env", "")
 				viper.Set("base-url", "http://localhost")
 				t.Cleanup(func() { viper.Reset() })
 			},

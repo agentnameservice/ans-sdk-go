@@ -26,13 +26,14 @@ import (
 )
 
 // setupViperForTest sets viper values needed for config.Load() and registers cleanup.
-// Both token keys are explicitly zeroed so a developer's exported ANS_TOKEN or
+// Every token key is explicitly zeroed so a developer's exported ANS_TOKEN or
 // ANS_OAUTH_TOKEN cannot leak into tests through viper's env bindings.
 func setupViperForTest(t *testing.T, serverURL string) {
 	t.Helper()
 	viper.Set("api-key", "testkey:testsecret")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", serverURL)
 	viper.Set("api-version", "v1")
 	viper.Set("verbose", false)
@@ -89,6 +90,7 @@ func TestRunStatus_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -165,6 +167,7 @@ func TestRunSearchWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -269,6 +272,7 @@ func TestRunResolve_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -341,6 +345,7 @@ func TestRunRevoke_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -422,6 +427,7 @@ func TestRunCsrStatus_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -479,6 +485,7 @@ func TestRunVerifyACME_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -536,6 +543,7 @@ func TestRunVerifyDNS_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -676,6 +684,7 @@ func TestRunSubmitIdentityCSR_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -796,6 +805,7 @@ func TestRunEventsWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -941,6 +951,7 @@ func TestRunRegisterWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1348,6 +1359,7 @@ func TestRunRevoke_CredentialErrorBeforeArgValidation(t *testing.T) {
 	viper.Set("api-key", "")
 	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1367,7 +1379,7 @@ func TestInitConfig_TokenEnvBindings(t *testing.T) {
 		viperKey string
 	}{
 		{name: "ANS_TOKEN binds to the token key", envVar: "ANS_TOKEN", viperKey: "token"},
-		{name: "ANS_OAUTH_TOKEN keeps binding to the legacy key", envVar: "ANS_OAUTH_TOKEN", viperKey: "oauth-token"},
+		{name: "ANS_OAUTH_TOKEN binds to its own env-only key", envVar: "ANS_OAUTH_TOKEN", viperKey: "oauth-token-env"},
 	}
 
 	for _, tt := range tests {
@@ -1714,35 +1726,50 @@ func TestRunSubmitIdentityCSR_SkipPreflight(t *testing.T) {
 }
 
 // TestRunStatus_DeprecatedTokenName pins the migration contract for the
-// legacy --oauth-token/ANS_OAUTH_TOKEN names: they still authenticate, the
-// current names win when both are set, every collision or legacy use prints
-// exactly one note, and no note ever echoes a token.
+// deprecated --oauth-token flag and ANS_OAUTH_TOKEN variable: both still
+// authenticate, the explicit flag beats any environment value, ANS_TOKEN
+// beats ANS_OAUTH_TOKEN, every deprecated use or collision prints exactly
+// one note, and no note ever echoes a token.
 func TestRunStatus_DeprecatedTokenName(t *testing.T) {
 	tests := []struct {
-		name        string
-		token       string
-		legacyToken string
-		wantAuth    string
-		wantNote    string // substring of the single expected stderr note; empty means no note
+		name       string
+		envToken   string // ANS_TOKEN
+		legacyEnv  string // ANS_OAUTH_TOKEN
+		legacyFlag string // --oauth-token
+		wantAuth   string
+		wantNote   string // substring of the single expected stderr note; empty means no note
 	}{
 		{
-			name:        "legacy name alone authenticates with a deprecation note",
-			legacyToken: "legacy-tok",
-			wantAuth:    "Bearer legacy-tok",
-			wantNote:    "deprecated; use --token or ANS_TOKEN",
+			name:       "deprecated flag alone authenticates with a deprecation note",
+			legacyFlag: "legacy-tok",
+			wantAuth:   "Bearer legacy-tok",
+			wantNote:   "deprecated; use ANS_TOKEN or --token-file",
 		},
 		{
-			name:        "token key wins over a different legacy value and says so",
-			token:       "new-tok",
-			legacyToken: "legacy-tok",
-			wantAuth:    "Bearer new-tok",
-			wantNote:    "using --token/ANS_TOKEN",
+			name:      "deprecated variable alone authenticates with a deprecation note",
+			legacyEnv: "legacy-tok",
+			wantAuth:  "Bearer legacy-tok",
+			wantNote:  "deprecated; use ANS_TOKEN or --token-file",
 		},
 		{
-			name:        "identical value under both names needs no note",
-			token:       "same-tok",
-			legacyToken: "same-tok",
-			wantAuth:    "Bearer same-tok",
+			name:       "deprecated flag beats an exported ANS_TOKEN",
+			envToken:   "env-tok",
+			legacyFlag: "legacy-tok",
+			wantAuth:   "Bearer legacy-tok",
+			wantNote:   "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:      "ANS_TOKEN wins over a different ANS_OAUTH_TOKEN and says so",
+			envToken:  "env-tok",
+			legacyEnv: "legacy-tok",
+			wantAuth:  "Bearer env-tok",
+			wantNote:  "using ANS_TOKEN",
+		},
+		{
+			name:      "identical values under both variables need no note",
+			envToken:  "same-tok",
+			legacyEnv: "same-tok",
+			wantAuth:  "Bearer same-tok",
 		},
 	}
 
@@ -1760,8 +1787,9 @@ func TestRunStatus_DeprecatedTokenName(t *testing.T) {
 			defer server.Close()
 
 			viper.Set("api-key", "")
-			viper.Set("token", tt.token)
-			viper.Set("oauth-token", tt.legacyToken)
+			viper.Set("token", tt.envToken)
+			viper.Set("oauth-token-env", tt.legacyEnv)
+			viper.Set("oauth-token", tt.legacyFlag)
 			viper.Set("base-url", server.URL)
 			t.Cleanup(func() { viper.Reset() })
 
@@ -1781,7 +1809,7 @@ func TestRunStatus_DeprecatedTokenName(t *testing.T) {
 			}
 
 			assertSingleNote(t, stderr, tt.wantNote)
-			for _, secret := range []string{tt.token, tt.legacyToken} {
+			for _, secret := range []string{tt.envToken, tt.legacyEnv, tt.legacyFlag} {
 				if secret != "" && strings.Contains(stderr, secret) {
 					t.Errorf("stderr leaks a token value: %q", stderr)
 				}

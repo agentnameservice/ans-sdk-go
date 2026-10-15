@@ -35,13 +35,15 @@ export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
 ```
 
-Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key:
+Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:
 
 ```bash
-export ANS_TOKEN="your-token"
+export ANS_TOKEN="your-token"                                            # from the environment
+ans-cli status <agentId> --token-file ~/.config/ans/token                 # from a file
+my-secret-store get ans-token | ans-cli status <agentId> --token-file -   # from stdin
 ```
 
-The API key remains the default path; when both are set, the bearer token takes precedence. `ANS_OAUTH_TOKEN` and `--oauth-token` still work as deprecated aliases of `ANS_TOKEN` and `--token`; the current names always win when both are set, and the CLI prints a note to stderr whenever a deprecated name is used or carries a different token.
+A bearer token takes precedence over the API key, and explicit flags take precedence over environment variables. `ANS_OAUTH_TOKEN` and `--oauth-token` still work as deprecated aliases and print a migration note; when both `ANS_TOKEN` and `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
 
 ### Register an agent (end-to-end)
 
