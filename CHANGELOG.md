@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.20](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.19...v0.1.20) (2026-10-15)
+
+
+### Features
+
+* **cli:** accept bearer tokens via ANS_TOKEN or --token-file; deprecate --oauth-token ([#92](https://github.com/agentnameservice/ans-sdk-go/issues/92)) ([037064c](https://github.com/agentnameservice/ans-sdk-go/commit/037064cc4382d27ed6b67448cf8f0527c5cb7ac8))
+
+
+### Miscellaneous
+
+* **deps:** bump actions/upload-artifact from 7.0.1 to 7.0.2 ([#89](https://github.com/agentnameservice/ans-sdk-go/issues/89)) ([d1de724](https://github.com/agentnameservice/ans-sdk-go/commit/d1de724a1123120c219621acc24a3e662d959cd3))
+* **deps:** bump github.com/fxamacker/cbor/v2 from 2.9.4 to 2.9.6 ([#88](https://github.com/agentnameservice/ans-sdk-go/issues/88)) ([14176de](https://github.com/agentnameservice/ans-sdk-go/commit/14176dec3d7f3d2f05c482c4fbf37441efa83839))
+
 ## [0.1.19](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.18...v0.1.19) (2026-10-01)
 
 
