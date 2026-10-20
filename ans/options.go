@@ -248,7 +248,7 @@ func WithSearchName(name string) SearchOption {
 	}
 }
 
-// WithSearchHost filters by agent host domain (partial matching supported server-side).
+// WithSearchHost filters by agent host domain (exact match).
 func WithSearchHost(host string) SearchOption {
 	return func(c *searchConfig) error {
 		c.host = host

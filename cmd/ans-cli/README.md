@@ -102,6 +102,7 @@ The CLI can be configured using environment variables or command-line flags:
 | `ANS_TOKEN` | `--token-file` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token. The flag reads it from a file, or from stdin when `-`; takes precedence over the API key | (unset) |
 | `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated; still accepted and prints a migration note | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
+| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL used by `badge` | derived from the API base URL (see [badge](#badge)) |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
 
@@ -238,7 +239,7 @@ ans-cli verify-acme <agentId>
 
 ### verify-dns
 
-Verify that all required DNS records have been configured correctly.
+Ask the registry to verify the DNS records for an agent. Only the `_ans` and `_ans-badge` TXT records are required; the HTTPS and TLSA records are optional and do not block activation.
 
 ```bash
 ans-cli verify-dns <agentId>
@@ -261,7 +262,7 @@ ans-cli search --name "Analyzer" --limit 10 --offset 0
 
 **Flags:**
 - `--name`: Agent display name (partial matching)
-- `--host`: Agent host domain (partial matching)
+- `--host`: Agent host domain (exact match)
 - `--version`: Agent version (flexible matching)
 - `--limit`: Maximum number of results (default: 20, max: 100)
 - `--offset`: Number of results to skip
@@ -433,6 +434,8 @@ ans-cli badge <agentId> --audit --checkpoint
 - `--audit`: Also retrieve audit trail
 - `--checkpoint`: Also retrieve log checkpoint
 - `--transparency-url`: Transparency log base URL (env: ANS_TRANSPARENCY_URL)
+
+When neither `--transparency-url` nor `ANS_TRANSPARENCY_URL` is set, the CLI derives the log URL from the API base URL by replacing the leading `api.` host label with `transparency.ans.`, so `https://api.ote-godaddy.com` maps to `https://transparency.ans.ote-godaddy.com`. A base URL whose host does not start with `api.` cannot be derived; pass `--transparency-url` for those.
 
 ## Complete Registration Workflow
 
