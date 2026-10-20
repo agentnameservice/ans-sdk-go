@@ -239,7 +239,7 @@ ans-cli verify-acme <agentId>
 
 ### verify-dns
 
-Ask the registry to verify the DNS records for an agent. The response marks each expected record as required or optional for the agent's DNS profile and lists the ones it could not confirm. Optional records need not be published, but a published record must match what the registry expects.
+Ask the registry to verify the DNS records for an agent. The response marks each expected record as required or optional for the agent's DNS profile and lists the ones it could not confirm. Optional records need not be published, but a published record that does not match what the registry expects blocks activation; in a DNSSEC-signed zone a validated TLSA fingerprint mismatch is treated as an attack signal.
 
 ```bash
 ans-cli verify-dns <agentId>

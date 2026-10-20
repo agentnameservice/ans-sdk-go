@@ -21,8 +21,10 @@ func buildVerifyDNSCmd() *cobra.Command {
 		Long: `Asks the registry to verify the DNS records for an agent. Which records are
 required depends on the agent's DNS profile: the response marks each expected
 record as required or optional and lists the ones it could not confirm. Optional
-records need not be published, but a published record must match what the
-registry expects. This is the final step for external domain registration.`,
+records need not be published, but a published record that does not match what
+the registry expects blocks activation; in a DNSSEC-signed zone a validated TLSA
+fingerprint mismatch is treated as an attack signal. This is the final step for
+external domain registration.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runVerifyDNS,
 	}
