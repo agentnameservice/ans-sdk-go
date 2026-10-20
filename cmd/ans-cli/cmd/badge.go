@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -17,6 +19,10 @@ import (
 const (
 	defaultBadgeAuditLimit   = 10
 	maxMetadataHashesDisplay = 20
+
+	transparencyURLEnv     = "ANS_TRANSPARENCY_URL"
+	apiHostPrefix          = "api."
+	transparencyHostPrefix = "transparency.ans."
 )
 
 func buildBadgeCmd() *cobra.Command {
@@ -39,7 +45,7 @@ for a given agent ID. This includes the Merkle proof, payload data, and status.`
 
 	cmd.Flags().BoolVar(&badgeAuditTrail, "audit", false, "Also retrieve audit trail")
 	cmd.Flags().BoolVar(&badgeCheckpoint, "checkpoint", false, "Also retrieve log checkpoint")
-	cmd.Flags().StringVar(&transparencyBaseURL, "transparency-url", "", "Transparency log base URL (env: ANS_TRANSPARENCY_URL)")
+	cmd.Flags().StringVar(&transparencyBaseURL, "transparency-url", "", "Transparency log base URL (env: "+transparencyURLEnv+")")
 
 	return cmd
 }
@@ -50,16 +56,9 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Determine transparency log base URL
-	// Priority: CLI flag > Environment variable > Derived from API base URL
-	baseURL := transparencyBaseURL
-	if baseURL == "" {
-		baseURL = os.Getenv("ANS_TRANSPARENCY_URL")
-	}
-	if baseURL == "" {
-		// Derive from API base URL
-		baseURL = strings.Replace(cfg.BaseURL, "api.ote-godaddy.com", "transparency.ans.ote-godaddy.com", 1)
-		baseURL = strings.Replace(baseURL, "api.godaddy.com", "transparency.ans.godaddy.com", 1)
+	baseURL, err := resolveTransparencyURL(transparencyBaseURL, os.Getenv(transparencyURLEnv), cfg.BaseURL)
+	if err != nil {
+		return err
 	}
 
 	// Create Transparency Log client (no authentication needed - public endpoint)
@@ -87,6 +86,38 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 
 	outputBadgeHuman(ctx, c, agentID, logEntry, auditTrail, checkpoint)
 	return nil
+}
+
+func resolveTransparencyURL(flagValue, envValue, apiBaseURL string) (string, error) {
+	if flagValue != "" {
+		return flagValue, nil
+	}
+	if envValue != "" {
+		return envValue, nil
+	}
+	return deriveTransparencyURL(apiBaseURL)
+}
+
+// deriveTransparencyURL relies on every hosted ANS environment publishing its
+// transparency log at the root of the transparency.ans. host of the API gateway domain.
+func deriveTransparencyURL(apiBaseURL string) (string, error) {
+	u, err := url.Parse(apiBaseURL)
+	if err != nil {
+		return "", fmt.Errorf("cannot derive the transparency log URL: %w; pass --transparency-url or set %s", err, transparencyURLEnv)
+	}
+	host := strings.ToLower(u.Hostname())
+	if !strings.HasPrefix(host, apiHostPrefix) {
+		return "", fmt.Errorf(
+			"cannot derive the transparency log URL from base URL %q (expected an %s* host): pass --transparency-url or set %s",
+			u.Redacted(), apiHostPrefix, transparencyURLEnv,
+		)
+	}
+	host = transparencyHostPrefix + strings.TrimPrefix(host, apiHostPrefix)
+	if port := u.Port(); port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	derived := url.URL{Scheme: u.Scheme, Host: host}
+	return derived.String(), nil
 }
 
 func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail, checkpoint bool) {
