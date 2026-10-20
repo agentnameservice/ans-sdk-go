@@ -1,6 +1,9 @@
 package models
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // DNSVerificationError is the typed error returned by Client.VerifyDNS when the
 // API responds with HTTP 422 carrying structured missingRecords/incorrectRecords
@@ -35,18 +38,34 @@ type IncorrectDNSRecord struct {
 
 // Error returns a human-readable summary of the verification failure.
 func (e *DNSVerificationError) Error() string {
-	missing := len(e.MissingRecords)
-	incorrect := len(e.IncorrectRecords)
-	switch {
-	case missing > 0 && incorrect > 0:
-		return fmt.Sprintf("DNS verification failed: %d missing record(s), %d incorrect record(s)", missing, incorrect)
-	case missing > 0:
-		return fmt.Sprintf("DNS verification failed: %d missing record(s)", missing)
-	case incorrect > 0:
-		return fmt.Sprintf("DNS verification failed: %d incorrect record(s)", incorrect)
-	default:
-		return "DNS verification failed"
+	missingRequired, incorrectRequired := 0, 0
+	for _, r := range e.MissingRecords {
+		if r.Required {
+			missingRequired++
+		}
 	}
+	for _, r := range e.IncorrectRecords {
+		if r.Record.Required {
+			incorrectRequired++
+		}
+	}
+	// A response that marks no record required is indistinguishable from one sent by
+	// a registry that never emits the flag, so only a marked response gets qualified.
+	serverDistinguishesRequired := missingRequired > 0 || incorrectRequired > 0
+
+	var parts []string
+	if n := len(e.MissingRecords); n > 0 {
+		parts = append(parts, recordCount("missing", n, missingRequired, serverDistinguishesRequired))
+	}
+	if n := len(e.IncorrectRecords); n > 0 {
+		parts = append(parts, recordCount("incorrect", n, incorrectRequired, serverDistinguishesRequired))
+	}
+
+	const prefix = "DNS verification failed"
+	if len(parts) == 0 {
+		return prefix
+	}
+	return prefix + ": " + strings.Join(parts, ", ")
 }
 
 // Unwrap exposes the embedded *ResponseError so errors.As(err, &respErr) keeps
@@ -56,4 +75,12 @@ func (e *DNSVerificationError) Unwrap() error {
 		return nil
 	}
 	return e.ResponseError
+}
+
+func recordCount(category string, total, required int, showRequired bool) string {
+	s := fmt.Sprintf("%d %s record(s)", total, category)
+	if showRequired && required < total {
+		s += fmt.Sprintf(" (%d required)", required)
+	}
+	return s
 }
