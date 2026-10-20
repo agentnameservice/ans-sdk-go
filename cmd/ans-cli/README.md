@@ -239,7 +239,7 @@ ans-cli verify-acme <agentId>
 
 ### verify-dns
 
-Ask the registry to verify the DNS records for an agent. Only the `_ans` and `_ans-badge` TXT records are required; the HTTPS and TLSA records are optional and do not block activation.
+Ask the registry to verify the DNS records for an agent. The response marks each expected record as required or optional for the agent's DNS profile and lists the ones it could not confirm. Optional records need not be published, but a published record must match what the registry expects.
 
 ```bash
 ans-cli verify-dns <agentId>

@@ -18,11 +18,11 @@ func buildVerifyDNSCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "verify-dns <agentId>",
 		Short: "Verify DNS records are configured",
-		Long: `Asks the registry to verify the DNS records for an agent. Only the records the
-registry marks required (the _ans and _ans-badge TXT records) block activation. The
-HTTPS and TLSA records are optional: a failure response lists them when they are
-absent, but they do not block activation. This is the final step for external domain
-registration.`,
+		Long: `Asks the registry to verify the DNS records for an agent. Which records are
+required depends on the agent's DNS profile: the response marks each expected
+record as required or optional and lists the ones it could not confirm. Optional
+records need not be published, but a published record must match what the
+registry expects. This is the final step for external domain registration.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runVerifyDNS,
 	}

@@ -196,10 +196,10 @@ func TestDNSVerificationError_Error(t *testing.T) {
 			want:    "DNS verification failed: 2 missing record(s)",
 		},
 		{
-			name:      "reports zero required missing records when only an incorrect record is required",
+			name:      "leaves counts plain when neither category mixes required and optional records",
 			missing:   []bool{false},
 			incorrect: []bool{true},
-			want:      "DNS verification failed: 1 missing record(s) (0 required), 1 incorrect record(s)",
+			want:      "DNS verification failed: 1 missing record(s), 1 incorrect record(s)",
 		},
 		{
 			name:    "keeps the plain count when the server marks no record required",
@@ -215,7 +215,13 @@ func TestDNSVerificationError_Error(t *testing.T) {
 			name:      "annotates the missing and incorrect counts independently",
 			missing:   []bool{true, false},
 			incorrect: []bool{false, false},
-			want:      "DNS verification failed: 2 missing record(s) (1 required), 2 incorrect record(s) (0 required)",
+			want:      "DNS verification failed: 2 missing record(s) (1 required), 2 incorrect record(s)",
+		},
+		{
+			name:      "does not infer the incorrect category from the missing one, as V1 mismatch records carry no flag",
+			missing:   []bool{true},
+			incorrect: []bool{false},
+			want:      "DNS verification failed: 1 missing record(s), 1 incorrect record(s)",
 		},
 		{
 			name: "falls back to the bare prefix when nothing is missing or incorrect",

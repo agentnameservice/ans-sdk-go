@@ -38,27 +38,24 @@ type IncorrectDNSRecord struct {
 
 // Error returns a human-readable summary of the verification failure.
 func (e *DNSVerificationError) Error() string {
-	missingRequired, incorrectRequired := 0, 0
-	for _, r := range e.MissingRecords {
-		if r.Required {
-			missingRequired++
-		}
-	}
-	for _, r := range e.IncorrectRecords {
-		if r.Record.Required {
-			incorrectRequired++
-		}
-	}
-	// A response that marks no record required is indistinguishable from one sent by
-	// a registry that never emits the flag, so only a marked response gets qualified.
-	serverDistinguishesRequired := missingRequired > 0 || incorrectRequired > 0
-
 	var parts []string
 	if n := len(e.MissingRecords); n > 0 {
-		parts = append(parts, recordCount("missing", n, missingRequired, serverDistinguishesRequired))
+		required := 0
+		for _, r := range e.MissingRecords {
+			if r.Required {
+				required++
+			}
+		}
+		parts = append(parts, recordCount("missing", n, required))
 	}
 	if n := len(e.IncorrectRecords); n > 0 {
-		parts = append(parts, recordCount("incorrect", n, incorrectRequired, serverDistinguishesRequired))
+		required := 0
+		for _, r := range e.IncorrectRecords {
+			if r.Record.Required {
+				required++
+			}
+		}
+		parts = append(parts, recordCount("incorrect", n, required))
 	}
 
 	const prefix = "DNS verification failed"
@@ -77,9 +74,13 @@ func (e *DNSVerificationError) Unwrap() error {
 	return e.ResponseError
 }
 
-func recordCount(category string, total, required int, showRequired bool) string {
+// recordCount qualifies a category only when it mixes required and optional
+// records. A category with none marked is indistinguishable from a registry
+// whose wire format omits the flag, as the V1 mismatch records do, so it is
+// never annotated from the other category's flags.
+func recordCount(category string, total, required int) string {
 	s := fmt.Sprintf("%d %s record(s)", total, category)
-	if showRequired && required < total {
+	if required > 0 && required < total {
 		s += fmt.Sprintf(" (%d required)", required)
 	}
 	return s
