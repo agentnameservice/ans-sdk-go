@@ -778,87 +778,32 @@ func TestPrintAuditEntryProof(t *testing.T) {
 
 func TestResolveTransparencyURL(t *testing.T) {
 	tests := []struct {
-		name       string
-		flagValue  string
-		envValue   string
-		apiBaseURL string
-		want       string
-		wantErr    []string
-		wantAbsent string
+		name      string
+		flagValue string
+		envValue  string
+		want      string
+		wantErr   []string
 	}{
 		{
-			name:       "flag wins over env and base URL",
-			flagValue:  "https://flag.example",
-			envValue:   "https://env.example",
-			apiBaseURL: "https://api.example.com",
-			want:       "https://flag.example",
+			name:      "flag wins over env",
+			flagValue: "https://flag.example",
+			envValue:  "https://env.example",
+			want:      "https://flag.example",
 		},
 		{
-			name:       "env wins over base URL",
-			envValue:   "https://env.example",
-			apiBaseURL: "https://api.example.com",
-			want:       "https://env.example",
+			name:     "env is used when the flag is empty",
+			envValue: "https://env.example",
+			want:     "https://env.example",
 		},
 		{
-			name:       "production gateway derives the production log",
-			apiBaseURL: "https://api.godaddy.com",
-			want:       "https://transparency.ans.godaddy.com",
-		},
-		{
-			name:       "OTE gateway derives the OTE log",
-			apiBaseURL: "https://api.ote-godaddy.com",
-			want:       "https://transparency.ans.ote-godaddy.com",
-		},
-		{
-			name:       "host case is normalised",
-			apiBaseURL: "https://API.Example.COM",
-			want:       "https://transparency.ans.example.com",
-		},
-		{
-			name:       "port is kept but path and query are dropped",
-			apiBaseURL: "https://api.example.com:8443/base/?x=1",
-			want:       "https://transparency.ans.example.com:8443",
-		},
-		{
-			name:       "userinfo is dropped",
-			apiBaseURL: "https://user:pw@api.example.com",
-			want:       "https://transparency.ans.example.com",
-		},
-		{
-			name:       "host without api label cannot be derived",
-			apiBaseURL: "http://127.0.0.1:38041",
-			wantErr:    []string{`"http://127.0.0.1:38041"`, "--transparency-url", "ANS_TRANSPARENCY_URL"},
-		},
-		{
-			name:       "error redacts the password of an underivable host",
-			apiBaseURL: "https://user:pw@gateway.example.com",
-			wantErr:    []string{"user:xxxxx@gateway.example.com", "--transparency-url"},
-			wantAbsent: "pw",
-		},
-		{
-			name:       "api must be a whole label",
-			apiBaseURL: "https://apiserver.example.com",
-			wantErr:    []string{"--transparency-url"},
-		},
-		{
-			name:       "missing scheme cannot be derived",
-			apiBaseURL: "api.example.com",
-			wantErr:    []string{"--transparency-url"},
-		},
-		{
-			name:    "empty base URL cannot be derived",
-			wantErr: []string{"--transparency-url"},
-		},
-		{
-			name:       "unparsable base URL surfaces the parse error",
-			apiBaseURL: "::",
-			wantErr:    []string{"missing protocol scheme", "--transparency-url"},
+			name:    "neither set names both settings",
+			wantErr: []string{"--transparency-url", "ANS_TRANSPARENCY_URL"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveTransparencyURL(tt.flagValue, tt.envValue, tt.apiBaseURL)
+			got, err := resolveTransparencyURL(tt.flagValue, tt.envValue)
 			if len(tt.wantErr) > 0 {
 				if err == nil {
 					t.Fatalf("resolveTransparencyURL() = %q, want error", got)
@@ -867,9 +812,6 @@ func TestResolveTransparencyURL(t *testing.T) {
 					if !strings.Contains(err.Error(), sub) {
 						t.Errorf("error %q missing %q", err.Error(), sub)
 					}
-				}
-				if tt.wantAbsent != "" && strings.Contains(err.Error(), tt.wantAbsent) {
-					t.Errorf("error %q leaks %q", err.Error(), tt.wantAbsent)
 				}
 				return
 			}
@@ -883,13 +825,13 @@ func TestResolveTransparencyURL(t *testing.T) {
 	}
 }
 
-func TestRunBadgeWithParams_UnderivableBaseURL_NamesTransparencyFlag(t *testing.T) {
+func TestRunBadgeWithParams_NoTransparencyURL_NamesBothSettings(t *testing.T) {
 	setupViperForTest(t, "http://127.0.0.1:1")
 	t.Setenv("ANS_TRANSPARENCY_URL", "")
 
 	err := runBadgeWithParams("agent-123", false, false, "")
 	if err == nil {
-		t.Fatal("expected an error for a base URL the CLI cannot map to a transparency log")
+		t.Fatal("expected an error when no transparency log URL is configured")
 	}
 	for _, sub := range []string{"--transparency-url", "ANS_TRANSPARENCY_URL"} {
 		if !strings.Contains(err.Error(), sub) {

@@ -33,6 +33,7 @@ scoop install ans/ans-cli
 ```bash
 export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"   # used by ans-cli badge
 ```
 
 Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:

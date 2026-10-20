@@ -102,7 +102,7 @@ The CLI can be configured using environment variables or command-line flags:
 | `ANS_TOKEN` | `--token-file` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token. The flag reads it from a file, or from stdin when `-`; takes precedence over the API key | (unset) |
 | `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated; still accepted and prints a migration note | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
-| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL used by `badge` | derived from the API base URL (see [badge](#badge)) |
+| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL; required by `badge` | (unset; see [Environment URLs](../../README.md#environment-urls)) |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
 
@@ -417,6 +417,9 @@ ans-cli get-server-certs <agentId>
 Retrieve the transparency log entry for an agent.
 
 ```bash
+# Point badge at the OTE transparency log, or pass --transparency-url
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"
+
 # Get transparency log entry
 ans-cli badge <agentId>
 
@@ -435,7 +438,7 @@ ans-cli badge <agentId> --audit --checkpoint
 - `--checkpoint`: Also retrieve log checkpoint
 - `--transparency-url`: Transparency log base URL (env: ANS_TRANSPARENCY_URL)
 
-When neither `--transparency-url` nor `ANS_TRANSPARENCY_URL` is set, the CLI derives the log URL from the API base URL by replacing the leading `api.` host label with `transparency.ans.`, so `https://api.ote-godaddy.com` maps to `https://transparency.ans.ote-godaddy.com`. A base URL whose host does not start with `api.` cannot be derived; pass `--transparency-url` for those.
+`badge` reads from the transparency log, a separate host from the API, so it needs `--transparency-url` or `ANS_TRANSPARENCY_URL` and fails before any request when neither is set. The repository README's [Environment URLs](../../README.md#environment-urls) table lists the log URL for each hosted environment.
 
 ## Complete Registration Workflow
 

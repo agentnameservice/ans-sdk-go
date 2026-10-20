@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -20,9 +18,7 @@ const (
 	defaultBadgeAuditLimit   = 10
 	maxMetadataHashesDisplay = 20
 
-	transparencyURLEnv     = "ANS_TRANSPARENCY_URL"
-	apiHostPrefix          = "api."
-	transparencyHostPrefix = "transparency.ans."
+	transparencyURLEnv = "ANS_TRANSPARENCY_URL"
 )
 
 func buildBadgeCmd() *cobra.Command {
@@ -56,7 +52,7 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	baseURL, err := resolveTransparencyURL(transparencyBaseURL, os.Getenv(transparencyURLEnv), cfg.BaseURL)
+	baseURL, err := resolveTransparencyURL(transparencyBaseURL, os.Getenv(transparencyURLEnv))
 	if err != nil {
 		return err
 	}
@@ -88,36 +84,14 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 	return nil
 }
 
-func resolveTransparencyURL(flagValue, envValue, apiBaseURL string) (string, error) {
+func resolveTransparencyURL(flagValue, envValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
 	if envValue != "" {
 		return envValue, nil
 	}
-	return deriveTransparencyURL(apiBaseURL)
-}
-
-// deriveTransparencyURL relies on every hosted ANS environment publishing its
-// transparency log at the root of the transparency.ans. host of the API gateway domain.
-func deriveTransparencyURL(apiBaseURL string) (string, error) {
-	u, err := url.Parse(apiBaseURL)
-	if err != nil {
-		return "", fmt.Errorf("cannot derive the transparency log URL: %w; pass --transparency-url or set %s", err, transparencyURLEnv)
-	}
-	host := strings.ToLower(u.Hostname())
-	if !strings.HasPrefix(host, apiHostPrefix) {
-		return "", fmt.Errorf(
-			"cannot derive the transparency log URL from base URL %q (expected an %s* host): pass --transparency-url or set %s",
-			u.Redacted(), apiHostPrefix, transparencyURLEnv,
-		)
-	}
-	host = transparencyHostPrefix + strings.TrimPrefix(host, apiHostPrefix)
-	if port := u.Port(); port != "" {
-		host = net.JoinHostPort(host, port)
-	}
-	derived := url.URL{Scheme: u.Scheme, Host: host}
-	return derived.String(), nil
+	return "", fmt.Errorf("no transparency log URL configured: pass --transparency-url or set %s (the README lists the URL for each environment)", transparencyURLEnv)
 }
 
 func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail, checkpoint bool) {
