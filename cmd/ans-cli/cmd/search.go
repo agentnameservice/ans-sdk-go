@@ -43,7 +43,7 @@ agents in every lifecycle state.`,
 	}
 
 	cmd.Flags().StringVar(&p.name, "name", "", "Agent display name (partial matching supported)")
-	cmd.Flags().StringVar(&p.host, "host", "", "Agent host domain (partial matching supported)")
+	cmd.Flags().StringVar(&p.host, "host", "", "Agent host domain (exact match)")
 	cmd.Flags().StringVar(&p.version, "version", "", "Agent version (flexible matching supported)")
 	cmd.Flags().StringVar(&p.protocol, "protocol", "", "Endpoint protocol filter (A2A, MCP, HTTP-API)")
 	cmd.Flags().StringSliceVar(&p.statuses, "status", nil, "Lifecycle status filter, repeatable (PENDING_DNS, ACTIVE, DEPRECATED, REVOKED, ALL)")

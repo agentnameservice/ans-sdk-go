@@ -18,8 +18,13 @@ func buildVerifyDNSCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "verify-dns <agentId>",
 		Short: "Verify DNS records are configured",
-		Long: `Verifies that all required DNS records (HTTPS, TLSA, _ans, _ans-badge) have been
-configured correctly. This is the final step for external domain registration.`,
+		Long: `Asks the registry to verify the DNS records for an agent. Which records are
+required depends on the agent's DNS profile: the response marks each expected
+record as required or optional and lists the ones it could not confirm. Optional
+records need not be published, but a published record that does not match what
+the registry expects blocks activation; in a DNSSEC-signed zone a validated TLSA
+fingerprint mismatch is treated as an attack signal. This is the final step for
+external domain registration.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runVerifyDNS,
 	}
@@ -113,18 +118,14 @@ func writeMissingRecordsTable(w io.Writer, records []models.DNSRecord) {
 	tw := tabwriter.NewWriter(w, 0, 0, tabwriterColumnPadding, ' ', 0)
 	fmt.Fprintln(tw, "  NAME\tTYPE\tVALUE\tREQUIRED")
 	for _, r := range records {
-		required := ""
-		if r.Required {
-			required = "yes"
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Name, r.Type, r.Value, required)
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Name, r.Type, r.Value, requiredMark(r.Required))
 	}
 	_ = tw.Flush()
 }
 
 func writeIncorrectRecordsTable(w io.Writer, records []models.IncorrectDNSRecord) {
 	tw := tabwriter.NewWriter(w, 0, 0, tabwriterColumnPadding, ' ', 0)
-	fmt.Fprintln(tw, "  NAME\tTYPE\tEXPECTED\tFOUND")
+	fmt.Fprintln(tw, "  NAME\tTYPE\tEXPECTED\tFOUND\tREQUIRED")
 	for _, ir := range records {
 		name := ir.Record.Name
 		recType := ir.Record.Type
@@ -137,7 +138,14 @@ func writeIncorrectRecordsTable(w io.Writer, records []models.IncorrectDNSRecord
 			name = "<unknown>"
 			recType = "<unknown>"
 		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", name, recType, ir.Expected, ir.Found)
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", name, recType, ir.Expected, ir.Found, requiredMark(ir.Record.Required))
 	}
 	_ = tw.Flush()
+}
+
+func requiredMark(required bool) string {
+	if required {
+		return "yes"
+	}
+	return ""
 }

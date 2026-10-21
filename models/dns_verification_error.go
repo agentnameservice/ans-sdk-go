@@ -1,6 +1,9 @@
 package models
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // DNSVerificationError is the typed error returned by Client.VerifyDNS when the
 // API responds with HTTP 422 carrying structured missingRecords/incorrectRecords
@@ -35,18 +38,31 @@ type IncorrectDNSRecord struct {
 
 // Error returns a human-readable summary of the verification failure.
 func (e *DNSVerificationError) Error() string {
-	missing := len(e.MissingRecords)
-	incorrect := len(e.IncorrectRecords)
-	switch {
-	case missing > 0 && incorrect > 0:
-		return fmt.Sprintf("DNS verification failed: %d missing record(s), %d incorrect record(s)", missing, incorrect)
-	case missing > 0:
-		return fmt.Sprintf("DNS verification failed: %d missing record(s)", missing)
-	case incorrect > 0:
-		return fmt.Sprintf("DNS verification failed: %d incorrect record(s)", incorrect)
-	default:
-		return "DNS verification failed"
+	var parts []string
+	if n := len(e.MissingRecords); n > 0 {
+		required := 0
+		for _, r := range e.MissingRecords {
+			if r.Required {
+				required++
+			}
+		}
+		parts = append(parts, recordCount("missing", n, required))
 	}
+	if n := len(e.IncorrectRecords); n > 0 {
+		required := 0
+		for _, r := range e.IncorrectRecords {
+			if r.Record.Required {
+				required++
+			}
+		}
+		parts = append(parts, recordCount("incorrect", n, required))
+	}
+
+	const prefix = "DNS verification failed"
+	if len(parts) == 0 {
+		return prefix
+	}
+	return prefix + ": " + strings.Join(parts, ", ")
 }
 
 // Unwrap exposes the embedded *ResponseError so errors.As(err, &respErr) keeps
@@ -56,4 +72,16 @@ func (e *DNSVerificationError) Unwrap() error {
 		return nil
 	}
 	return e.ResponseError
+}
+
+// recordCount qualifies a category only when it mixes required and optional
+// records. A category with none marked is indistinguishable from a registry
+// whose wire format omits the flag, as the V1 mismatch records do, so it is
+// never annotated from the other category's flags.
+func recordCount(category string, total, required int) string {
+	s := fmt.Sprintf("%d %s record(s)", total, category)
+	if required > 0 && required < total {
+		s += fmt.Sprintf(" (%d required)", required)
+	}
+	return s
 }
