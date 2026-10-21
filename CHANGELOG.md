@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.20...v0.2.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** badge no longer infers the transparency log URL from --base-url; set --transparency-url or ANS_TRANSPARENCY_URL.
+
+### Bug Fixes
+
+* **cli:** badge needs an explicit transparency log URL; DNS record counts; host search docs ([#95](https://github.com/agentnameservice/ans-sdk-go/issues/95)) ([27084d5](https://github.com/agentnameservice/ans-sdk-go/commit/27084d5b2016624dc43f88c3097f03ed7e39eaa5))
+
 ## [0.1.20](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.19...v0.1.20) (2026-10-15)
 
 
