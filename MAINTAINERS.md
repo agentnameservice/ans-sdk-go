@@ -1,15 +1,6 @@
-# Repository access roster
+# Maintainers
 
-## Maintainers
-
-| GitHub |
-| --- |
-| @kperry-godaddy |
-| @csnitker-godaddy |
-
-## Reviewers
-
-| GitHub |
-| --- |
-
-Update this file through a reviewed pull request. The organization automation reads the GitHub column in these two sections.
+The [sdk-go-maintainers team](https://github.com/orgs/agentnameservice/teams/sdk-go-maintainers)
+maintains this repository. Current membership and GitHub access are recorded in
+[the organization team configuration](https://github.com/agentnameservice/.github/blob/main/peribolos.yml).
+Propose membership changes there through a reviewed pull request.
