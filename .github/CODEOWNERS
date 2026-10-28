@@ -1,2 +1,2 @@
-# Repository Maintainers; see /MAINTAINERS.md.
-* @agentnameservice/sdk-go-maintainers
+# Review routing; merge permissions are managed separately.
+* @agentnameservice/sdk-go-maintainers @agentnameservice/tsc-owners
