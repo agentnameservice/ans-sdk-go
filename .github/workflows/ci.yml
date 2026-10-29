@@ -3,7 +3,6 @@
 name: CI
 
 on:
-  merge_group:
   push:
     branches:
       - main
