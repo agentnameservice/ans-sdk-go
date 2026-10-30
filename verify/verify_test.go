@@ -605,6 +605,52 @@ func TestServerVerifier_SANHostMatching_DialedHostMismatch(t *testing.T) {
 	}
 }
 
+func TestServerVerifier_SANHostMatching_CNMatchesButSANsDoNot(t *testing.T) {
+	// The CN is ignored when DNS SANs are present (RFC 6125).
+	// Even if cn == badgeHost, a cert with non-matching SANs must be rejected.
+	host := "agent.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := host // CN matches — must still be rejected because the SAN does not
+	dnsSANs := []string{"other.example.com"}
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, dnsSANs, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeHostnameMismatch {
+		t.Errorf("Verify() expected HostnameMismatch, got %v (Expected=%q, Actual=%q)", outcome.Type, outcome.Expected, outcome.Actual)
+	}
+	if outcome.Expected != host {
+		t.Errorf("Verify() Expected = %q, want %q", outcome.Expected, host)
+	}
+	if outcome.Actual != "other.example.com" {
+		t.Errorf("Verify() Actual = %q, want %q", outcome.Actual, "other.example.com")
+	}
+}
+
 func TestServerVerifier_WithCache(t *testing.T) {
 	host := "test.example.com"
 	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"

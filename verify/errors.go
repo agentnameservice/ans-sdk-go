@@ -123,6 +123,7 @@ const (
 	// VerificationErrorAnsNameMismatch indicates ANS name mismatch.
 	VerificationErrorAnsNameMismatch
 	// VerificationErrorNoCN indicates no CN in certificate.
+	// Retained for backward compatibility; the verifiers no longer produce it and report VerificationErrorNoURISAN when a certificate lacks an ANS identity.
 	VerificationErrorNoCN
 	// VerificationErrorNoURISAN indicates no URI SAN in certificate.
 	VerificationErrorNoURISAN
