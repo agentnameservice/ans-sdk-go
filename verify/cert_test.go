@@ -806,3 +806,62 @@ func TestAnsName_String_Additional(t *testing.T) {
 func strPtr(s string) *string {
 	return &s
 }
+
+func TestCertIdentity_MatchesHost(t *testing.T) {
+	skyboundSANs := []string{
+		"skybound-travel.com",
+		"seller.skybound-travel.com",
+		"*.seller.skybound-travel.com",
+	}
+
+	tests := []struct {
+		name string
+		sans []string
+		host string
+		want bool
+	}{
+		{"exact match at index 1", skyboundSANs, "seller.skybound-travel.com", true},
+		{"wildcard matches one label", skyboundSANs, "shop.seller.skybound-travel.com", true},
+		{"wildcard too many labels", skyboundSANs, "a.b.seller.skybound-travel.com", false},
+		{"no matching SAN", skyboundSANs, "other.example.com", false},
+		{"single wildcard SAN matches", []string{"*.example.com"}, "agent.example.com", true},
+		{"wildcard requires left label", []string{"*.example.com"}, "example.com", false},
+		{"wildcard covers only one label", []string{"*.example.com"}, "a.b.example.com", false},
+		{"case insensitive host", []string{"agent.example.com"}, "AGENT.Example.COM", true},
+		{"trailing dot on host", []string{"agent.example.com"}, "agent.example.com.", true},
+		{"partial-label wildcard rejected", []string{"f*.example.com"}, "foo.example.com", false},
+		{"bare wildcard SAN rejected", []string{"*"}, "example.com", false},
+		{"wildcard not leftmost rejected", []string{"agent.*.com"}, "agent.example.com", false},
+		{"IPv4 literal", []string{"agent.example.com"}, "192.0.2.10", false},
+		{"IPv6 literal", []string{"agent.example.com"}, "2001:db8::1", false},
+		{"empty SANs", nil, "agent.example.com", false},
+		{"empty host", []string{"agent.example.com"}, "", false},
+		{"bare dot host", []string{"agent.example.com"}, ".", false},
+		{"punycode opaque ASCII", []string{"xn--bcher-kva.example.com"}, "xn--bcher-kva.example.com", true},
+		{"host with port rejected", []string{"agent.example.com"}, "agent.example.com:443", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (&CertIdentity{DNSSANs: tt.sans}).MatchesHost(tt.host)
+			if got != tt.want {
+				t.Errorf("MatchesHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+
+			// Drift oracle: x509.Certificate.VerifyHostname must agree on every row.
+			oracleGot := (&x509.Certificate{DNSNames: tt.sans}).VerifyHostname(tt.host) == nil
+			if oracleGot != tt.want {
+				t.Errorf("oracle VerifyHostname(%q) = %v, want %v (oracle disagreement)", tt.host, oracleGot, tt.want)
+			}
+		})
+	}
+
+	// CommonName is never consulted; only DNSSANs are checked.
+	t.Run("does not consult CommonName", func(t *testing.T) {
+		cn := "agent.example.com"
+		got := (&CertIdentity{CommonName: &cn, DNSSANs: []string{"other.example.com"}}).MatchesHost(cn)
+		if got {
+			t.Error("MatchesHost consulted CommonName; want false when CN matches but no DNS SAN does")
+		}
+	})
+}
