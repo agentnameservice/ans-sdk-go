@@ -33,6 +33,7 @@ scoop install ans/ans-cli
 ```bash
 export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"   # used by ans-cli badge
 ```
 
 Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:
@@ -374,7 +375,7 @@ Searches for agents using flexible criteria with pagination support. Filter
 values are provided via functional options:
 
 - `ans.WithSearchName(name)` — agent display name (partial match)
-- `ans.WithSearchHost(host)` — agent host domain (partial match)
+- `ans.WithSearchHost(host)` — agent host domain (exact match)
 - `ans.WithSearchVersion(version)` — agent version (flexible match)
 - `ans.WithSearchProtocol(models.AgentProtocolMCP)` — endpoint protocol
 - `ans.WithSearchStatus(models.AgentStatusPendingDNS, ...)` — lifecycle status (multi-valued). Defaults to `ACTIVE` server-side when unset; pass `AgentStatusPendingDNS` to find registrations still completing DNS validation, or `AgentStatusAll` to include every state.

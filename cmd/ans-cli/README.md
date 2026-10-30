@@ -102,6 +102,7 @@ The CLI can be configured using environment variables or command-line flags:
 | `ANS_TOKEN` | `--token-file` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token. The flag reads it from a file, or from stdin when `-`; takes precedence over the API key | (unset) |
 | `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated; still accepted and prints a migration note | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
+| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL; required by `badge` | (unset; see [Environment URLs](../../README.md#environment-urls)) |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
 
@@ -238,7 +239,7 @@ ans-cli verify-acme <agentId>
 
 ### verify-dns
 
-Verify that all required DNS records have been configured correctly.
+Ask the registry to verify the DNS records for an agent. The response marks each expected record as required or optional for the agent's DNS profile and lists the ones it could not confirm. Optional records need not be published, but a published record that does not match what the registry expects blocks activation; in a DNSSEC-signed zone a validated TLSA fingerprint mismatch is treated as an attack signal.
 
 ```bash
 ans-cli verify-dns <agentId>
@@ -261,7 +262,7 @@ ans-cli search --name "Analyzer" --limit 10 --offset 0
 
 **Flags:**
 - `--name`: Agent display name (partial matching)
-- `--host`: Agent host domain (partial matching)
+- `--host`: Agent host domain (exact match)
 - `--version`: Agent version (flexible matching)
 - `--limit`: Maximum number of results (default: 20, max: 100)
 - `--offset`: Number of results to skip
@@ -416,6 +417,9 @@ ans-cli get-server-certs <agentId>
 Retrieve the transparency log entry for an agent.
 
 ```bash
+# Point badge at the OTE transparency log, or pass --transparency-url
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"
+
 # Get transparency log entry
 ans-cli badge <agentId>
 
@@ -433,6 +437,8 @@ ans-cli badge <agentId> --audit --checkpoint
 - `--audit`: Also retrieve audit trail
 - `--checkpoint`: Also retrieve log checkpoint
 - `--transparency-url`: Transparency log base URL (env: ANS_TRANSPARENCY_URL)
+
+`badge` reads from the transparency log, a separate host from the API, so it needs `--transparency-url` or `ANS_TRANSPARENCY_URL` and fails before any request when neither is set. The repository README's [Environment URLs](../../README.md#environment-urls) table lists the log URL for each hosted environment.
 
 ## Complete Registration Workflow
 
