@@ -327,31 +327,31 @@ func (v *ClientVerifier) Verify(ctx context.Context, cert *CertIdentity) *Verifi
 	// 2. Extract version
 	version := ansName.Version
 
-	// 4. Check cache first (by FQDN + version)
+	// 3. Check cache first (by FQDN + version)
 	if v.config.cache != nil {
 		if cached, ok := v.config.cache.GetByFqdnVersion(fqdn, version); ok {
 			return v.verifyWithBadge(cached.Badge, cert, fqdn, ansName)
 		}
 	}
 
-	// 5. Fetch badge from DNS + TLog (matching version)
+	// 4. Fetch badge from DNS + TLog (matching version)
 	badge, outcome := v.fetchBadge(ctx, fqdn, version)
 	if outcome != nil {
 		return outcome
 	}
 
-	// 6. Cache the badge
+	// 5. Cache the badge
 	if v.config.cache != nil {
 		v.config.cache.InsertForVersion(fqdn, version, badge)
 	}
 
-	// 7. Verify against badge
+	// 6. Verify against badge
 	outcome = v.verifyWithBadge(badge, cert, fqdn, ansName)
 	if !outcome.IsSuccess() {
 		return outcome
 	}
 
-	// 8. Optional DANE/TLSA check (can reject even if badge verification passed)
+	// 7. Optional DANE/TLSA check (can reject even if badge verification passed)
 	if rejection := verifyDANE(ctx, v.config, fqdn, cert, outcome); rejection != nil {
 		return rejection
 	}

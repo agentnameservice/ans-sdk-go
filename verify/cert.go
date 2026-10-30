@@ -216,8 +216,13 @@ func CertIdentityFromFingerprintAndCN(fingerprint CertFingerprint, cn string) *C
 	}
 }
 
-// FQDN returns the FQDN from the certificate.
-// Prefers DNS SAN (more reliable) over CN.
+// FQDN returns the first DNS SAN, or the Common Name when the certificate has
+// no DNS SANs.
+//
+// Deprecated: a certificate may carry several DNS SANs and the first one is
+// not necessarily the agent's hostname. Use MatchesHost to test whether a
+// hostname is covered by the certificate, or AnsName to read the ANS identity
+// from the URI SAN.
 func (c *CertIdentity) FQDN() *string {
 	if len(c.DNSSANs) > 0 {
 		return &c.DNSSANs[0]
