@@ -24,6 +24,8 @@ const (
 	DefaultEventsLimit = 20
 	// DefaultRSAKeySize is the default RSA key size in bits
 	DefaultRSAKeySize = 2048
+	// DefaultCSRType selects which CSRs generate-csr produces
+	DefaultCSRType = csrTypeBoth
 	// DefaultPollIntervalSeconds is the default seconds between polls in follow mode
 	DefaultPollIntervalSeconds = 5
 )

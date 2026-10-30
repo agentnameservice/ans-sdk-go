@@ -34,6 +34,16 @@ func TestCreateClient(t *testing.T) {
 			errSubstr: "invalid API key format",
 		},
 		{
+			name: "invalid API key format points PAT holders at --token",
+			cfg: &config.Config{
+				APIVersion: "v1",
+				BaseURL:    "https://api.example.com",
+				APIKey:     "a-personal-access-token-pasted-into-the-wrong-variable",
+			},
+			wantErr:   true,
+			errSubstr: "set ANS_TOKEN or use --token-file instead",
+		},
+		{
 			name: "no credentials at all",
 			cfg: &config.Config{
 				APIVersion: "v1",
@@ -41,7 +51,7 @@ func TestCreateClient(t *testing.T) {
 				APIKey:     "",
 			},
 			wantErr:   true,
-			errSubstr: "OAuth token or API key is required",
+			errSubstr: "bearer token or API key is required",
 		},
 		{
 			name: "valid API key with verbose",
@@ -54,31 +64,51 @@ func TestCreateClient(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "OAuth token only",
+			name: "token only",
 			cfg: &config.Config{
 				APIVersion: "v1",
 				BaseURL:    "https://api.example.com",
-				OAuthToken: "tok",
+				Token:      "tok",
 			},
 			wantErr: false,
 		},
 		{
-			name: "OAuth token wins over malformed API key",
+			name: "token wins over malformed API key",
 			cfg: &config.Config{
 				APIVersion: "v1",
 				BaseURL:    "https://api.example.com",
 				APIKey:     "no-colon-here",
-				OAuthToken: "tok",
+				Token:      "tok",
 			},
 			wantErr: false,
 		},
 		{
-			name: "OAuth token with verbose",
+			name: "token with verbose",
 			cfg: &config.Config{
 				APIVersion: "v1",
 				BaseURL:    "https://api.example.com",
-				OAuthToken: "tok",
+				Token:      "tok",
 				Verbose:    true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "token supplied under a deprecated name still authenticates",
+			cfg: &config.Config{
+				APIVersion:              "v1",
+				BaseURL:                 "https://api.example.com",
+				Token:                   "tok",
+				TokenFromDeprecatedName: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "token kept while a different deprecated value is ignored",
+			cfg: &config.Config{
+				APIVersion:             "v1",
+				BaseURL:                "https://api.example.com",
+				Token:                  "tok",
+				DeprecatedTokenIgnored: true,
 			},
 			wantErr: false,
 		},
@@ -118,9 +148,9 @@ func TestAuthOption(t *testing.T) {
 		errSubstr  string
 	}{
 		{
-			name:       "OAuth token only",
-			cfg:        &config.Config{OAuthToken: "tok"},
-			wantMethod: "OAuth bearer token",
+			name:       "token only",
+			cfg:        &config.Config{Token: "tok"},
+			wantMethod: "bearer token",
 		},
 		{
 			name:       "API key only",
@@ -128,21 +158,27 @@ func TestAuthOption(t *testing.T) {
 			wantMethod: "API key",
 		},
 		{
-			name:       "OAuth token wins when both are set",
-			cfg:        &config.Config{APIKey: "key:secret", OAuthToken: "tok"},
-			wantMethod: "OAuth bearer token",
+			name:       "token wins when both are set",
+			cfg:        &config.Config{APIKey: "key:secret", Token: "tok"},
+			wantMethod: "bearer token",
 		},
 		{
 			name:      "no credentials",
 			cfg:       &config.Config{},
 			wantErr:   true,
-			errSubstr: "OAuth token or API key is required",
+			errSubstr: "bearer token or API key is required",
 		},
 		{
-			name:      "malformed API key without OAuth token",
+			name:      "malformed API key without token",
 			cfg:       &config.Config{APIKey: "no-colon-here"},
 			wantErr:   true,
 			errSubstr: "invalid API key format",
+		},
+		{
+			name:      "malformed API key error points PAT holders at --token",
+			cfg:       &config.Config{APIKey: "no-colon-here"},
+			wantErr:   true,
+			errSubstr: "set ANS_TOKEN or use --token-file instead",
 		},
 	}
 

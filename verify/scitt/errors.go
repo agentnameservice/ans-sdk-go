@@ -1,6 +1,9 @@
 package scitt
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // CoseErrorType represents the type of COSE_Sign1 parsing error.
 type CoseErrorType int
@@ -224,6 +227,10 @@ type TransportError struct {
 	Type       TransportErrorType
 	Message    string
 	StatusCode int
+	// RetryAfter is the wait the server requested through a Retry-After header
+	// on a 503 or 429 response, capped at 24 hours; zero when the header was
+	// absent or malformed.
+	RetryAfter time.Duration
 	Cause      error
 }
 
@@ -237,7 +244,11 @@ func (e *TransportError) Error() string {
 	case TransportErrNotSupported:
 		return fmt.Sprintf("not supported: %s", e.Message)
 	case TransportErrHTTPError:
-		return fmt.Sprintf("HTTP error (%d): %s", e.StatusCode, e.Message)
+		msg := fmt.Sprintf("HTTP error (%d): %s", e.StatusCode, e.Message)
+		if e.RetryAfter > 0 {
+			msg += fmt.Sprintf(" (retry after %v)", e.RetryAfter)
+		}
+		return msg
 	case TransportErrBase64Decode:
 		return fmt.Sprintf("base64 decode failed: %s", e.Message)
 	default:
@@ -260,4 +271,58 @@ func (e *TransportError) ShouldFallbackToBadge() bool {
 	default:
 		return false
 	}
+}
+
+// CheckpointErrorType represents the type of checkpoint note parsing error or
+// checkpoint-to-receipt binding failure.
+type CheckpointErrorType int
+
+const (
+	// CheckpointErrOversizedInput indicates the note exceeds MaxCheckpointNoteSize.
+	CheckpointErrOversizedInput CheckpointErrorType = iota
+	// CheckpointErrMalformed indicates the note does not have the signed-note shape:
+	// a body, a blank line, and one or more well-formed signature lines.
+	CheckpointErrMalformed
+	// CheckpointErrInvalidSize indicates the tree size line is not a decimal uint64.
+	CheckpointErrInvalidSize
+	// CheckpointErrInvalidRootHash indicates the root hash line is not the base64 of 32 bytes.
+	CheckpointErrInvalidRootHash
+	// CheckpointErrSizeMismatch indicates a receipt's tree size differs from the
+	// checkpoint's. The receipt is not thereby invalid; see Checkpoint.Covers.
+	CheckpointErrSizeMismatch
+	// CheckpointErrRootMismatch indicates a receipt's root differs from the checkpoint's.
+	CheckpointErrRootMismatch
+)
+
+// CheckpointError represents a checkpoint note parsing failure or a receipt
+// the checkpoint does not cover.
+type CheckpointError struct {
+	Type    CheckpointErrorType
+	Message string
+	Cause   error
+}
+
+// Error implements the error interface.
+func (e *CheckpointError) Error() string {
+	switch e.Type {
+	case CheckpointErrOversizedInput:
+		return fmt.Sprintf("checkpoint oversized input: %s", e.Message)
+	case CheckpointErrMalformed:
+		return fmt.Sprintf("malformed checkpoint: %s", e.Message)
+	case CheckpointErrInvalidSize:
+		return fmt.Sprintf("invalid checkpoint size: %s", e.Message)
+	case CheckpointErrInvalidRootHash:
+		return fmt.Sprintf("invalid checkpoint root hash: %s", e.Message)
+	case CheckpointErrSizeMismatch:
+		return fmt.Sprintf("checkpoint size mismatch: %s", e.Message)
+	case CheckpointErrRootMismatch:
+		return fmt.Sprintf("checkpoint root mismatch: %s", e.Message)
+	default:
+		return fmt.Sprintf("checkpoint error: %s", e.Message)
+	}
+}
+
+// Unwrap returns the underlying cause.
+func (e *CheckpointError) Unwrap() error {
+	return e.Cause
 }

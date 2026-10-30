@@ -2,7 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,12 +26,14 @@ import (
 )
 
 // setupViperForTest sets viper values needed for config.Load() and registers cleanup.
-// oauth-token is explicitly zeroed so a developer's exported ANS_OAUTH_TOKEN
-// cannot leak into tests through viper's env binding.
+// Every token key is explicitly zeroed so a developer's exported ANS_TOKEN or
+// ANS_OAUTH_TOKEN cannot leak into tests through viper's env bindings.
 func setupViperForTest(t *testing.T, serverURL string) {
 	t.Helper()
 	viper.Set("api-key", "testkey:testsecret")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", serverURL)
 	viper.Set("api-version", "v1")
 	viper.Set("verbose", false)
@@ -78,7 +88,9 @@ func TestRunStatus_JSONMode(t *testing.T) {
 
 func TestRunStatus_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -153,7 +165,9 @@ func TestRunSearchWithParams_JSONMode(t *testing.T) {
 
 func TestRunSearchWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -256,7 +270,9 @@ func TestRunResolve_JSONMode(t *testing.T) {
 
 func TestRunResolve_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -327,7 +343,9 @@ func TestRunRevoke_JSONMode(t *testing.T) {
 
 func TestRunRevoke_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -407,7 +425,9 @@ func TestRunCsrStatus_JSONMode(t *testing.T) {
 
 func TestRunCsrStatus_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -463,7 +483,9 @@ func TestRunVerifyACME_JSONMode(t *testing.T) {
 
 func TestRunVerifyACME_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -519,7 +541,9 @@ func TestRunVerifyDNS_JSONMode(t *testing.T) {
 
 func TestRunVerifyDNS_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -626,12 +650,9 @@ func TestRunSubmitIdentityCSR_Success(t *testing.T) {
 
 	setupViperForTest(t, server.URL)
 
-	// Create a temp CSR file
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeIdentityCSR(t, t.TempDir())
 
-	err := runSubmitIdentityCSRWithParams("agent-123", csrFile)
+	err := runSubmitIdentityCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitIdentityCSRWithParams() error = %v", err)
 	}
@@ -651,11 +672,9 @@ func TestRunSubmitIdentityCSR_JSONMode(t *testing.T) {
 	setupViperForTest(t, server.URL)
 	viper.Set("json", true)
 
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeIdentityCSR(t, t.TempDir())
 
-	err := runSubmitIdentityCSRWithParams("agent-123", csrFile)
+	err := runSubmitIdentityCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitIdentityCSRWithParams() JSON mode error = %v", err)
 	}
@@ -663,11 +682,13 @@ func TestRunSubmitIdentityCSR_JSONMode(t *testing.T) {
 
 func TestRunSubmitIdentityCSR_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
-	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr")
+	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr", false)
 	if err == nil {
 		t.Fatal("runSubmitIdentityCSRWithParams() expected error for missing API key")
 	}
@@ -676,7 +697,7 @@ func TestRunSubmitIdentityCSR_NoAPIKey(t *testing.T) {
 func TestRunSubmitIdentityCSR_BadFile(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
-	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr")
+	err := runSubmitIdentityCSRWithParams("agent-123", "/nonexistent/file.csr", false)
 	if err == nil {
 		t.Fatal("runSubmitIdentityCSRWithParams() expected error for bad file")
 	}
@@ -695,11 +716,9 @@ func TestRunSubmitServerCSR_Success(t *testing.T) {
 
 	setupViperForTest(t, server.URL)
 
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "server.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeServerCSR(t, t.TempDir())
 
-	err := runSubmitServerCSRWithParams("agent-123", csrFile)
+	err := runSubmitServerCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitServerCSRWithParams() error = %v", err)
 	}
@@ -719,11 +738,9 @@ func TestRunSubmitServerCSR_JSONMode(t *testing.T) {
 	setupViperForTest(t, server.URL)
 	viper.Set("json", true)
 
-	tmpDir := t.TempDir()
-	csrFile := filepath.Join(tmpDir, "server.csr")
-	os.WriteFile(csrFile, []byte("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"), 0600)
+	csrFile := writeServerCSR(t, t.TempDir())
 
-	err := runSubmitServerCSRWithParams("agent-123", csrFile)
+	err := runSubmitServerCSRWithParams("agent-123", csrFile, false)
 	if err != nil {
 		t.Fatalf("runSubmitServerCSRWithParams() JSON mode error = %v", err)
 	}
@@ -732,7 +749,7 @@ func TestRunSubmitServerCSR_JSONMode(t *testing.T) {
 func TestRunSubmitServerCSR_BadFile(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
-	err := runSubmitServerCSRWithParams("agent-123", "/nonexistent/file.csr")
+	err := runSubmitServerCSRWithParams("agent-123", "/nonexistent/file.csr", false)
 	if err == nil {
 		t.Fatal("runSubmitServerCSRWithParams() expected error for bad file")
 	}
@@ -786,7 +803,9 @@ func TestRunEventsWithParams_JSONMode(t *testing.T) {
 
 func TestRunEventsWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -930,7 +949,9 @@ func TestRunBadgeWithParams_ServerError(t *testing.T) {
 
 func TestRunRegisterWithParams_NoAPIKey(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -969,8 +990,7 @@ func TestRunRegisterWithParams_BadServerCSR(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -991,8 +1011,7 @@ func TestRunRegisterWithParams_BadServerCert(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1013,8 +1032,7 @@ func TestRunRegisterWithParams_InvalidFunctions(t *testing.T) {
 	setupViperForTest(t, "http://localhost")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1046,8 +1064,7 @@ func TestRunRegisterWithParams_Success(t *testing.T) {
 	setupViperForTest(t, server.URL)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1079,8 +1096,7 @@ func TestRunRegisterWithParams_JSONMode(t *testing.T) {
 	viper.Set("json", true)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1111,10 +1127,8 @@ func TestRunRegisterWithParams_WithServerCSR(t *testing.T) {
 	setupViperForTest(t, server.URL)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	serverCSR := filepath.Join(tmpDir, "server.csr")
-	os.WriteFile(identityCSR, []byte("ID-CSR"), 0600)
-	os.WriteFile(serverCSR, []byte("SRV-CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
+	serverCSR := writeServerCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:          "name",
@@ -1146,9 +1160,8 @@ func TestRunRegisterWithParams_WithServerCert(t *testing.T) {
 	setupViperForTest(t, server.URL)
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
+	identityCSR := writeIdentityCSR(t, tmpDir)
 	serverCert := filepath.Join(tmpDir, "server.cert")
-	os.WriteFile(identityCSR, []byte("ID-CSR"), 0600)
 	os.WriteFile(serverCert, []byte("CERT"), 0600)
 
 	err := runRegisterWithParams(&registerParams{
@@ -1237,7 +1250,7 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 	return <-outCh, <-errCh
 }
 
-func TestRunStatus_OAuthToken(t *testing.T) {
+func TestRunStatus_Token(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1250,14 +1263,14 @@ func TestRunStatus_OAuthToken(t *testing.T) {
 	defer server.Close()
 
 	viper.Set("api-key", "")
-	viper.Set("oauth-token", "tok")
+	viper.Set("token", "tok")
 	viper.Set("base-url", server.URL)
 	t.Cleanup(func() { viper.Reset() })
 
 	cmd := buildStatusCmd()
 	cmd.SetArgs([]string{"agent-123"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("runStatus() with OAuth token error = %v", err)
+		t.Fatalf("runStatus() with bearer token error = %v", err)
 	}
 
 	mu.Lock()
@@ -1267,7 +1280,7 @@ func TestRunStatus_OAuthToken(t *testing.T) {
 	}
 }
 
-func TestRunStatus_OAuthPrecedence(t *testing.T) {
+func TestRunStatus_TokenPrecedence(t *testing.T) {
 	var mu sync.Mutex
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1280,7 +1293,7 @@ func TestRunStatus_OAuthPrecedence(t *testing.T) {
 	defer server.Close()
 
 	setupViperForTest(t, server.URL)
-	viper.Set("oauth-token", "secret-oauth-value")
+	viper.Set("token", "secret-token-value")
 	viper.Set("json", true)
 
 	stdout, stderr := captureOutput(t, func() {
@@ -1294,14 +1307,14 @@ func TestRunStatus_OAuthPrecedence(t *testing.T) {
 	mu.Lock()
 	gotAuthCopy := gotAuth
 	mu.Unlock()
-	if gotAuthCopy != "Bearer secret-oauth-value" {
-		t.Errorf("Authorization header = %q, want %q (OAuth must win over API key)", gotAuthCopy, "Bearer secret-oauth-value")
+	if gotAuthCopy != "Bearer secret-token-value" {
+		t.Errorf("Authorization header = %q, want %q (bearer token must win over API key)", gotAuthCopy, "Bearer secret-token-value")
 	}
 
-	if !strings.Contains(stderr, "using the OAuth bearer token") {
+	if !strings.Contains(stderr, "using the bearer token") {
 		t.Errorf("stderr = %q, want the both-credentials notice", stderr)
 	}
-	if strings.Contains(stderr, "secret-oauth-value") {
+	if strings.Contains(stderr, "secret-token-value") {
 		t.Errorf("stderr leaks the token value: %q", stderr)
 	}
 
@@ -1311,7 +1324,7 @@ func TestRunStatus_OAuthPrecedence(t *testing.T) {
 	}
 }
 
-func TestRunStatus_OAuthExpired401(t *testing.T) {
+func TestRunStatus_TokenExpired401(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -1324,7 +1337,7 @@ func TestRunStatus_OAuthExpired401(t *testing.T) {
 	defer server.Close()
 
 	viper.Set("api-key", "")
-	viper.Set("oauth-token", "expired-tok")
+	viper.Set("token", "expired-tok")
 	viper.Set("base-url", server.URL)
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1344,7 +1357,9 @@ func TestRunStatus_OAuthExpired401(t *testing.T) {
 // credentials AND an invalid reason, the credential error must win.
 func TestRunRevoke_CredentialErrorBeforeArgValidation(t *testing.T) {
 	viper.Set("api-key", "")
+	viper.Set("token", "")
 	viper.Set("oauth-token", "")
+	viper.Set("oauth-token-env", "")
 	viper.Set("base-url", "http://localhost")
 	t.Cleanup(func() { viper.Reset() })
 
@@ -1352,20 +1367,33 @@ func TestRunRevoke_CredentialErrorBeforeArgValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("runRevoke() expected error")
 	}
-	if !strings.Contains(err.Error(), "OAuth token or API key is required") {
+	if !strings.Contains(err.Error(), "bearer token or API key is required") {
 		t.Errorf("error = %q, want the credentials error before reason validation", err.Error())
 	}
 }
 
-func TestInitConfig_OAuthTokenEnv(t *testing.T) {
-	viper.Reset()
-	t.Setenv("ANS_OAUTH_TOKEN", "env-tok")
-	t.Cleanup(func() { viper.Reset() })
+func TestInitConfig_TokenEnvBindings(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVar   string
+		viperKey string
+	}{
+		{name: "ANS_TOKEN binds to the token key", envVar: "ANS_TOKEN", viperKey: "token"},
+		{name: "ANS_OAUTH_TOKEN binds to its own env-only key", envVar: "ANS_OAUTH_TOKEN", viperKey: "oauth-token-env"},
+	}
 
-	initConfig()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv(tt.envVar, "env-tok")
+			t.Cleanup(func() { viper.Reset() })
 
-	if got := viper.GetString("oauth-token"); got != "env-tok" {
-		t.Errorf("viper oauth-token = %q, want %q (ANS_OAUTH_TOKEN env binding)", got, "env-tok")
+			initConfig()
+
+			if got := viper.GetString(tt.viperKey); got != "env-tok" {
+				t.Errorf("viper %q = %q, want %q (%s env binding)", tt.viperKey, got, "env-tok", tt.envVar)
+			}
+		})
 	}
 }
 
@@ -1378,8 +1406,7 @@ func TestRunRegisterWithParams_InvalidDiscoveryProfile(t *testing.T) {
 	viper.Set("api-version", "v2")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:              "name",
@@ -1403,8 +1430,7 @@ func TestRunRegisterWithParams_DiscoveryProfilesRequireV2(t *testing.T) {
 	setupViperForTest(t, "http://localhost") // api-version unset → flag default v1
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:              "name",
@@ -1433,7 +1459,7 @@ func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
 
 	// Captures are written in the handler goroutine and read from the
 	// test goroutine; the mutex is the happens-before edge (mirrors
-	// TestRunStatus_OAuthToken).
+	// TestRunStatus_Token).
 	var mu sync.Mutex
 	var gotPath string
 	var gotBody []byte
@@ -1451,8 +1477,7 @@ func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
 	viper.Set("api-version", "v2")
 
 	tmpDir := t.TempDir()
-	identityCSR := filepath.Join(tmpDir, "identity.csr")
-	os.WriteFile(identityCSR, []byte("CSR"), 0600)
+	identityCSR := writeIdentityCSR(t, tmpDir)
 
 	err := runRegisterWithParams(&registerParams{
 		name:              "name",
@@ -1479,5 +1504,329 @@ func TestRunRegisterWithParams_DiscoveryProfilesV2Success(t *testing.T) {
 	profiles, ok := body["discoveryProfiles"].([]any)
 	if !ok || len(profiles) != 1 || profiles[0] != "ANS_DNSAID" {
 		t.Errorf("discoveryProfiles: got %v, want [ANS_DNSAID] (input normalized to upper case)", body["discoveryProfiles"])
+	}
+}
+
+// writeIdentityCSR writes an EC P-256 CSR that satisfies the identity intake rules.
+func writeIdentityCSR(t *testing.T, dir string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	return writeCSRFile(t, filepath.Join(dir, "identity.csr"), key, x509.ECDSAWithSHA256)
+}
+
+// writeServerCSR writes an RSA-2048 CSR that satisfies the server intake rules.
+func writeServerCSR(t *testing.T, dir string) string {
+	t.Helper()
+	return writeCSRFile(t, filepath.Join(dir, "server.csr"), newRSAKey(t, 2048), x509.SHA256WithRSA)
+}
+
+func newRSAKey(t *testing.T, bits int) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey(%d): %v", bits, err)
+	}
+	return key
+}
+
+func writeCSRFile(t *testing.T, path string, key crypto.Signer, sigAlg x509.SignatureAlgorithm) string {
+	t.Helper()
+	return writeFile(t, path, newCSRPEM(t, key, sigAlg))
+}
+
+func newCSRPEM(t *testing.T, key crypto.Signer, sigAlg x509.SignatureAlgorithm) []byte {
+	t.Helper()
+	template := x509.CertificateRequest{
+		Subject:            pkix.Name{CommonName: "test.example.com"},
+		DNSNames:           []string{"test.example.com"},
+		SignatureAlgorithm: sigAlg,
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &template, key)
+	if err != nil {
+		t.Fatalf("CreateCertificateRequest: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+}
+
+func writeFile(t *testing.T, path string, data []byte) string {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+// noRegistryCalls returns a server that fails the test if any request reaches it.
+func noRegistryCalls(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("registry must not be called when preflight validation fails, got %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+}
+
+func TestRunSubmitCSR_PreflightRejectsBeforeNetwork(t *testing.T) {
+	server := noRegistryCalls(t)
+	defer server.Close()
+	setupViperForTest(t, server.URL)
+	dir := t.TempDir()
+
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	const (
+		malformedCSRBlock    = "-----BEGIN CERTIFICATE REQUEST-----\nnot base64!\n-----END CERTIFICATE REQUEST-----\n"
+		unterminatedCSRBlock = "-----BEGIN CERTIFICATE REQUEST-----\nMIIBAA==\n"
+	)
+
+	tests := []struct {
+		name    string
+		run     func(csrFile string) error
+		csrFile string
+		wantErr string
+	}{
+		{
+			name:    "identity CSR on P-384",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "id-p384.csr"), p384, x509.ECDSAWithSHA384),
+			wantErr: "EC key curve must be P-256",
+		},
+		{
+			name:    "identity CSR with RSA 1024",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "id-1024.csr"), newRSAKey(t, 1024), x509.SHA256WithRSA),
+			wantErr: "RSA key size must be 2048 or 3072 or 4096 bits",
+		},
+		{
+			name:    "server CSR with EC key",
+			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f, false) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-ec.csr"), p256, x509.ECDSAWithSHA256),
+			wantErr: "CSR public key must use RSA, but was 'EC'",
+		},
+		{
+			name:    "server CSR signed with SHA-384",
+			run:     func(f string) error { return runSubmitServerCSRWithParams("agent-123", f, false) },
+			csrFile: writeCSRFile(t, filepath.Join(dir, "srv-sha384.csr"), newRSAKey(t, 2048), x509.SHA384WithRSA),
+			wantErr: "CSR signature algorithm must be SHA256WITHRSA",
+		},
+		{
+			name:    "identity CSR file with a malformed leading block",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
+			csrFile: writeFile(t, filepath.Join(dir, "id-malformed-lead.csr"), append([]byte(malformedCSRBlock), newCSRPEM(t, p256, x509.ECDSAWithSHA256)...)),
+			wantErr: "expected exactly one PEM",
+		},
+		{
+			name:    "identity CSR file with an unterminated leading block",
+			run:     func(f string) error { return runSubmitIdentityCSRWithParams("agent-123", f, false) },
+			csrFile: writeFile(t, filepath.Join(dir, "id-unterminated-lead.csr"), append([]byte(unterminatedCSRBlock), newCSRPEM(t, p256, x509.ECDSAWithSHA256)...)),
+			wantErr: "expected exactly one PEM",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(tc.csrFile)
+			if err == nil || !strings.Contains(err.Error(), "preflight validation") || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want preflight failure containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunRegisterWithParams_Preflight(t *testing.T) {
+	dir := t.TempDir()
+	identityCSR := writeIdentityCSR(t, dir)
+	serverCSR := writeServerCSR(t, dir)
+	ecServerCSR := func() string {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatalf("ecdsa.GenerateKey: %v", err)
+		}
+		return writeCSRFile(t, filepath.Join(dir, "server-ec.csr"), key, x509.ECDSAWithSHA256)
+	}()
+	baseParams := func(identity, server string) *registerParams {
+		return &registerParams{
+			name: "Test Agent", host: "test.example.com", version: "1.0.0",
+			identityCSR: identity, serverCSR: server,
+			endpointURL: "https://test.example.com/mcp", endpointProto: "MCP", endpointTrans: []string{"STREAMABLE-HTTP"},
+		}
+	}
+
+	t.Run("EC identity and RSA server CSRs pass preflight and reach the registry", func(t *testing.T) {
+		var calls int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(&models.RegistrationPending{Status: "PENDING_DNS", ANSName: "ans://v1.0.0.test.example.com", AgentID: "agent-123"})
+		}))
+		defer server.Close()
+		setupViperForTest(t, server.URL)
+
+		if err := runRegisterWithParams(baseParams(identityCSR, serverCSR)); err != nil {
+			t.Fatalf("runRegisterWithParams() error = %v", err)
+		}
+		if calls != 1 {
+			t.Errorf("registry calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("EC server CSR fails preflight before the registry is called", func(t *testing.T) {
+		server := noRegistryCalls(t)
+		defer server.Close()
+		setupViperForTest(t, server.URL)
+
+		err := runRegisterWithParams(baseParams(identityCSR, ecServerCSR))
+		if err == nil || !strings.Contains(err.Error(), "server CSR failed preflight validation") {
+			t.Fatalf("error = %v, want server CSR preflight failure", err)
+		}
+	})
+
+	t.Run("missing identity CSR file", func(t *testing.T) {
+		setupViperForTest(t, "http://localhost")
+
+		err := runRegisterWithParams(baseParams(filepath.Join(dir, "missing.csr"), ""))
+		if err == nil || !strings.Contains(err.Error(), "failed to read identity CSR file") {
+			t.Fatalf("error = %v, want read failure", err)
+		}
+	})
+}
+
+func TestRunSubmitIdentityCSR_SkipPreflight(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(&models.CsrSubmissionResponse{CsrID: "csr-skip-123"})
+	}))
+	defer server.Close()
+	setupViperForTest(t, server.URL)
+
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	csrFile := writeCSRFile(t, filepath.Join(t.TempDir(), "id-p384.csr"), p384, x509.ECDSAWithSHA384)
+
+	if err := runSubmitIdentityCSRWithParams("agent-123", csrFile, true); err != nil {
+		t.Fatalf("runSubmitIdentityCSRWithParams(skipPreflight) error = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("registry calls = %d, want 1 when preflight is skipped", calls)
+	}
+}
+
+// TestRunStatus_DeprecatedTokenName pins the migration contract for the
+// deprecated --oauth-token flag and ANS_OAUTH_TOKEN variable: both still
+// authenticate, the explicit flag beats any environment value, ANS_TOKEN
+// beats ANS_OAUTH_TOKEN, every deprecated use or collision prints exactly
+// one note, and no note ever echoes a token.
+func TestRunStatus_DeprecatedTokenName(t *testing.T) {
+	tests := []struct {
+		name       string
+		envToken   string // ANS_TOKEN
+		legacyEnv  string // ANS_OAUTH_TOKEN
+		legacyFlag string // --oauth-token
+		wantAuth   string
+		wantNote   string // substring of the single expected stderr note; empty means no note
+	}{
+		{
+			name:       "deprecated flag alone authenticates with a deprecation note",
+			legacyFlag: "legacy-tok",
+			wantAuth:   "Bearer legacy-tok",
+			wantNote:   "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:      "deprecated variable alone authenticates with a deprecation note",
+			legacyEnv: "legacy-tok",
+			wantAuth:  "Bearer legacy-tok",
+			wantNote:  "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:       "deprecated flag beats an exported ANS_TOKEN",
+			envToken:   "env-tok",
+			legacyFlag: "legacy-tok",
+			wantAuth:   "Bearer legacy-tok",
+			wantNote:   "deprecated; use ANS_TOKEN or --token-file",
+		},
+		{
+			name:      "ANS_TOKEN wins over a different ANS_OAUTH_TOKEN and says so",
+			envToken:  "env-tok",
+			legacyEnv: "legacy-tok",
+			wantAuth:  "Bearer env-tok",
+			wantNote:  "using ANS_TOKEN",
+		},
+		{
+			name:      "identical values under both variables need no note",
+			envToken:  "same-tok",
+			legacyEnv: "same-tok",
+			wantAuth:  "Bearer same-tok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var gotAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				gotAuth = r.Header.Get("Authorization")
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(&models.AgentDetails{AgentID: "agent-123"})
+			}))
+			defer server.Close()
+
+			viper.Set("api-key", "")
+			viper.Set("token", tt.envToken)
+			viper.Set("oauth-token-env", tt.legacyEnv)
+			viper.Set("oauth-token", tt.legacyFlag)
+			viper.Set("base-url", server.URL)
+			t.Cleanup(func() { viper.Reset() })
+
+			_, stderr := captureOutput(t, func() {
+				cmd := buildStatusCmd()
+				cmd.SetArgs([]string{"agent-123"})
+				if err := cmd.Execute(); err != nil {
+					t.Errorf("runStatus() error = %v", err)
+				}
+			})
+
+			mu.Lock()
+			gotAuthCopy := gotAuth
+			mu.Unlock()
+			if gotAuthCopy != tt.wantAuth {
+				t.Errorf("Authorization header = %q, want %q", gotAuthCopy, tt.wantAuth)
+			}
+
+			assertSingleNote(t, stderr, tt.wantNote)
+			for _, secret := range []string{tt.envToken, tt.legacyEnv, tt.legacyFlag} {
+				if secret != "" && strings.Contains(stderr, secret) {
+					t.Errorf("stderr leaks a token value: %q", stderr)
+				}
+			}
+		})
+	}
+}
+
+// assertSingleNote checks that stderr carries exactly one "Note:" line
+// containing wantNote, or none at all when wantNote is empty.
+func assertSingleNote(t *testing.T, stderr, wantNote string) {
+	t.Helper()
+	notes := strings.Count(stderr, "Note:")
+	switch {
+	case wantNote == "" && notes != 0:
+		t.Errorf("stderr = %q, want no note", stderr)
+	case wantNote != "" && (notes != 1 || !strings.Contains(stderr, wantNote)):
+		t.Errorf("stderr = %q, want exactly one note containing %q", stderr, wantNote)
 	}
 }

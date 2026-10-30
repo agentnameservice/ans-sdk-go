@@ -230,11 +230,13 @@ func TestPrintLinks(t *testing.T) {
 func TestPrintRegistrationPending(t *testing.T) {
 	tests := []struct {
 		name    string
+		agentID string
 		pending *models.RegistrationPending
 		checks  []string
 	}{
 		{
-			name: "full registration pending",
+			name:    "full registration pending",
+			agentID: "agent-abc",
 			pending: &models.RegistrationPending{
 				Status:    "PENDING",
 				ExpiresAt: time.Now().Add(24 * time.Hour),
@@ -266,6 +268,18 @@ func TestPrintRegistrationPending(t *testing.T) {
 				"Challenges:", "DNS-01", "_acme-challenge",
 				"DNS Records:", "TXT", "_ans-badge",
 				"Next Steps:", "VERIFY_DNS",
+				// Guidance line must appear when DNS records are present.
+				"ans-cli verify-dns agent-abc",
+			},
+		},
+		{
+			name:    "pending with no DNS records omits guidance line",
+			agentID: "agent-xyz",
+			pending: &models.RegistrationPending{
+				Status: "PENDING_VALIDATION",
+			},
+			checks: []string{
+				"Registration Pending", "PENDING_VALIDATION",
 			},
 		},
 	}
@@ -273,14 +287,50 @@ func TestPrintRegistrationPending(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := captureStdout(func() {
-				printRegistrationPending(tt.pending)
+				printRegistrationPending(tt.agentID, tt.pending)
 			})
 			for _, check := range tt.checks {
 				if !strings.Contains(output, check) {
-					t.Errorf("printRegistrationPending() output missing %q", check)
+					t.Errorf("printRegistrationPending() output missing %q\nfull output:\n%s", check, output)
 				}
 			}
+			// When no DNS records, guidance must not appear.
+			if len(tt.pending.DNSRecords) == 0 && strings.Contains(output, "ans-cli verify-dns") {
+				t.Errorf("printRegistrationPending() should not print verify-dns guidance with no DNS records, got:\n%s", output)
+			}
 		})
+	}
+}
+
+// TestPrintAgentDetails_PendingDNSGuidance verifies that status output for a
+// PENDING_DNS agent includes the actionable verify-dns guidance with the correct
+// agent ID, so an operator reading the output knows exactly what to run next.
+func TestPrintAgentDetails_PendingDNSGuidance(t *testing.T) {
+	agent := &models.AgentDetails{
+		AgentID:     "pending-agent-456",
+		AgentHost:   "example.com",
+		AgentStatus: &models.AgentStatus{Status: "PENDING_DNS"},
+		RegistrationPending: &models.RegistrationPending{
+			Status: "PENDING_DNS",
+			DNSRecords: []models.DNSRecord{
+				{Type: "TXT", Name: "_ans.example.com", Value: "v=ans1; mode=direct", Required: true},
+				{Type: "HTTPS", Name: "example.com", Value: "1 . alpn=h2"},
+			},
+		},
+	}
+
+	output := captureStdout(func() {
+		printAgentDetails(agent)
+	})
+
+	for _, want := range []string{
+		"_ans.example.com",
+		"v=ans1",
+		"ans-cli verify-dns pending-agent-456",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("PENDING_DNS output missing %q\nfull output:\n%s", want, output)
+		}
 	}
 }
 

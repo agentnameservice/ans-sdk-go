@@ -3,15 +3,22 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/csrvalidation"
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
+
+const maxDescriptionLen = 150
 
 // registerParams carries the register command's flag values. A struct
 // (matching searchParams/eventsParams) rather than positional
@@ -26,6 +33,7 @@ type registerParams struct {
 	endpointTrans                           []string
 	functionFlags                           []string
 	discoveryProfiles                       []string
+	skipPreflight                           bool
 }
 
 func buildRegisterCmd() *cobra.Command {
@@ -49,12 +57,14 @@ CSRs for identity and server certificates, and endpoint configuration.`,
 	cmd.Flags().StringVar(&p.serverCSR, "server-csr", "", "Path to server CSR PEM file")
 	cmd.Flags().StringVar(&p.serverCert, "server-cert", "", "Path to server certificate PEM file (BYOC)")
 	cmd.Flags().StringVar(&p.endpointURL, "endpoint-url", "", "Agent endpoint URL (required)")
-	cmd.Flags().StringVar(&p.metaDataURL, "metadata-url", "", "Agent metadata URL (e.g., /.well-known/agent-card.json)")
+	cmd.Flags().StringVar(&p.metaDataURL, "metadata-url", "", "Agent metadata URL, absolute https (e.g., https://myagent.example.com/.well-known/agent-card.json)")
 	cmd.Flags().StringVar(&p.endpointProto, "endpoint-protocol", "MCP", "Endpoint protocol (MCP, A2A, HTTP-API)")
 	cmd.Flags().StringSliceVar(&p.endpointTrans, "endpoint-transports", []string{"STREAMABLE-HTTP"}, "Endpoint transports")
 	cmd.Flags().StringArrayVar(&p.functionFlags, "function", nil, "Agent function in format 'id:name' or 'id:name:tag1,tag2' (repeatable)")
 	cmd.Flags().StringSliceVar(&p.discoveryProfiles, "discovery-profiles", nil,
 		"DNS record families the RA asks the operator to publish: ANS_DNSAID, ANS_TXT, or both (requires --api-version v2; omitted = server default ANS_DNSAID)")
+
+	cmd.Flags().BoolVar(&p.skipPreflight, "skip-preflight", false, "Submit the CSRs without checking them against the registry's intake rules first")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("host")
@@ -105,10 +115,9 @@ func runRegisterWithParams(p *registerParams) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Read identity CSR
-	identityCSRData, err := os.ReadFile(p.identityCSR)
+	identityCSRData, err := readValidatedCSR(p.identityCSR, csrvalidation.IdentityRules(), "identity", p.skipPreflight)
 	if err != nil {
-		return fmt.Errorf("failed to read identity CSR file: %w", err)
+		return err
 	}
 
 	// Read server CSR or certificate
@@ -119,9 +128,9 @@ func runRegisterWithParams(p *registerParams) error {
 			return fmt.Errorf("failed to read server certificate file: %w", err)
 		}
 	} else if p.serverCSR != "" {
-		serverCSRData, err = os.ReadFile(p.serverCSR)
+		serverCSRData, err = readValidatedCSR(p.serverCSR, csrvalidation.ServerRules(), "server", p.skipPreflight)
 		if err != nil {
-			return fmt.Errorf("failed to read server CSR file: %w", err)
+			return err
 		}
 	}
 
@@ -133,6 +142,10 @@ func runRegisterWithParams(p *registerParams) error {
 
 	profiles, err := parseDiscoveryProfiles(p.discoveryProfiles, cfg.APIVersion)
 	if err != nil {
+		return err
+	}
+
+	if err := validateRegistrationParams(p); err != nil {
 		return err
 	}
 
@@ -167,6 +180,10 @@ func runRegisterWithParams(p *registerParams) error {
 	ctx := context.Background()
 	result, err := c.RegisterAgent(ctx, req)
 	if err != nil {
+		var respErr *models.ResponseError
+		if errors.As(err, &respErr) && len(respErr.Details) > 0 {
+			printResponseErrorDetails(os.Stderr, respErr)
+		}
 		return fmt.Errorf("registration failed: %w", err)
 	}
 
@@ -295,5 +312,33 @@ func printResultLinks(links []models.Link) {
 	fmt.Fprintln(os.Stdout, "\nLinks:")
 	for _, link := range links {
 		fmt.Fprintf(os.Stdout, "  %s: %s\n", link.Rel, link.Href)
+	}
+}
+
+// validateRegistrationParams checks operator-supplied flag values before the
+// HTTP call so that common mistakes fail fast with guidance instead of
+// round-tripping to a server 422.
+func validateRegistrationParams(p *registerParams) error {
+	if utf8.RuneCountInString(p.description) > maxDescriptionLen {
+		return fmt.Errorf("description exceeds maximum length of %d characters (got %d)", maxDescriptionLen, utf8.RuneCountInString(p.description))
+	}
+	return nil
+}
+
+// printResponseErrorDetails renders the Details map from a ResponseError to w.
+// Called when a registration HTTP call returns a structured error with a
+// details map (the hosted API shape; the OSS reference RA uses RFC 7807 without
+// a details field, so this branch will not fire against the OSS server).
+func printResponseErrorDetails(w io.Writer, e *models.ResponseError) {
+	if len(e.Details) == 0 {
+		return
+	}
+	statusText := http.StatusText(e.StatusCode)
+	if statusText == "" {
+		statusText = fmt.Sprintf("HTTP %d", e.StatusCode)
+	}
+	fmt.Fprintf(w, "\nRegistration rejected (%d %s):\n", e.StatusCode, statusText)
+	for k, v := range e.Details {
+		fmt.Fprintf(w, "  %s: %v\n", k, v)
 	}
 }

@@ -47,6 +47,16 @@ type VerifiedReceipt struct {
 //  5. Verify issuer binding (after signature verification)
 //  6. Extract VDP (Verifiable Data Proofs) from unprotected header
 //  7. Walk Merkle inclusion path
+//
+// A nil error proves that the key named by kid signed the protected header and
+// the attached event (EventBytes), and that the unprotected inclusion proof is
+// well-formed and walks from that event to RootHash. It does not prove that the
+// event is in any tree the log published: tree size, leaf index and the path
+// are not signed, and RootHash is compared with nothing here. A caller that
+// needs inclusion in a published tree compares RootHash with a checkpoint
+// signed at the same tree size (Checkpoint.Covers) or relates it to a later
+// checkpoint with an RFC 6962 consistency proof, which this package does not
+// build.
 func VerifyReceipt(receiptBytes []byte, keys KeyLookup) (*VerifiedReceipt, error) {
 	parsed, err := ParseCoseSign1(receiptBytes)
 	if err != nil {

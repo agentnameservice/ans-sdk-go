@@ -33,20 +33,23 @@ scoop install ans/ans-cli
 ```bash
 export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"   # used by ans-cli badge
 ```
 
-Or authenticate with an OAuth 2.0 access token instead of an API key:
+Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:
 
 ```bash
-export ANS_OAUTH_TOKEN="your-oauth-token"
+export ANS_TOKEN="your-token"                                            # from the environment
+ans-cli status <agentId> --token-file ~/.config/ans/token                 # from a file
+my-secret-store get ans-token | ans-cli status <agentId> --token-file -   # from stdin
 ```
 
-The API key remains the default path; when both are set, the OAuth token takes precedence.
+A bearer token takes precedence over the API key, and explicit flags take precedence over environment variables. `ANS_OAUTH_TOKEN` and `--oauth-token` still work as deprecated aliases and print a migration note; when both `ANS_TOKEN` and `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
 
 ### Register an agent (end-to-end)
 
 ```bash
-# 1. Generate identity + server CSRs
+# 1. Generate identity + server CSRs (EC P-256 identity key, RSA-2048 server key)
 ans-cli generate-csr \
   --host myagent.example.com \
   --org "Example Corp" \
@@ -225,6 +228,7 @@ func main() {
   - ✅ Server Certificate Retrieval
   - ✅ CSR Submission (Identity & Server)
   - ✅ CSR Status Checking
+  - ✅ Client-side CSR preflight validation (`csrvalidation` package)
 - ✅ ACME Challenge Verification
 - ✅ DNS Record Verification
 - ✅ Event Stream (Pagination + Follow mode)
@@ -251,7 +255,7 @@ func main() {
 ### Authentication Methods
 - ✅ JWT Bearer Token
 - ✅ API Key (Public gateway endpoints)
-- ✅ OAuth 2.0 Bearer Token (static via `WithBearerToken`, refreshable via `WithTokenSource`)
+- ✅ Bearer Token — Personal Access Token (PAT) or OAuth 2.0 access token (static via `WithBearerToken`, refreshable via `WithTokenSource`)
 - ✅ Custom HTTP Client support
 
 ## Configuration
@@ -277,7 +281,7 @@ client, err := ans.NewClient(
 | `WithBaseURL(url string)` | Set the API base URL | `ans.WithBaseURL("https://api.godaddy.com")` |
 | `WithJWT(token string)` | Set JWT authentication | `ans.WithJWT("eyJhbGciOi...")` |
 | `WithAPIKey(key, secret string)` | Set API key authentication (public gateway) | `ans.WithAPIKey("key", "secret")` |
-| `WithBearerToken(token string)` | Set a static OAuth 2.0 bearer token | `ans.WithBearerToken("your-oauth-token")` |
+| `WithBearerToken(token string)` | Set a static bearer token (a PAT or OAuth 2.0 access token) | `ans.WithBearerToken("your-token")` |
 | `WithTokenSource(ts ans.TokenSource)` | Set a refreshable OAuth 2.0 token source | `ans.WithTokenSource(mySource)` |
 | `WithTimeout(duration time.Duration)` | Set HTTP client timeout | `ans.WithTimeout(60 * time.Second)` |
 | `WithVerbose(verbose bool)` | Enable verbose logging | `ans.WithVerbose(true)` |
@@ -290,14 +294,14 @@ Auth options are last-wins: applying any of `WithJWT`, `WithAPIKey`, `WithBearer
 
 `WithAPIVersion(ans.APIVersionV2)` routes the agent-lifecycle and certificate methods through the RA's V2 lane (`/v2/ans/agents/...`). The request/response shapes are identical to V1; the lane matters because **DNS discovery profiles** are a V2 feature: on V2 the `AgentRegistrationRequest.DiscoveryProfiles` field selects which DNS record families the RA asks the operator to publish (`models.DiscoveryProfileANSDNSAID` — RFC 9460 SVCB records, the server default — and/or `models.DiscoveryProfileANSTXT`, the legacy `_ans` TXT shape). The V1 lane ignores the field and always emits the ANS_TXT family. The equivalent CLI switches are `--api-version v2` (also `ANS_API_VERSION`) and `register --discovery-profiles ANS_DNSAID,ANS_TXT`.
 
-### OAuth 2.0 Bearer Tokens
+### Bearer Tokens (PATs and OAuth 2.0)
 
-For a static access token, use `WithBearerToken` — every request sends `Authorization: Bearer <token>`:
+For a static token — a Personal Access Token (PAT) or an OAuth 2.0 access token — use `WithBearerToken`; every request sends `Authorization: Bearer <token>`:
 
 ```go
 client, err := ans.NewClient(
     ans.WithBaseURL("https://api.godaddy.com"),
-    ans.WithBearerToken(os.Getenv("ANS_OAUTH_TOKEN")),
+    ans.WithBearerToken(os.Getenv("ANS_TOKEN")),
 )
 ```
 
@@ -371,7 +375,7 @@ Searches for agents using flexible criteria with pagination support. Filter
 values are provided via functional options:
 
 - `ans.WithSearchName(name)` — agent display name (partial match)
-- `ans.WithSearchHost(host)` — agent host domain (partial match)
+- `ans.WithSearchHost(host)` — agent host domain (exact match)
 - `ans.WithSearchVersion(version)` — agent version (flexible match)
 - `ans.WithSearchProtocol(models.AgentProtocolMCP)` — endpoint protocol
 - `ans.WithSearchStatus(models.AgentStatusPendingDNS, ...)` — lifecycle status (multi-valued). Defaults to `ACTIVE` server-side when unset; pass `AgentStatusPendingDNS` to find registrations still completing DNS validation, or `AgentStatusAll` to include every state.
