@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/viper"
 )
 
@@ -208,5 +208,44 @@ func TestRunVerifyDNS_422_JSONMode(t *testing.T) {
 	var dnsErr *models.DNSVerificationError
 	if !errors.As(err, &dnsErr) {
 		t.Fatalf("expected typed error, got: %v", err)
+	}
+}
+
+func TestWriteIncorrectRecordsTable_MarksRequired(t *testing.T) {
+	tests := []struct {
+		name     string
+		record   models.IncorrectDNSRecord
+		wantMark bool
+	}{
+		{
+			name: "required record is marked yes",
+			record: models.IncorrectDNSRecord{
+				Record:   models.DNSRecord{Name: "_ans-badge.example.com", Type: "TXT", Required: true},
+				Expected: "v=ans-badge1", Found: "v=ans-badge0",
+			},
+			wantMark: true,
+		},
+		{
+			name: "optional record is left blank",
+			record: models.IncorrectDNSRecord{
+				Record:   models.DNSRecord{Name: "_443._tcp.example.com", Type: "TLSA"},
+				Expected: "3 0 1 expected", Found: "3 0 1 actual",
+			},
+			wantMark: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			writeIncorrectRecordsTable(&buf, []models.IncorrectDNSRecord{tt.record})
+			lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+			if len(lines) != 2 || !strings.HasSuffix(strings.TrimRight(lines[0], " "), "REQUIRED") {
+				t.Fatalf("unexpected table:\n%s", buf.String())
+			}
+			if gotMark := strings.HasSuffix(strings.TrimRight(lines[1], " "), "yes"); gotMark != tt.wantMark {
+				t.Errorf("row %q marked required = %v, want %v", lines[1], gotMark, tt.wantMark)
+			}
+		})
 	}
 }

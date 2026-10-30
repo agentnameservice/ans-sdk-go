@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/ans"
-	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/ans"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +43,7 @@ agents in every lifecycle state.`,
 	}
 
 	cmd.Flags().StringVar(&p.name, "name", "", "Agent display name (partial matching supported)")
-	cmd.Flags().StringVar(&p.host, "host", "", "Agent host domain (partial matching supported)")
+	cmd.Flags().StringVar(&p.host, "host", "", "Agent host domain (exact match)")
 	cmd.Flags().StringVar(&p.version, "version", "", "Agent version (flexible matching supported)")
 	cmd.Flags().StringVar(&p.protocol, "protocol", "", "Endpoint protocol filter (A2A, MCP, HTTP-API)")
 	cmd.Flags().StringSliceVar(&p.statuses, "status", nil, "Lifecycle status filter, repeatable (PENDING_DNS, ACTIVE, DEPRECATED, REVOKED, ALL)")
@@ -59,8 +59,8 @@ func runSearchWithParams(p *searchParams) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
-		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
+	if err := cfg.RequireCredentials(); err != nil {
+		return err
 	}
 
 	if p.name == "" && p.host == "" && p.version == "" && p.protocol == "" && len(p.statuses) == 0 {

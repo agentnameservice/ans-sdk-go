@@ -3,16 +3,19 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 
-	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/csrvalidation"
 	"github.com/spf13/cobra"
 )
 
 func buildSubmitServerCSRCmd() *cobra.Command {
-	var submitServerCsrFile string
+	var (
+		submitServerCsrFile string
+		skipPreflight       bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "submit-server-csr <agentId>",
@@ -20,24 +23,25 @@ func buildSubmitServerCSRCmd() *cobra.Command {
 		Long:  `Submit a Certificate Signing Request (CSR) to obtain a new server certificate for an agent.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return runSubmitServerCSRWithParams(args[0], submitServerCsrFile)
+			return runSubmitServerCSRWithParams(args[0], submitServerCsrFile, skipPreflight)
 		},
 	}
 
 	cmd.Flags().StringVar(&submitServerCsrFile, "csr-file", "", "Path to CSR PEM file (required)")
+	cmd.Flags().BoolVar(&skipPreflight, "skip-preflight", false, "Submit the CSR without checking it against the registry's intake rules first")
 	_ = cmd.MarkFlagRequired("csr-file")
 
 	return cmd
 }
 
-func runSubmitServerCSRWithParams(agentID, csrFile string) error {
+func runSubmitServerCSRWithParams(agentID, csrFile string, skipPreflight bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
-		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
+	if err := cfg.RequireCredentials(); err != nil {
+		return err
 	}
 
 	c, err := createClient(cfg)
@@ -45,9 +49,9 @@ func runSubmitServerCSRWithParams(agentID, csrFile string) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	csrData, err := os.ReadFile(csrFile)
+	csrData, err := readValidatedCSR(csrFile, csrvalidation.ServerRules(), "server", skipPreflight)
 	if err != nil {
-		return fmt.Errorf("failed to read CSR file: %w", err)
+		return err
 	}
 
 	ctx := context.Background()

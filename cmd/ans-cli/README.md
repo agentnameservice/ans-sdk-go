@@ -9,15 +9,15 @@ Five install options, in recommended order:
 ### Install with Homebrew (macOS / Linux)
 
 ```bash
-brew install godaddy/ans/ans-cli
+brew install agentnameservice/ans/ans-cli
 ```
 
-This auto-taps <https://github.com/godaddy/homebrew-ans> the first time you reference it. To upgrade later: `brew upgrade ans-cli`.
+This auto-taps <https://github.com/agentnameservice/homebrew-ans> the first time you reference it. To upgrade later: `brew upgrade ans-cli`.
 
 ### Install with Scoop (Windows)
 
 ```powershell
-scoop bucket add ans https://github.com/godaddy/scoop-ans
+scoop bucket add ans https://github.com/agentnameservice/scoop-ans
 scoop install ans/ans-cli
 ```
 
@@ -27,19 +27,19 @@ To upgrade later: `scoop update ans-cli`.
 
 Prebuilt binaries for linux, macOS, and Windows are published with each release.
 
-- Browse releases: <https://github.com/godaddy/ans-sdk-go/releases/latest>
+- Browse releases: <https://github.com/agentnameservice/ans-sdk-go/releases/latest>
 - Archive name pattern: `ans-cli_<version>_<os>_<arch>.tar.gz` (linux/darwin) or `ans-cli_<version>_windows_<arch>.zip`
 - Supported targets: `linux_amd64`, `linux_arm64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`, `windows_arm64`
 
-In the snippets below, replace `<version>` with the latest release tag from <https://github.com/godaddy/ans-sdk-go/releases/latest> (e.g., `0.1.10`). The leading `v` is part of the tag (`v0.1.10`) but **not** part of the archive filenames.
+In the snippets below, replace `<version>` with the latest release tag from <https://github.com/agentnameservice/ans-sdk-go/releases/latest> (e.g., `0.1.10`). The leading `v` is part of the tag (`v0.1.10`) but **not** part of the archive filenames.
 
 #### macOS / Linux one-liner
 
 ```bash
-VERSION=<version>   # e.g. 0.1.10 — look up at https://github.com/godaddy/ans-sdk-go/releases/latest
+VERSION=<version>   # e.g. 0.1.10 — look up at https://github.com/agentnameservice/ans-sdk-go/releases/latest
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-curl -L "https://github.com/godaddy/ans-sdk-go/releases/download/v${VERSION}/ans-cli_${VERSION}_${OS}_${ARCH}.tar.gz" \
+curl -L "https://github.com/agentnameservice/ans-sdk-go/releases/download/v${VERSION}/ans-cli_${VERSION}_${OS}_${ARCH}.tar.gz" \
   | tar -xz ans-cli
 sudo mv ans-cli /usr/local/bin/
 ans-cli --version
@@ -49,7 +49,7 @@ ans-cli --version
 
 Most Windows users will prefer the Scoop install above. If you want the raw archive:
 
-1. Download the appropriate zip for your architecture from the [latest release](https://github.com/godaddy/ans-sdk-go/releases/latest):
+1. Download the appropriate zip for your architecture from the [latest release](https://github.com/agentnameservice/ans-sdk-go/releases/latest):
    - amd64 (most PCs): `ans-cli_<version>_windows_amd64.zip`
    - arm64 (Surface Pro X, Snapdragon X laptops, Windows VMs on Apple Silicon): `ans-cli_<version>_windows_arm64.zip`
 2. Extract `ans-cli.exe` to a directory on your `%PATH%` (e.g., `C:\Tools\ans-cli\`).
@@ -69,11 +69,11 @@ If you have Go 1.25 or newer:
 
 ```bash
 # Track the latest tag
-go install github.com/godaddy/ans-sdk-go/cmd/ans-cli@latest
+go install github.com/agentnameservice/ans-sdk-go/cmd/ans-cli@latest
 
 # Or pin to a specific release (recommended for reproducible installs).
-# Replace <version> with a tag from https://github.com/godaddy/ans-sdk-go/releases — include the leading `v`.
-go install github.com/godaddy/ans-sdk-go/cmd/ans-cli@v<version>
+# Replace <version> with a tag from https://github.com/agentnameservice/ans-sdk-go/releases — include the leading `v`.
+go install github.com/agentnameservice/ans-sdk-go/cmd/ans-cli@v<version>
 ```
 
 The binary lands in `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin`. Make sure that directory is on your `PATH`.
@@ -98,16 +98,23 @@ The CLI can be configured using environment variables or command-line flags:
 
 | Environment Variable | Flag | Description | Default |
 |---------------------|------|-------------|---------|
-| `ANS_API_KEY` | `--api-key` | API key for authentication | (required) |
+| `ANS_API_KEY` | `--api-key` | API key (`key:secret`) for authentication | (required unless a bearer token is set) |
+| `ANS_TOKEN` | `--token-file` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token. The flag reads it from a file, or from stdin when `-`; takes precedence over the API key | (unset) |
+| `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated; still accepted and prints a migration note | (unset) |
 | `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
+| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL; required by `badge` | (unset; see [Environment URLs](../../README.md#environment-urls)) |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
+
+Keep tokens out of command-line arguments — they are visible to other local processes (`ps`) and saved in shell history. Use `ANS_TOKEN` in a shell, or `--token-file` (a path, or `-` for stdin) in scripts and CI; prefer `ANS_API_KEY` over the `--api-key` flag for the same reason. Explicit flags take precedence over environment variables, and a bearer token takes precedence over the API key — when both credentials are configured the CLI prints a note to stderr saying the bearer token is being used. An explicitly empty `--token-file ""` is an error rather than a fallback to the environment, so a script whose token-file variable is unset fails instead of running under another identity. When both `ANS_TOKEN` and the deprecated `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
+
+Bearer tokens can expire; for long-lived automation and `events --follow`, use a credential that outlives the run or refresh the token before each invocation.
 
 ## Commands
 
 ### generate-csr
 
-Generate RSA key pairs and Certificate Signing Requests (CSRs) for both identity and server certificates.
+Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the GoDaddy-operated ANS registry accepts (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them. A key the registry would reject for a CSR type (for example `--key-size 3072` or `--key-type ec` together with a server CSR) is refused before anything is written; the error names the accepted keys.
 
 ```bash
 ans-cli generate-csr \
@@ -118,19 +125,34 @@ ans-cli generate-csr \
   --out-dir ./certs
 ```
 
+Identity CSR only (for example to renew an identity certificate with `submit-identity-csr`):
+
+```bash
+ans-cli generate-csr \
+  --host myagent.example.com \
+  --org "Example Corp" \
+  --version 1.0.0 \
+  --csr-type identity \
+  --out-dir ./certs-renewal
+```
+
 **Flags:**
 - `--host` (required): Agent host domain
 - `--org` (required): Organization name
 - `--version` (required): Agent version for ANS URI (e.g., 1.0.0)
 - `--country`: Country code (default: US)
 - `--out-dir`: Output directory (default: current directory)
-- `--key-size`: RSA key size in bits (default: 2048)
+- `--key-type`: Force one key algorithm for every generated CSR, `rsa` or `ec` (unset: EC P-256 for identity, RSA for server). EC keys are always P-256, the only curve the registry issues identity certificates for.
+- `--key-size`: RSA key size in bits, minimum 2048; ignored for EC keys (default: 2048)
+- `--csr-type`: Which CSRs to generate: `identity`, `server`, or `both` (default: both)
 
-**Output:**
-- `identity.key` - Private key for identity certificate
+**Output** (only the selected CSR types are written):
+- `identity.key` - Private key for identity certificate (`EC PRIVATE KEY` PEM by default, `RSA PRIVATE KEY` with `--key-type rsa`)
 - `identity.csr` - CSR for identity certificate
-- `server.key` - Private key for server certificate
+- `server.key` - Private key for server certificate (`RSA PRIVATE KEY` PEM by default)
 - `server.csr` - CSR for server certificate
+
+Existing files with these names in `--out-dir` are overwritten, so use a fresh directory when generating a second key pair for an agent.
 
 ### register
 
@@ -160,7 +182,7 @@ ans-cli register \
 - `--description`: Agent description
 - `--server-csr`: Path to server CSR PEM file
 - `--server-cert`: Path to server certificate PEM file (BYOC)
-- `--metadata-url`: Agent metadata URL (e.g., `/.well-known/agent-card.json`)
+- `--metadata-url`: Agent metadata URL, absolute https (e.g., `https://myagent.example.com/.well-known/agent-card.json`)
 - `--endpoint-protocol`: Protocol (MCP, A2A, HTTP-API) (default: MCP)
 - `--endpoint-transports`: Comma-separated list of transports (default: STREAMABLE-HTTP)
 - `--function`: Agent function in format `id:name` or `id:name:tag1,tag2` (repeatable)
@@ -217,7 +239,7 @@ ans-cli verify-acme <agentId>
 
 ### verify-dns
 
-Verify that all required DNS records have been configured correctly.
+Ask the registry to verify the DNS records for an agent. The response marks each expected record as required or optional for the agent's DNS profile and lists the ones it could not confirm. Optional records need not be published, but a published record that does not match what the registry expects blocks activation; in a DNSSEC-signed zone a validated TLSA fingerprint mismatch is treated as an attack signal.
 
 ```bash
 ans-cli verify-dns <agentId>
@@ -240,7 +262,7 @@ ans-cli search --name "Analyzer" --limit 10 --offset 0
 
 **Flags:**
 - `--name`: Agent display name (partial matching)
-- `--host`: Agent host domain (partial matching)
+- `--host`: Agent host domain (exact match)
 - `--version`: Agent version (flexible matching)
 - `--limit`: Maximum number of results (default: 20, max: 100)
 - `--offset`: Number of results to skip
@@ -359,6 +381,21 @@ ans-cli submit-server-csr <agentId> --csr-file ./new-server.csr
 **Flags:**
 - `--csr-file` (required): Path to CSR PEM file
 
+### CSR preflight validation
+
+`register`, `submit-identity-csr`, and `submit-server-csr` check each CSR against the registry's intake rules before making the authenticated request, so a CSR the registry would reject fails locally with equivalent guidance. The rules match the registry's intake policy:
+
+| CSR | Public key | Signature algorithm |
+|-----|------------|---------------------|
+| Identity | RSA 2048, 3072, or 4096 bits, or EC P-256 | SHA-256, SHA-384, or SHA-512 with RSA or ECDSA |
+| Server | RSA 2048 or 4096 bits | SHA-256 with RSA |
+
+The CSR file must contain exactly one well-formed PEM `CERTIFICATE REQUEST` block whose self-signature verifies; a file that also carries a private key is refused rather than uploaded. Subject and SAN checks (CN and DNS SAN equal to the agent host, URI SAN equal to the `ans://` name) stay with the registry, which reports them in its 422 response.
+
+EC P-256 identity CSRs require a registry deployment with EC support; a registry without it rejects them with a 422. When the SDK's copy of the rules lags the registry, `--skip-preflight` submits the CSR unchecked and lets the registry decide.
+
+The same rules are available to SDK users through the `csrvalidation` package (`csrvalidation.Validate(csrPEM, csrvalidation.IdentityRules())`), for example to check a BYOC CSR before submission.
+
 ### get-identity-certs
 
 List all identity certificates associated with an agent.
@@ -380,6 +417,9 @@ ans-cli get-server-certs <agentId>
 Retrieve the transparency log entry for an agent.
 
 ```bash
+# Point badge at the OTE transparency log, or pass --transparency-url
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"
+
 # Get transparency log entry
 ans-cli badge <agentId>
 
@@ -397,6 +437,8 @@ ans-cli badge <agentId> --audit --checkpoint
 - `--audit`: Also retrieve audit trail
 - `--checkpoint`: Also retrieve log checkpoint
 - `--transparency-url`: Transparency log base URL (env: ANS_TRANSPARENCY_URL)
+
+`badge` reads from the transparency log, a separate host from the API, so it needs `--transparency-url` or `ANS_TRANSPARENCY_URL` and fails before any request when neither is set. The repository README's [Environment URLs](../../README.md#environment-urls) table lists the log URL for each hosted environment.
 
 ## Complete Registration Workflow
 
@@ -453,7 +495,7 @@ ans-cli status <agentId> --json
 
 ## Verbose Mode
 
-Enable verbose output to see HTTP requests and responses:
+Enable verbose output to see diagnostics on stderr, such as which authentication method is in use:
 
 ```bash
 ans-cli register --verbose ...
@@ -465,6 +507,16 @@ ans-cli register --verbose ...
 ```bash
 export ANS_API_KEY="your-api-key"
 ans-cli search --name "Analyzer"
+```
+
+### Authenticate with a bearer token (PAT or OAuth 2.0)
+```bash
+export ANS_TOKEN="your-token"
+ans-cli status 550e8400-e29b-41d4-a716-446655440000
+
+# or keep the token out of the environment: read it from a file, or from stdin with "-"
+ans-cli status 550e8400-e29b-41d4-a716-446655440000 --token-file ~/.config/ans/token
+my-secret-store get ans-token | ans-cli status 550e8400-e29b-41d4-a716-446655440000 --token-file -
 ```
 
 ### Get agent status in JSON format

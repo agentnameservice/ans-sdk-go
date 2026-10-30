@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/ans"
-	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/ans"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
 )
 
 const (
@@ -13,20 +15,62 @@ const (
 	apiKeyParts = 2
 )
 
-// createClient creates an ANS client with API key authentication
-// API key format: key:secret
+// createClient creates an ANS client using the configured credentials.
+// The bearer token takes precedence over the API key when both are set.
 func createClient(cfg *config.Config) (*ans.Client, error) {
-	// API key format: key:secret
-	parts := strings.SplitN(cfg.APIKey, ":", apiKeyParts)
-	if len(parts) != apiKeyParts {
-		return nil, errors.New("invalid API key format, expected key:secret")
+	authOpt, method, err := authOption(cfg)
+	if err != nil {
+		return nil, err
 	}
 
+	// Diagnostics go to stderr so JSON output on stdout stays parseable, and
+	// they name the credential method only (never the value) so an
+	// unexpected 401 is diagnosable without -v.
+	if cfg.TokenFromDeprecatedName {
+		fmt.Fprintln(os.Stderr, "Note: --oauth-token and ANS_OAUTH_TOKEN are deprecated; use ANS_TOKEN or --token-file")
+	}
+	if cfg.DeprecatedTokenIgnored {
+		fmt.Fprintln(os.Stderr, "Note: both ANS_TOKEN and the deprecated ANS_OAUTH_TOKEN are set; using ANS_TOKEN")
+	}
+	if cfg.Token != "" && cfg.APIKey != "" {
+		fmt.Fprintln(os.Stderr, "Note: both a bearer token and an API key are configured; using the bearer token")
+	}
+	if cfg.Verbose {
+		fmt.Fprintf(os.Stderr, "Using %s authentication\n", method)
+	}
+
+	// cfg.APIVersion is never empty (config.Load defaults it to "v1"),
+	// so the SDK option validates every value — an unknown version
+	// fails fast with guidance instead of silently using the V1 lane.
 	opts := []ans.Option{
 		ans.WithBaseURL(cfg.BaseURL),
 		ans.WithVerbose(cfg.Verbose),
-		ans.WithAPIKey(parts[0], parts[1]),
+		ans.WithAPIVersion(ans.APIVersion(cfg.APIVersion)),
+		authOpt,
 	}
 
 	return ans.NewClient(opts...)
+}
+
+// authOption selects the credential to use and returns the SDK option, a
+// display name for auth-method notices, and any error. The bearer token wins
+// over the API key when both are set.
+func authOption(cfg *config.Config) (ans.Option, string, error) {
+	if cfg.Token != "" {
+		return ans.WithBearerToken(cfg.Token), "bearer token", nil
+	}
+
+	if cfg.APIKey == "" {
+		// No credentials at all — return the shared guidance error directly
+		// (always non-nil, so a nil ans.Option can never reach NewClient).
+		return nil, "", config.ErrNoCredentials
+	}
+
+	// API key format: key:secret
+	parts := strings.SplitN(cfg.APIKey, ":", apiKeyParts)
+	if len(parts) != apiKeyParts {
+		return nil, "", errors.New("invalid API key format, expected key:secret (for a Personal Access Token, set ANS_TOKEN or use --token-file instead)")
+	}
+
+	return ans.WithAPIKey(parts[0], parts[1]), "API key", nil
 }

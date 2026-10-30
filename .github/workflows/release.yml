@@ -45,19 +45,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history + tags so `git describe` resolves the version.
           fetch-depth: 0
           ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Setup Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.x"
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7.2.1
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           # Floats to the latest v2.x release on each run. Latest as of 2026-05-01: v2.15.4.
@@ -65,5 +65,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_ANS_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_ANS_GITHUB_TOKEN }}
-          SCOOP_BUCKET_ANS_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_ANS_GITHUB_TOKEN }}
+          HOMEBREW_SCOOP_TAP_ANS_PAT: ${{ secrets.HOMEBREW_SCOOP_TAP_ANS_PAT }}

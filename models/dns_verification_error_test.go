@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -181,59 +180,93 @@ func TestDNSVerificationError_Unmarshal_Incorrect(t *testing.T) {
 
 func TestDNSVerificationError_Error(t *testing.T) {
 	tests := []struct {
-		name        string
-		err         *DNSVerificationError
-		wantSubstr  []string
-		wantNoEmpty bool
+		name      string
+		missing   []bool
+		incorrect []bool
+		want      string
 	}{
 		{
-			name: "missing only",
-			err: &DNSVerificationError{
-				MissingRecords: []DNSRecord{{Name: "a"}, {Name: "b"}},
-			},
-			wantSubstr: []string{"DNS verification failed", "2 missing"},
+			name:    "shows the required count when optional records pad the missing list",
+			missing: []bool{true, true, false},
+			want:    "DNS verification failed: 3 missing record(s) (2 required)",
 		},
 		{
-			name: "incorrect only",
-			err: &DNSVerificationError{
-				IncorrectRecords: []IncorrectDNSRecord{{Record: DNSRecord{Name: "a"}}},
-			},
-			wantSubstr: []string{"DNS verification failed", "1 incorrect"},
+			name:    "omits the required count when every missing record is required",
+			missing: []bool{true, true},
+			want:    "DNS verification failed: 2 missing record(s)",
 		},
 		{
-			name: "both",
-			err: &DNSVerificationError{
-				MissingRecords: []DNSRecord{{Name: "a"}},
-				IncorrectRecords: []IncorrectDNSRecord{
-					{Record: DNSRecord{Name: "b"}},
-					{Record: DNSRecord{Name: "c"}},
-				},
-			},
-			wantSubstr: []string{"DNS verification failed", "1 missing", "2 incorrect"},
+			name:      "leaves counts plain when neither category mixes required and optional records",
+			missing:   []bool{false},
+			incorrect: []bool{true},
+			want:      "DNS verification failed: 1 missing record(s), 1 incorrect record(s)",
 		},
 		{
-			name:        "empty (degenerate)",
-			err:         &DNSVerificationError{},
-			wantNoEmpty: true,
+			name:    "keeps the plain count when the server marks no record required",
+			missing: []bool{false, false},
+			want:    "DNS verification failed: 2 missing record(s)",
+		},
+		{
+			name:      "shows the required count when an optional record pads the incorrect list",
+			incorrect: []bool{true, false},
+			want:      "DNS verification failed: 2 incorrect record(s) (1 required)",
+		},
+		{
+			name:      "annotates the missing and incorrect counts independently",
+			missing:   []bool{true, false},
+			incorrect: []bool{false, false},
+			want:      "DNS verification failed: 2 missing record(s) (1 required), 2 incorrect record(s)",
+		},
+		{
+			name:      "does not infer the incorrect category from the missing one, as V1 mismatch records carry no flag",
+			missing:   []bool{true},
+			incorrect: []bool{false},
+			want:      "DNS verification failed: 1 missing record(s), 1 incorrect record(s)",
+		},
+		{
+			name: "falls back to the bare prefix when nothing is missing or incorrect",
+			want: "DNS verification failed",
+		},
+		{
+			name:      "keeps the plain count for a single unmarked incorrect record",
+			incorrect: []bool{false},
+			want:      "DNS verification failed: 1 incorrect record(s)",
+		},
+		{
+			name:      "keeps the plain counts for both categories when no record is marked required",
+			missing:   []bool{false},
+			incorrect: []bool{false, false},
+			want:      "DNS verification failed: 1 missing record(s), 2 incorrect record(s)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.err.Error()
-			if got == "" {
-				t.Fatal("Error() returned empty string")
+			err := &DNSVerificationError{
+				MissingRecords:   dnsRecordsRequired(tt.missing...),
+				IncorrectRecords: incorrectDNSRecordsRequired(tt.incorrect...),
 			}
-			if tt.wantNoEmpty {
-				return
-			}
-			for _, sub := range tt.wantSubstr {
-				if !strings.Contains(got, sub) {
-					t.Errorf("Error() = %q, missing substring %q", got, sub)
-				}
+			if got := err.Error(); got != tt.want {
+				t.Errorf("Error() = %q, want %q", got, tt.want)
 			}
 		})
 	}
+}
+
+func dnsRecordsRequired(flags ...bool) []DNSRecord {
+	records := make([]DNSRecord, len(flags))
+	for i, required := range flags {
+		records[i] = DNSRecord{Required: required}
+	}
+	return records
+}
+
+func incorrectDNSRecordsRequired(flags ...bool) []IncorrectDNSRecord {
+	records := make([]IncorrectDNSRecord, len(flags))
+	for i, required := range flags {
+		records[i] = IncorrectDNSRecord{Record: DNSRecord{Required: required}}
+	}
+	return records
 }
 
 func TestDNSVerificationError_Unwrap(t *testing.T) {

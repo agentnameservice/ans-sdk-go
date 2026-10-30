@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // BadgeRecordSource indicates where a badge record was resolved from.

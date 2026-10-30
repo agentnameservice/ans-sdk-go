@@ -3,13 +3,12 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/cmd/ans-cli/internal/config"
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/spf13/cobra"
 )
 
@@ -31,8 +30,8 @@ func runStatus(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
-		return errors.New("API key is required. Set --api-key flag or ANS_API_KEY environment variable")
+	if err := cfg.RequireCredentials(); err != nil {
+		return err
 	}
 
 	// Create client and get agent details
@@ -65,7 +64,7 @@ func printAgentDetails(agent *models.AgentDetails) {
 	printDNSRecords(agent.DNSRecords)
 
 	if agent.RegistrationPending != nil {
-		printRegistrationPending(agent.RegistrationPending)
+		printRegistrationPending(agent.AgentID, agent.RegistrationPending)
 	}
 
 	printTimestamps(agent)
@@ -172,7 +171,7 @@ func printLinks(links []models.Link) {
 	}
 }
 
-func printRegistrationPending(pending *models.RegistrationPending) {
+func printRegistrationPending(agentID string, pending *models.RegistrationPending) {
 	fmt.Fprintln(os.Stdout, "\nRegistration Pending:")
 	fmt.Fprintf(os.Stdout, "  Status: %s\n", pending.Status)
 
@@ -191,6 +190,7 @@ func printRegistrationPending(pending *models.RegistrationPending) {
 	}
 
 	if len(pending.DNSRecords) > 0 {
+		fmt.Fprintf(os.Stdout, "\nPublish these DNS records, then run: ans-cli verify-dns %s\n", agentID)
 		printDNSRecords(pending.DNSRecords)
 	}
 

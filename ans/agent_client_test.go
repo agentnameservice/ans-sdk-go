@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/models"
-	"github.com/godaddy/ans-sdk-go/verify"
+	"github.com/agentnameservice/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/verify"
 )
 
 func TestNewAgentClient(t *testing.T) {

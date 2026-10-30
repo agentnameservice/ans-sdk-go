@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/verify/scitt"
+	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
 )
 
 // Option configures a verifier.

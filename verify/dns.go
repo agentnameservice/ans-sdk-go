@@ -3,7 +3,7 @@ package verify
 import (
 	"context"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // DNSLookupResult represents the result of a DNS lookup.

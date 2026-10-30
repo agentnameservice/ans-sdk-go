@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // Default HTTP client configuration values.

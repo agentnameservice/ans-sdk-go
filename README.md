@@ -3,7 +3,7 @@
 A command-line tool and Go SDK for the Agent Name Service (ANS) Registry Authority and Transparency Log.
 
 - **`ans-cli`** ([cmd/ans-cli](cmd/ans-cli)) — the fastest way to register, verify, and manage agents from a terminal. Most users start here.
-- **Go SDK** (`github.com/godaddy/ans-sdk-go/ans`) — the library the CLI is built on. Embed it in Go services that need to register agents programmatically, verify agent badges, or query the Transparency Log.
+- **Go SDK** (`github.com/agentnameservice/ans-sdk-go/ans`) — the library the CLI is built on. Embed it in Go services that need to register agents programmatically, verify agent badges, or query the Transparency Log.
 
 ## API Specification Reference
 
@@ -19,12 +19,12 @@ Top two options shown; see [cmd/ans-cli/README.md#installation](cmd/ans-cli/READ
 
 ```bash
 # macOS / Linux
-brew install godaddy/ans/ans-cli
+brew install agentnameservice/ans/ans-cli
 ```
 
 ```powershell
 # Windows (PowerShell)
-scoop bucket add ans https://github.com/godaddy/scoop-ans
+scoop bucket add ans https://github.com/agentnameservice/scoop-ans
 scoop install ans/ans-cli
 ```
 
@@ -33,12 +33,23 @@ scoop install ans/ans-cli
 ```bash
 export ANS_API_KEY="your-api-key"
 export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
+export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"   # used by ans-cli badge
 ```
+
+Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:
+
+```bash
+export ANS_TOKEN="your-token"                                            # from the environment
+ans-cli status <agentId> --token-file ~/.config/ans/token                 # from a file
+my-secret-store get ans-token | ans-cli status <agentId> --token-file -   # from stdin
+```
+
+A bearer token takes precedence over the API key, and explicit flags take precedence over environment variables. `ANS_OAUTH_TOKEN` and `--oauth-token` still work as deprecated aliases and print a migration note; when both `ANS_TOKEN` and `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
 
 ### Register an agent (end-to-end)
 
 ```bash
-# 1. Generate identity + server CSRs
+# 1. Generate identity + server CSRs (EC P-256 identity key, RSA-2048 server key)
 ans-cli generate-csr \
   --host myagent.example.com \
   --org "Example Corp" \
@@ -90,7 +101,7 @@ For full per-command flag references and additional workflows, see [cmd/ans-cli/
 ## SDK Installation
 
 ```bash
-go get github.com/godaddy/ans-sdk-go
+go get github.com/agentnameservice/ans-sdk-go
 ```
 
 ## SDK Quick Start
@@ -105,8 +116,8 @@ import (
     "fmt"
     "log"
 
-    "github.com/godaddy/ans-sdk-go/ans"
-    "github.com/godaddy/ans-sdk-go/models"
+    "github.com/agentnameservice/ans-sdk-go/ans"
+    "github.com/agentnameservice/ans-sdk-go/models"
 )
 
 func main() {
@@ -174,7 +185,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/godaddy/ans-sdk-go/ans"
+    "github.com/agentnameservice/ans-sdk-go/ans"
 )
 
 func main() {
@@ -217,6 +228,7 @@ func main() {
   - ✅ Server Certificate Retrieval
   - ✅ CSR Submission (Identity & Server)
   - ✅ CSR Status Checking
+  - ✅ Client-side CSR preflight validation (`csrvalidation` package)
 - ✅ ACME Challenge Verification
 - ✅ DNS Record Verification
 - ✅ Event Stream (Pagination + Follow mode)
@@ -243,6 +255,7 @@ func main() {
 ### Authentication Methods
 - ✅ JWT Bearer Token
 - ✅ API Key (Public gateway endpoints)
+- ✅ Bearer Token — Personal Access Token (PAT) or OAuth 2.0 access token (static via `WithBearerToken`, refreshable via `WithTokenSource`)
 - ✅ Custom HTTP Client support
 
 ## Configuration
@@ -268,9 +281,65 @@ client, err := ans.NewClient(
 | `WithBaseURL(url string)` | Set the API base URL | `ans.WithBaseURL("https://api.godaddy.com")` |
 | `WithJWT(token string)` | Set JWT authentication | `ans.WithJWT("eyJhbGciOi...")` |
 | `WithAPIKey(key, secret string)` | Set API key authentication (public gateway) | `ans.WithAPIKey("key", "secret")` |
+| `WithBearerToken(token string)` | Set a static bearer token (a PAT or OAuth 2.0 access token) | `ans.WithBearerToken("your-token")` |
+| `WithTokenSource(ts ans.TokenSource)` | Set a refreshable OAuth 2.0 token source | `ans.WithTokenSource(mySource)` |
 | `WithTimeout(duration time.Duration)` | Set HTTP client timeout | `ans.WithTimeout(60 * time.Second)` |
 | `WithVerbose(verbose bool)` | Enable verbose logging | `ans.WithVerbose(true)` |
 | `WithHTTPClient(client *http.Client)` | Use custom HTTP client | `ans.WithHTTPClient(myClient)` |
+| `WithAPIVersion(v ans.APIVersion)` | Select the RA API lane for agent lifecycle routes (`ans.APIVersionV1` default, `ans.APIVersionV2`) | `ans.WithAPIVersion(ans.APIVersionV2)` |
+
+Auth options are last-wins: applying any of `WithJWT`, `WithAPIKey`, `WithBearerToken`, or `WithTokenSource` replaces the previously configured credential.
+
+### API Versions and Discovery Profiles
+
+`WithAPIVersion(ans.APIVersionV2)` routes the agent-lifecycle and certificate methods through the RA's V2 lane (`/v2/ans/agents/...`). The request/response shapes are identical to V1; the lane matters because **DNS discovery profiles** are a V2 feature: on V2 the `AgentRegistrationRequest.DiscoveryProfiles` field selects which DNS record families the RA asks the operator to publish (`models.DiscoveryProfileANSDNSAID` — RFC 9460 SVCB records, the server default — and/or `models.DiscoveryProfileANSTXT`, the legacy `_ans` TXT shape). The V1 lane ignores the field and always emits the ANS_TXT family. The equivalent CLI switches are `--api-version v2` (also `ANS_API_VERSION`) and `register --discovery-profiles ANS_DNSAID,ANS_TXT`.
+
+### Bearer Tokens (PATs and OAuth 2.0)
+
+For a static token — a Personal Access Token (PAT) or an OAuth 2.0 access token — use `WithBearerToken`; every request sends `Authorization: Bearer <token>`:
+
+```go
+client, err := ans.NewClient(
+    ans.WithBaseURL("https://api.godaddy.com"),
+    ans.WithBearerToken(os.Getenv("ANS_TOKEN")),
+)
+```
+
+For tokens that need refreshing, implement the SDK's small `TokenSource` interface. `Token` is called for each outgoing request, so implementations should cache and refresh proactively, must be safe for concurrent use, and must honor `ctx` cancellation — the client's `WithTimeout` does **not** bound the token fetch:
+
+```go
+type TokenSource interface {
+    Token(ctx context.Context) (string, error)
+}
+```
+
+The SDK deliberately has no `golang.org/x/oauth2` dependency. If you already use that package, a four-line adapter bridges it — and because `oauth2.Config`/`clientcredentials.Config` token sources wrap `ReuseTokenSource`, the adapter below caches automatically instead of hitting your identity provider on every call (avoid writing a source that fetches per request):
+
+```go
+type oauth2Adapter struct{ src oauth2.TokenSource }
+
+func (a oauth2Adapter) Token(_ context.Context) (string, error) {
+    t, err := a.src.Token()
+    if err != nil {
+        return "", err // never embed credentials or raw token-endpoint responses in errors
+    }
+    return t.AccessToken, nil
+}
+
+// x/oauth2 sources capture their context at construction and cannot honor the
+// per-request ctx, so bound the token fetch here — otherwise a hung identity
+// provider stalls every SDK call indefinitely.
+srcCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: 10 * time.Second})
+src := clientCredentialsConfig.TokenSource(srcCtx) // caching, auto-refreshing
+client, err := ans.NewClient(ans.WithTokenSource(oauth2Adapter{src: src}))
+```
+
+Notes:
+
+- Only use bearer tokens over `https` base URLs — RFC 6750 requires TLS, and a token sent over plain HTTP is trivially stolen and replayable.
+- The SDK does not retry or refresh on `401`; sources should refresh ahead of expiry. A token revoked before expiry fails with `401` until the source refreshes.
+- Failure signatures: an error from the token source is returned with the `failed to obtain bearer token` prefix; a source that returns an empty or malformed token fails with `models.ErrBadRequest`. In both cases no HTTP call is made. A server rejection is a `*models.ResponseError` with `StatusCode: 401`.
+- `TransparencyClient` public endpoints (checkpoint, audit, schema) never send credentials; only `GetAgentTransparencyLog` authenticates when a credential is configured.
 
 ### Environment URLs
 
@@ -306,7 +375,7 @@ Searches for agents using flexible criteria with pagination support. Filter
 values are provided via functional options:
 
 - `ans.WithSearchName(name)` — agent display name (partial match)
-- `ans.WithSearchHost(host)` — agent host domain (partial match)
+- `ans.WithSearchHost(host)` — agent host domain (exact match)
 - `ans.WithSearchVersion(version)` — agent version (flexible match)
 - `ans.WithSearchProtocol(models.AgentProtocolMCP)` — endpoint protocol
 - `ans.WithSearchStatus(models.AgentStatusPendingDNS, ...)` — lifecycle status (multi-valued). Defaults to `ACTIVE` server-side when unset; pass `AgentStatusPendingDNS` to find registrations still completing DNS validation, or `AgentStatusAll` to include every state.
@@ -429,7 +498,7 @@ import (
     "context"
     "time"
 
-    "github.com/godaddy/ans-sdk-go/ans"
+    "github.com/agentnameservice/ans-sdk-go/ans"
 )
 
 // Create agent client with badge verification
@@ -467,7 +536,7 @@ resp, err = agentClient.GetJSON(ctx, "https://other-agent.example.com/api/data",
 The `keygen` package provides utilities for key generation:
 
 ```go
-import "github.com/godaddy/ans-sdk-go/keygen"
+import "github.com/agentnameservice/ans-sdk-go/keygen"
 
 // Generate RSA key pair
 keyPair, err := keygen.GenerateRSAKeyPairWithPEM(2048, nil)
@@ -493,7 +562,7 @@ API errors are returned as `*models.ResponseError`, which provides the HTTP stat
 import (
     "errors"
     "net/http"
-    "github.com/godaddy/ans-sdk-go/models"
+    "github.com/agentnameservice/ans-sdk-go/models"
 )
 
 result, err := client.GetAgentDetails(ctx, agentID)

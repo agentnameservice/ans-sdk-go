@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // MockDNSResolver is a mock DNS resolver for testing.

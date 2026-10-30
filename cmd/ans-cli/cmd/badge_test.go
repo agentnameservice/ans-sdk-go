@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // captureStdout runs fn and returns what was written to os.Stdout.
@@ -770,5 +773,89 @@ func TestPrintAuditEntryProof(t *testing.T) {
 				t.Errorf("printAuditEntryProof() output missing %q", tt.expect)
 			}
 		})
+	}
+}
+
+func TestResolveTransparencyURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		flagValue string
+		envValue  string
+		want      string
+		wantErr   []string
+	}{
+		{
+			name:      "flag wins over env",
+			flagValue: "https://flag.example",
+			envValue:  "https://env.example",
+			want:      "https://flag.example",
+		},
+		{
+			name:     "env is used when the flag is empty",
+			envValue: "https://env.example",
+			want:     "https://env.example",
+		},
+		{
+			name:    "neither set names both settings",
+			wantErr: []string{"--transparency-url", "ANS_TRANSPARENCY_URL"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveTransparencyURL(tt.flagValue, tt.envValue)
+			if len(tt.wantErr) > 0 {
+				if err == nil {
+					t.Fatalf("resolveTransparencyURL() = %q, want error", got)
+				}
+				for _, sub := range tt.wantErr {
+					if !strings.Contains(err.Error(), sub) {
+						t.Errorf("error %q missing %q", err.Error(), sub)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveTransparencyURL() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveTransparencyURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunBadgeWithParams_NoTransparencyURL_NamesBothSettings(t *testing.T) {
+	setupViperForTest(t, "http://127.0.0.1:1")
+	t.Setenv("ANS_TRANSPARENCY_URL", "")
+
+	err := runBadgeWithParams("agent-123", false, false, "")
+	if err == nil {
+		t.Fatal("expected an error when no transparency log URL is configured")
+	}
+	for _, sub := range []string{"--transparency-url", "ANS_TRANSPARENCY_URL"} {
+		if !strings.Contains(err.Error(), sub) {
+			t.Errorf("error %q missing %q", err.Error(), sub)
+		}
+	}
+}
+
+func TestRunBadgeWithParams_EnvTransparencyURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&models.TransparencyLog{Status: "ACTIVE", Payload: map[string]any{"logId": "test"}})
+	}))
+	defer server.Close()
+
+	setupViperForTest(t, "http://127.0.0.1:1")
+	t.Setenv("ANS_TRANSPARENCY_URL", server.URL)
+
+	var err error
+	out := captureStdout(func() { err = runBadgeWithParams("agent-123", false, false, "") })
+	if err != nil {
+		t.Fatalf("runBadgeWithParams() with ANS_TRANSPARENCY_URL set: %v", err)
+	}
+	if !strings.Contains(out, "ACTIVE") {
+		t.Errorf("badge output missing the log entry status:\n%s", out)
 	}
 }

@@ -3,7 +3,7 @@ package ans
 import (
 	"fmt"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 // validateRequired checks that a required string parameter is not empty.

@@ -3,7 +3,7 @@ package verify
 import (
 	"testing"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 func TestParseAnsBadgeRecord(t *testing.T) {

@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 func TestBuildVerifyACMECmd(t *testing.T) {

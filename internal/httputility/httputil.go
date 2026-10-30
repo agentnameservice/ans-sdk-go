@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/godaddy/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/models"
 )
 
 const (
