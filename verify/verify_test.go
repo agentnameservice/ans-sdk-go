@@ -721,7 +721,10 @@ func TestClientVerifier_Success(t *testing.T) {
 	}
 }
 
-func TestClientVerifier_NoCN(t *testing.T) {
+func TestClientVerifier_URISANOnly_LooksUpByAnsNameHost(t *testing.T) {
+	// A cert with a URI SAN but no CN or DNS SANs should reach the DNS lookup
+	// keyed on the host from the URI SAN (test.example.com) and return
+	// OutcomeNotAnsAgent when no record is found — not OutcomeCertError.
 	dnsResolver := NewMockDNSResolver()
 	tlogClient := NewMockTransparencyLogClient()
 
@@ -731,14 +734,91 @@ func TestClientVerifier_NoCN(t *testing.T) {
 		WithoutURLValidation(),
 	)
 
-	// Cert with no CN or DNS SANs
 	fp, _ := ParseCertFingerprint("SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
 	cert := NewCertIdentity(nil, nil, []string{"ans://v1.0.0.test.example.com"}, fp)
 
 	outcome := verifier.Verify(context.Background(), cert)
 
-	if outcome.Type != OutcomeCertError {
-		t.Errorf("Verify() expected CertError, got %v", outcome.Type)
+	if outcome.Type != OutcomeNotAnsAgent {
+		t.Errorf("Verify() expected NotAnsAgent, got %v", outcome.Type)
+	}
+}
+
+func TestClientVerifier_URISANOnly_Verified(t *testing.T) {
+	// A cert with a URI SAN and no CN or DNS SANs reaches badge lookup and
+	// verifies successfully when a matching badge exists for the URI SAN host.
+	host := "test.example.com"
+	version := "v1.0.0"
+	identityFP := "SHA256:aebdc9da0c20d6d5e4999a773839095ed050a9d7252bf212056fddc0c38f3496"
+
+	badge := createTestBadge(host, version, "SHA256:server", identityFP)
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewClientVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(identityFP)
+	cert := NewCertIdentity(nil, nil, []string{"ans://v1.0.0.test.example.com"}, fp)
+
+	outcome := verifier.Verify(context.Background(), cert)
+
+	if outcome.Type != OutcomeVerified {
+		t.Errorf("Verify() expected Verified, got %v (error: %v)", outcome.Type, outcome.Error)
+	}
+}
+
+func TestClientVerifier_LookupHostFromURISAN(t *testing.T) {
+	// When CN and DNS SANs name other.example.com but the URI SAN names
+	// agent.example.com, the lookup must use agent.example.com (the URI SAN
+	// host), not other.example.com.  Badge only exists for agent.example.com.
+	host := "agent.example.com"
+	version := "v1.0.0"
+	cn := "other.example.com"
+	identityFP := "SHA256:aebdc9da0c20d6d5e4999a773839095ed050a9d7252bf212056fddc0c38f3496"
+
+	badge := createTestBadge(host, version, "SHA256:server", identityFP)
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewClientVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(identityFP)
+	cert := NewCertIdentity(&cn, []string{cn}, []string{"ans://v1.0.0.agent.example.com"}, fp)
+
+	outcome := verifier.Verify(context.Background(), cert)
+
+	if outcome.Type != OutcomeVerified {
+		t.Errorf("Verify() expected Verified, got %v (error: %v)", outcome.Type, outcome.Error)
 	}
 }
 
@@ -761,6 +841,14 @@ func TestClientVerifier_NoAnsName(t *testing.T) {
 
 	if outcome.Type != OutcomeCertError {
 		t.Errorf("Verify() expected CertError, got %v", outcome.Type)
+	}
+	var verr *VerificationError
+	if errors.As(outcome.Error, &verr) {
+		if verr.Type != VerificationErrorNoURISAN {
+			t.Errorf("Verify() error type = %v, want VerificationErrorNoURISAN", verr.Type)
+		}
+	} else {
+		t.Errorf("Verify() error = %v, want *VerificationError", outcome.Error)
 	}
 }
 
@@ -2387,14 +2475,16 @@ func TestClientVerifier_VerifyWithScitt_NoKeyLookup(t *testing.T) {
 	}
 }
 
-func TestClientVerifier_VerifyWithScitt_NoCN(t *testing.T) {
+func TestClientVerifier_VerifyWithScitt_URISANOnly_ReachesScittPath(t *testing.T) {
+	// A cert with a URI SAN and no CN or DNS SANs passes identity extraction
+	// and reaches verifyWithHeaders.  Without a key lookup, it fails with
+	// OutcomeScittError (no key lookup configured), not OutcomeCertError.
 	verifier := NewClientVerifier(
 		WithDNSResolver(NewMockDNSResolver()),
 		WithTlogClient(NewMockTransparencyLogClient()),
 		WithoutURLValidation(),
 	)
 
-	// Cert with no CN or DNS SANs — FQDN() returns nil
 	fp, _ := ParseCertFingerprint("SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
 	cert := NewCertIdentity(nil, nil, []string{"ans://v1.0.0.test.example.com"}, fp)
 
@@ -2404,8 +2494,43 @@ func TestClientVerifier_VerifyWithScitt_NoCN(t *testing.T) {
 	}
 
 	result := verifier.VerifyWithScitt(context.Background(), cert, headers)
+	if result.Type != OutcomeScittError {
+		t.Errorf("Type = %v, want OutcomeScittError", result.Type)
+	}
+	if result.Type == OutcomeCertError {
+		t.Errorf("Type must not be OutcomeCertError; identity extraction should have succeeded")
+	}
+}
+
+func TestClientVerifier_VerifyWithScitt_NoURISAN(t *testing.T) {
+	// A cert with CN but no URI SAN fails before reaching the SCITT path with
+	// OutcomeCertError / VerificationErrorNoURISAN.
+	verifier := NewClientVerifier(
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint("SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904")
+	cn := "test.example.com"
+	cert := NewCertIdentity(&cn, []string{cn}, nil, fp)
+
+	headers := &scitt.Headers{
+		Receipt:     []byte{1, 2, 3},
+		StatusToken: []byte{4, 5, 6},
+	}
+
+	result := verifier.VerifyWithScitt(context.Background(), cert, headers)
 	if result.Type != OutcomeCertError {
 		t.Errorf("Type = %v, want OutcomeCertError", result.Type)
+	}
+	var verr *VerificationError
+	if errors.As(result.Error, &verr) {
+		if verr.Type != VerificationErrorNoURISAN {
+			t.Errorf("error type = %v, want VerificationErrorNoURISAN", verr.Type)
+		}
+	} else {
+		t.Errorf("error = %v, want *VerificationError", result.Error)
 	}
 }
 

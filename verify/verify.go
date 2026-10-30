@@ -313,24 +313,18 @@ func NewClientVerifier(opts ...Option) *ClientVerifier {
 
 // Verify verifies an mTLS client certificate.
 func (v *ClientVerifier) Verify(ctx context.Context, cert *CertIdentity) *VerificationOutcome {
-	// 1. Extract FQDN from cert
-	fqdnStr := cert.FQDN()
-	if fqdnStr == nil {
-		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoCN})
-	}
-
-	fqdn, err := models.NewFqdn(*fqdnStr)
-	if err != nil {
-		return NewCertErrorOutcome(err)
-	}
-
-	// 2. Extract ANS name from URI SANs
+	// 1. Extract ANS name from URI SANs; the host it names is the lookup key.
 	ansName := cert.AnsName()
 	if ansName == nil {
 		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
 	}
 
-	// 3. Extract version
+	fqdn, err := models.NewFqdn(ansName.Host)
+	if err != nil {
+		return NewCertErrorOutcome(err)
+	}
+
+	// 2. Extract version
 	version := ansName.Version
 
 	// 4. Check cache first (by FQDN + version)
@@ -385,18 +379,13 @@ func (v *ClientVerifier) VerifyWithScitt(ctx context.Context, cert *CertIdentity
 		return NewScittErrorOutcome(errors.New("both X-SCITT-Receipt and X-ANS-Status-Token headers are required"))
 	}
 
-	fqdnStr := cert.FQDN()
-	if fqdnStr == nil {
-		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoCN})
+	ansName := cert.AnsName()
+	if ansName == nil {
+		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
 	}
-	fqdn, err := models.NewFqdn(*fqdnStr)
+	fqdn, err := models.NewFqdn(ansName.Host)
 	if err != nil {
 		return NewCertErrorOutcome(err)
-	}
-
-	// Parity with badge path: client cert must carry an ans:// URI SAN.
-	if cert.AnsName() == nil {
-		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
 	}
 
 	return verifyWithHeaders(ctx, v.config, fqdn, cert, headers, log, roleIdentity,
