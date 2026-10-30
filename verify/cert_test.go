@@ -839,6 +839,13 @@ func TestCertIdentity_MatchesHost(t *testing.T) {
 		{"bare dot host", []string{"agent.example.com"}, ".", false},
 		{"punycode opaque ASCII", []string{"xn--bcher-kva.example.com"}, "xn--bcher-kva.example.com", true},
 		{"host with port rejected", []string{"agent.example.com"}, "agent.example.com:443", false},
+		// M1: label-count guard rows — removed guard causes false match or out-of-bounds panic.
+		{"SAN is prefix of host labels", []string{"agent.example.com"}, "agent.example.com.org", false},
+		{"wildcard SAN has more labels than host", []string{"*.net"}, "net", false},
+		// M2: IP-literal guard rows — numeric labels are valid hostname chars, so removed
+		// guard allows a dotted-quad DNS SAN to match a dotted-quad host.
+		{"IPv4 host against IPv4 DNS SAN", []string{"127.0.0.1"}, "127.0.0.1", false},
+		{"IPv4 doc-range host against IPv4 DNS SAN", []string{"192.0.2.10"}, "192.0.2.10", false},
 	}
 
 	for _, tt := range tests {
