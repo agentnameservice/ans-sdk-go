@@ -318,6 +318,293 @@ func TestServerVerifier_HostnameMismatch(t *testing.T) {
 	}
 }
 
+func TestServerVerifier_SANHostMatching_IssueReproduction(t *testing.T) {
+	// Issue reproduction: cert has multiple SANs; badge host covered by second/third SAN
+	// but not first — old code failed because it only checked DNSSANs[0].
+	host := "seller.skybound-travel.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := "skybound-travel.com"
+	dnsSANs := []string{"skybound-travel.com", "seller.skybound-travel.com", "*.seller.skybound-travel.com"}
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, dnsSANs, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeVerified {
+		t.Errorf("Verify() expected Verified, got %v (Expected=%q, Actual=%q)", outcome.Type, outcome.Expected, outcome.Actual)
+	}
+}
+
+func TestServerVerifier_SANHostMatching_WildcardCovered(t *testing.T) {
+	// Wildcard SAN covers the badge host.
+	host := "agent.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := "*.example.com"
+	dnsSANs := []string{"*.example.com"}
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, dnsSANs, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeVerified {
+		t.Errorf("Verify() expected Verified, got %v (Expected=%q, Actual=%q)", outcome.Type, outcome.Expected, outcome.Actual)
+	}
+}
+
+func TestServerVerifier_SANHostMatching_NoMatchingSAN(t *testing.T) {
+	// No SAN covers the badge host; Actual must be the full joined SAN list.
+	host := "agent.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := "other.example.com"
+	dnsSANs := []string{"other.example.com", "*.other.example.com"}
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, dnsSANs, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeHostnameMismatch {
+		t.Errorf("Verify() expected HostnameMismatch, got %v", outcome.Type)
+	}
+	if outcome.Expected != host {
+		t.Errorf("Verify() Expected = %q, want %q", outcome.Expected, host)
+	}
+	if outcome.Actual != "other.example.com, *.other.example.com" {
+		t.Errorf("Verify() Actual = %q, want %q", outcome.Actual, "other.example.com, *.other.example.com")
+	}
+}
+
+func TestServerVerifier_SANHostMatching_NoDNSSANs_CNMatches(t *testing.T) {
+	// No DNS SANs; CN matches badge host (legacy CN fallback).
+	host := "agent.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := host
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, nil, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeVerified {
+		t.Errorf("Verify() expected Verified, got %v (Expected=%q, Actual=%q)", outcome.Type, outcome.Expected, outcome.Actual)
+	}
+}
+
+func TestServerVerifier_SANHostMatching_NoDNSSANs_CNDiffers(t *testing.T) {
+	// No DNS SANs; CN does not match badge host.
+	host := "agent.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := "other.example.com"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, nil, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeHostnameMismatch {
+		t.Errorf("Verify() expected HostnameMismatch, got %v", outcome.Type)
+	}
+	if outcome.Actual != cn {
+		t.Errorf("Verify() Actual = %q, want %q", outcome.Actual, cn)
+	}
+}
+
+func TestServerVerifier_SANHostMatching_NoDNSSANs_NoCN(t *testing.T) {
+	// No DNS SANs, no CN: cert-name check is skipped (legacy behavior).
+	host := "agent.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+
+	badge := createTestBadge(host, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(host, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(nil, nil, nil, fp)
+	fqdn, _ := models.NewFqdn(host)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeVerified {
+		t.Errorf("Verify() expected Verified, got %v", outcome.Type)
+	}
+}
+
+func TestServerVerifier_SANHostMatching_DialedHostMismatch(t *testing.T) {
+	// Dialed host differs from badge host: first check rejects even when cert
+	// covers both hosts with a wildcard SAN.
+	badgeHost := "agent.example.com"
+	dialedHost := "other.example.com"
+	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
+	cn := "*.example.com"
+	dnsSANs := []string{"*.example.com"}
+
+	badge := createTestBadge(badgeHost, "v1.0.0", fingerprint, "SHA256:aaa")
+	badgeURL := "https://tlog.example.com/v1/agents/test-id"
+
+	dnsRecord := AnsBadgeRecord{
+		FormatVersion: "ans-badge1",
+		Version:       ptr(models.NewVersion(1, 0, 0)),
+		URL:           badgeURL,
+	}
+
+	dnsResolver := NewMockDNSResolver().
+		WithRecords(dialedHost, []AnsBadgeRecord{dnsRecord})
+
+	tlogClient := NewMockTransparencyLogClient().
+		WithBadge(badgeURL, badge)
+
+	verifier := NewServerVerifier(
+		WithDNSResolver(dnsResolver),
+		WithTlogClient(tlogClient),
+		WithoutURLValidation(),
+	)
+
+	fp, _ := ParseCertFingerprint(fingerprint)
+	cert := NewCertIdentity(&cn, dnsSANs, nil, fp)
+	fqdn, _ := models.NewFqdn(dialedHost)
+
+	outcome := verifier.Verify(context.Background(), fqdn, cert)
+
+	if outcome.Type != OutcomeHostnameMismatch {
+		t.Errorf("Verify() expected HostnameMismatch, got %v", outcome.Type)
+	}
+	if outcome.Expected != dialedHost {
+		t.Errorf("Verify() Expected = %q, want %q", outcome.Expected, dialedHost)
+	}
+	if outcome.Actual != badgeHost {
+		t.Errorf("Verify() Actual = %q, want %q", outcome.Actual, badgeHost)
+	}
+}
+
 func TestServerVerifier_WithCache(t *testing.T) {
 	host := "test.example.com"
 	fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"

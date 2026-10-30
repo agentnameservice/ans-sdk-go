@@ -248,6 +248,23 @@ func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*mod
 	return badge, nil
 }
 
+// certCoversHost reports whether the certificate covers host, returning the
+// string to use as the "actual" value in a mismatch outcome.
+//
+// If the certificate has DNS SANs, MatchesHost is used (RFC 6125 multi-SAN
+// matching). If it has no SANs but has a CommonName, a case-insensitive exact
+// match is used (legacy CN fallback). If neither is present, the check is
+// skipped and ok is true.
+func certCoversHost(cert *CertIdentity, host string) (bool, string) {
+	if len(cert.DNSSANs) > 0 {
+		return cert.MatchesHost(host), strings.Join(cert.DNSSANs, ", ")
+	}
+	if cert.CommonName != nil {
+		return strings.EqualFold(*cert.CommonName, host), *cert.CommonName
+	}
+	return true, ""
+}
+
 // verifyWithBadge verifies a certificate against a badge.
 func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity, fqdn models.Fqdn) *VerificationOutcome {
 	// Check badge status
@@ -263,14 +280,13 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 
 	// Compare hostname
 	badgeHost := badge.AgentHost()
-	certFqdn := cert.FQDN()
 
 	if !strings.EqualFold(badgeHost, fqdn.String()) {
 		return NewHostnameMismatchOutcome(badge, fqdn.String(), badgeHost)
 	}
 
-	if certFqdn != nil && !strings.EqualFold(*certFqdn, badgeHost) {
-		return NewHostnameMismatchOutcome(badge, badgeHost, *certFqdn)
+	if ok, actual := certCoversHost(cert, badgeHost); !ok {
+		return NewHostnameMismatchOutcome(badge, badgeHost, actual)
 	}
 
 	outcome := NewVerifiedOutcome(badge, cert.Fingerprint)
