@@ -266,7 +266,11 @@ func (c *CertIdentity) MatchesHost(host string) bool {
 	if host == "" || len(c.DNSSANs) == 0 {
 		return false
 	}
-	if net.ParseIP(host) != nil {
+	candidateIP := host
+	if len(host) >= 3 && host[0] == '[' && host[len(host)-1] == ']' {
+		candidateIP = host[1 : len(host)-1]
+	}
+	if net.ParseIP(candidateIP) != nil {
 		return false
 	}
 	candidateName := toLowerCaseASCII(host)
@@ -285,6 +289,8 @@ func (c *CertIdentity) MatchesHost(host string) bool {
 	}
 	return false
 }
+
+// The helpers below mirror crypto/x509 hostname matching as of Go 1.26.
 
 // toLowerCaseASCII returns a lowercase version of in, converting only ASCII
 // uppercase letters. Non-ASCII bytes are left unchanged. See RFC 6125 §6.4.1.

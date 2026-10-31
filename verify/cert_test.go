@@ -846,6 +846,9 @@ func TestCertIdentity_MatchesHost(t *testing.T) {
 		// guard allows a dotted-quad DNS SAN to match a dotted-quad host.
 		{"IPv4 host against IPv4 DNS SAN", []string{"127.0.0.1"}, "127.0.0.1", false},
 		{"IPv4 doc-range host against IPv4 DNS SAN", []string{"192.0.2.10"}, "192.0.2.10", false},
+		// Bracketed IPv6: net.ParseIP strips brackets; MatchesHost must do the same.
+		{"bracketed IPv6 host against identical bracketed SAN", []string{"[::1]"}, "[::1]", false},
+		{"bracketed IPv6 host against hostname SAN", []string{"agent.example.com"}, "[2001:db8::1]", false},
 	}
 
 	for _, tt := range tests {

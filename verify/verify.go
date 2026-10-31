@@ -257,11 +257,17 @@ func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*mod
 // skipped and ok is true.
 func certCoversHost(cert *CertIdentity, host string) (bool, string) {
 	if len(cert.DNSSANs) > 0 {
-		return cert.MatchesHost(host), strings.Join(cert.DNSSANs, ", ")
+		if cert.MatchesHost(host) {
+			return true, ""
+		}
+		return false, strings.Join(cert.DNSSANs, ", ")
 	}
 	if cert.CommonName != nil {
 		return strings.EqualFold(*cert.CommonName, host), *cert.CommonName
 	}
+	// Neither DNS SANs nor a CN are present. Skip the hostname check: the
+	// fingerprint pin earlier in verifyWithBadge already binds this exact
+	// certificate to the badge, and ANS-2 identity certificates carry no DNS SAN.
 	return true, ""
 }
 
