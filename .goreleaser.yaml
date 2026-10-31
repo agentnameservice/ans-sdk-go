@@ -8,6 +8,11 @@ project_name: ans-cli
 before:
   hooks:
     - go mod tidy
+    # Fetch the known-registries list from agentnameservice/ans-spec at the
+    # ref pinned in cmd/ans-cli/ANS_SPEC_REF and write the -ldflags fragment
+    # that injects it. The list is never stored in this repository; a
+    # fetch or validation failure fails the release.
+    - sh -c 'scripts/fetch-registries.sh > .registries.ldflags'
 
 builds:
   - id: ans-cli
@@ -30,6 +35,8 @@ builds:
       - -X github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/cmd.version={{.Version}}
       - -X github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/cmd.commit={{.ShortCommit}}
       - -X github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/cmd.date={{.Date}}
+      # The two -X flags written by scripts/fetch-registries.sh in before.hooks.
+      - '{{ readFile ".registries.ldflags" }}'
 
 archives:
   - id: ans-cli

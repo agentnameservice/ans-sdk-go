@@ -778,11 +778,12 @@ func TestPrintAuditEntryProof(t *testing.T) {
 
 func TestResolveTransparencyURL(t *testing.T) {
 	tests := []struct {
-		name      string
-		flagValue string
-		envValue  string
-		want      string
-		wantErr   []string
+		name       string
+		flagValue  string
+		envValue   string
+		registryID string
+		want       string
+		wantErr    []string
 	}{
 		{
 			name:      "flag wins over env",
@@ -796,14 +797,31 @@ func TestResolveTransparencyURL(t *testing.T) {
 			want:     "https://env.example",
 		},
 		{
-			name:    "neither set names both settings",
-			wantErr: []string{"--transparency-url", "ANS_TRANSPARENCY_URL"},
+			name:       "env wins over registry",
+			envValue:   "https://env.example",
+			registryID: "example-production",
+			want:       "https://env.example",
+		},
+		{
+			name:       "registry supplies the log URL when flag and env are empty",
+			registryID: "example-production",
+			want:       "https://tl.example.com",
+		},
+		{
+			name:       "unknown registry is an error",
+			registryID: "nope",
+			wantErr:    []string{"unknown registry", "example-production"},
+		},
+		{
+			name:    "neither set names all three settings",
+			wantErr: []string{"--transparency-url", "ANS_TRANSPARENCY_URL", "--registry"},
 		},
 	}
 
+	withFixtureRegistries(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveTransparencyURL(tt.flagValue, tt.envValue)
+			got, err := resolveTransparencyURL(tt.flagValue, tt.envValue, tt.registryID)
 			if len(tt.wantErr) > 0 {
 				if err == nil {
 					t.Fatalf("resolveTransparencyURL() = %q, want error", got)

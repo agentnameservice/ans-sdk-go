@@ -49,7 +49,8 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	cmd.PersistentFlags().String("token-file", "", "Read the bearer token, a Personal Access Token (PAT) or OAuth 2.0 access token, from this file, or from stdin when \"-\" (or export ANS_TOKEN; takes precedence over --api-key)")
 	cmd.PersistentFlags().String("oauth-token", "", "Deprecated: export ANS_TOKEN or use --token-file")
 	_ = cmd.PersistentFlags().MarkHidden("oauth-token")
-	cmd.PersistentFlags().String("base-url", "https://api.ote-godaddy.com", "API base URL (env: ANS_BASE_URL)")
+	cmd.PersistentFlags().String("base-url", "", "Registration Authority base URL (env: ANS_BASE_URL; overrides --registry)")
+	cmd.PersistentFlags().String("registry", "", "Known registry id to use for the RA and transparency log URLs; see `ans-cli registries` (env: ANS_REGISTRY)")
 	cmd.PersistentFlags().String("api-version", "v1", "RA API lane for agent lifecycle routes: v1 or v2 (env: ANS_API_VERSION; discovery profiles require v2)")
 	cmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 	cmd.PersistentFlags().BoolP("json", "j", false, "Output in JSON format")
@@ -59,6 +60,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	_ = viper.BindPFlag("token-file", cmd.PersistentFlags().Lookup("token-file"))
 	_ = viper.BindPFlag("oauth-token", cmd.PersistentFlags().Lookup("oauth-token"))
 	_ = viper.BindPFlag("base-url", cmd.PersistentFlags().Lookup("base-url"))
+	_ = viper.BindPFlag("registry", cmd.PersistentFlags().Lookup("registry"))
 	_ = viper.BindPFlag("api-version", cmd.PersistentFlags().Lookup("api-version"))
 	_ = viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
 	_ = viper.BindPFlag("json", cmd.PersistentFlags().Lookup("json"))
@@ -72,6 +74,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 		buildGetIdentityCertsCmd(),
 		buildGetServerCertsCmd(),
 		buildRegisterCmd(),
+		buildRegistriesCmd(),
 		buildResolveCmd(),
 		buildRevokeCmd(),
 		buildSearchCmd(),
@@ -94,6 +97,7 @@ func initConfig() {
 	_ = viper.BindEnv("token", "ANS_TOKEN")
 	_ = viper.BindEnv("oauth-token-env", "ANS_OAUTH_TOKEN")
 	_ = viper.BindEnv("base-url", "ANS_BASE_URL")
+	_ = viper.BindEnv("registry", "ANS_REGISTRY")
 	_ = viper.BindEnv("api-version", "ANS_API_VERSION")
 
 	viper.AutomaticEnv()
