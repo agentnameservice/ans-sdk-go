@@ -35,7 +35,7 @@ func defaultConfig() *verifierConfig {
 		cache:               nil,
 		failurePolicy:       FailClosed,
 		failurePolicyConfig: DefaultFailurePolicyConfig(),
-		urlValidator:        NewDefaultURLValidator(),
+		urlValidator:        NewURLValidator(nil),
 		clockSkewTolerance:  defaultClockSkewTolerance,
 	}
 }
@@ -87,7 +87,11 @@ func WithFailurePolicyConfig(cfg FailurePolicyConfig) Option {
 	}
 }
 
-// WithTrustedRADomains sets custom trusted RA domains for URL validation.
+// WithTrustedRADomains sets the transparency log hosts whose badge URLs the
+// verifier accepts. There is no default: a verifier built without this option
+// (and without WithoutURLValidation) fails every badge with
+// ErrNoTrustedDomains. The public registries and their log hosts are listed
+// in agentnameservice/ans-spec, registries/known-registries.json.
 func WithTrustedRADomains(domains []string) Option {
 	return func(c *verifierConfig) {
 		c.urlValidator = NewURLValidator(domains)

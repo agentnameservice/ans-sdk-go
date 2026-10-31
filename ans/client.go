@@ -29,6 +29,9 @@ func NewClient(opts ...Option) (*Client, error) {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
+	if cfg.baseURL == "" {
+		return nil, ErrBaseURLRequired
+	}
 
 	return &Client{
 		config: cfg,

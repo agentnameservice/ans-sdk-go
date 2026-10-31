@@ -16,7 +16,7 @@ const defaultAuditLimit = 5
 func ExampleTransparencySchemas() {
 	// Create transparency client
 	client, err := ans.NewTransparencyClient(
-		ans.WithBaseURL("https://transparency.ans.godaddy.com"),
+		ans.WithBaseURL("https://tl.example.com"),
 		ans.WithJWT("your-jwt-token"),
 	)
 	if err != nil {
@@ -216,7 +216,7 @@ func createV1Event() *models.TransparencyLogV1 {
 						Type:        models.CertTypeX509OVClient,
 					},
 				},
-				RAID: "api.godaddy.com",
+				RAID: "ra.example.com",
 			},
 			KeyID:     "arn:aws:kms:us-east-1:123456789012:key/stub-key",
 			Signature: "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...",
@@ -236,7 +236,7 @@ func createV0Event() *models.TransparencyLogV0 {
 				Protocol:  "mcp",
 				RABadge: models.RABadge{
 					BadgeURLStatus: "verified_link",
-					RAID:           "api.godaddy.com",
+					RAID:           "ra.example.com",
 					Attestations: models.AttestationsV0{
 						DomainValidation:      stringPtr("acme-dns-01"),
 						ClientCertFingerprint: stringPtr("SHA256:fedcba9876543210"),

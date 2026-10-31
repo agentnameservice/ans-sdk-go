@@ -8,8 +8,7 @@ A command-line tool and Go SDK for the Agent Name Service (ANS) Registry Authori
 ## API Specification Reference
 
 Both the CLI and the SDK target the published REST API:
-- [View OpenAPI Spec — Human Readable](https://developer.godaddy.com/doc/endpoint/ans)
-- [OpenAPI Spec — AI/Machine Readable](https://developer.godaddy.com/swagger/swagger_ans.json)
+- [RA and TL OpenAPI contracts](https://github.com/agentnameservice/ans-spec/tree/main/api) in the ANS specification repository
 
 ## CLI Quickstart
 
@@ -32,8 +31,7 @@ scoop install ans/ans-cli
 
 ```bash
 export ANS_API_KEY="your-api-key"
-export ANS_BASE_URL="https://api.ote-godaddy.com"   # OTE — use https://api.godaddy.com for production
-export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"   # used by ans-cli badge
+export ANS_REGISTRY="<id>"   # a known registry id from `ans-cli registries`; or set ANS_BASE_URL / ANS_TRANSPARENCY_URL explicitly
 ```
 
 Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:
@@ -123,7 +121,7 @@ import (
 func main() {
     // Create a new Registry Authority client
     client, err := ans.NewClient(
-        ans.WithBaseURL("https://api.godaddy.com"),
+        ans.WithBaseURL("https://ra.example.com"),
         ans.WithAPIKey("your-api-key", "your-api-secret"),
         ans.WithVerbose(true),
     )
@@ -191,7 +189,7 @@ import (
 func main() {
     // Create a new Transparency Log client
     tlClient, err := ans.NewTransparencyClient(
-        ans.WithBaseURL("https://transparency.ans.godaddy.com"),
+        ans.WithBaseURL("https://tl.example.com"),
         ans.WithVerbose(true),
     )
     if err != nil {
@@ -266,7 +264,7 @@ The SDK uses the functional options pattern for flexible client configuration:
 
 ```go
 client, err := ans.NewClient(
-    ans.WithBaseURL("https://api.godaddy.com"),
+    ans.WithBaseURL("https://ra.example.com"),
     ans.WithJWT("your-jwt-token"),
     ans.WithTimeout(120 * time.Second),
     ans.WithVerbose(true),
@@ -278,7 +276,7 @@ client, err := ans.NewClient(
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `WithBaseURL(url string)` | Set the API base URL | `ans.WithBaseURL("https://api.godaddy.com")` |
+| `WithBaseURL(url string)` | Set the API base URL | `ans.WithBaseURL("https://ra.example.com")` |
 | `WithJWT(token string)` | Set JWT authentication | `ans.WithJWT("eyJhbGciOi...")` |
 | `WithAPIKey(key, secret string)` | Set API key authentication (public gateway) | `ans.WithAPIKey("key", "secret")` |
 | `WithBearerToken(token string)` | Set a static bearer token (a PAT or OAuth 2.0 access token) | `ans.WithBearerToken("your-token")` |
@@ -300,7 +298,7 @@ For a static token — a Personal Access Token (PAT) or an OAuth 2.0 access toke
 
 ```go
 client, err := ans.NewClient(
-    ans.WithBaseURL("https://api.godaddy.com"),
+    ans.WithBaseURL("https://ra.example.com"),
     ans.WithBearerToken(os.Getenv("ANS_TOKEN")),
 )
 ```
@@ -341,12 +339,18 @@ Notes:
 - Failure signatures: an error from the token source is returned with the `failed to obtain bearer token` prefix; a source that returns an empty or malformed token fails with `models.ErrBadRequest`. In both cases no HTTP call is made. A server rejection is a `*models.ResponseError` with `StatusCode: 401`.
 - `TransparencyClient` public endpoints (checkpoint, audit, schema) never send credentials; only `GetAgentTransparencyLog` authenticates when a credential is configured.
 
-### Environment URLs
+### Registries
 
-| Environment | Registry Authority | Transparency Log |
-|-------------|-------------------|------------------|
-| **Production** | `https://api.godaddy.com` | `https://transparency.ans.godaddy.com` |
-| **OTE** | `https://api.ote-godaddy.com` | `https://transparency.ans.ote-godaddy.com` |
+The SDK ships no default registry and no default trust anchors. `ans.NewClient` and
+`ans.NewTransparencyClient` return `ans.ErrBaseURLRequired` without `WithBaseURL`, and a
+`verify` verifier built without `WithTrustedRADomains` fails every badge with
+`verify.ErrNoTrustedDomains`. Public registries, their Registration Authority and Transparency
+Log URLs, and each log's checkpoint verification keys are listed in the ANS specification
+repository: [`registries/known-registries.json`](https://github.com/agentnameservice/ans-spec/blob/main/registries/known-registries.json).
+Pick an entry there, or point at your own deployment.
+
+Release builds of `ans-cli` carry that list; `ans-cli registries` prints it and `--registry <id>`
+selects an entry. See the [CLI README](cmd/ans-cli/README.md#configuration).
 
 ## API Reference
 

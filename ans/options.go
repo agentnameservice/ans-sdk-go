@@ -2,6 +2,7 @@ package ans
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -103,10 +104,17 @@ func isValidBearerToken(token string) bool {
 	return true
 }
 
-// defaultConfig returns the default client configuration
+// ErrBaseURLRequired is returned by NewClient and NewTransparencyClient when
+// no base URL was configured. The SDK ships no default registry; pick one
+// from the known-registries list published in the ANS specification
+// repository (agentnameservice/ans-spec, registries/known-registries.json)
+// or point at your own deployment with WithBaseURL.
+var ErrBaseURLRequired = errors.New("ans: a base URL is required; use WithBaseURL (see the known-registries list in agentnameservice/ans-spec for public registries)")
+
+// defaultConfig returns the default client configuration. The base URL is
+// deliberately empty; the constructors reject a configuration without one.
 func defaultConfig() *clientConfig {
 	return &clientConfig{
-		baseURL: "https://api.godaddy.com",
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
