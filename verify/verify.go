@@ -302,6 +302,30 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	return outcome
 }
 
+// validateIdentityCertName checks that an identity certificate names the host
+// carried in its ans:// URI SAN consistently: exactly one DNS SAN equal to the
+// host (case-insensitive) and, when a Common Name is present, a CN equal to the
+// host. The exact comparison means wildcard DNS SANs never satisfy it. It runs
+// before any badge or transparency-log lookup so a malformed certificate never
+// triggers network activity.
+func validateIdentityCertName(cert *CertIdentity, ansHost string) *VerificationOutcome {
+	if len(cert.DNSSANs) != 1 || !strings.EqualFold(cert.DNSSANs[0], ansHost) {
+		return NewCertErrorOutcome(&VerificationError{
+			Type:     VerificationErrorIdentityDNSMismatch,
+			Expected: ansHost,
+			Actual:   strings.Join(cert.DNSSANs, ", "),
+		})
+	}
+	if cert.CommonName != nil && !strings.EqualFold(*cert.CommonName, ansHost) {
+		return NewCertErrorOutcome(&VerificationError{
+			Type:     VerificationErrorIdentityDNSMismatch,
+			Expected: ansHost,
+			Actual:   *cert.CommonName,
+		})
+	}
+	return nil
+}
+
 // ClientVerifier verifies mTLS client certificates against the ANS transparency log.
 // Use this when a server wants to verify that an mTLS client is a legitimate ANS agent.
 type ClientVerifier struct {
@@ -319,10 +343,15 @@ func NewClientVerifier(opts ...Option) *ClientVerifier {
 
 // Verify verifies an mTLS client certificate.
 func (v *ClientVerifier) Verify(ctx context.Context, cert *CertIdentity) *VerificationOutcome {
-	// 1. Extract ANS name from URI SANs; the host it names is the lookup key.
+	// 1. Extract ANS name from URI SANs; validate that the identity certificate's
+	//    DNS SAN names exactly the same host (and CN when present); then look up the badge.
 	ansName := cert.AnsName()
 	if ansName == nil {
 		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
+	}
+
+	if outcome := validateIdentityCertName(cert, ansName.Host); outcome != nil {
+		return outcome
 	}
 
 	fqdn, err := models.NewFqdn(ansName.Host)
@@ -389,6 +418,11 @@ func (v *ClientVerifier) VerifyWithScitt(ctx context.Context, cert *CertIdentity
 	if ansName == nil {
 		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
 	}
+
+	if outcome := validateIdentityCertName(cert, ansName.Host); outcome != nil {
+		return outcome
+	}
+
 	fqdn, err := models.NewFqdn(ansName.Host)
 	if err != nil {
 		return NewCertErrorOutcome(err)
