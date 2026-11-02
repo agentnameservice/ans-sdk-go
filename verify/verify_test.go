@@ -850,34 +850,15 @@ func TestClientVerifier_DNSSANDisagreesWithURISAN_Rejected(t *testing.T) {
 	// When the DNS SAN names other.example.com but the URI SAN names
 	// agent.example.com, the certificate must be rejected before any badge
 	// lookup with OutcomeCertError / VerificationErrorIdentityDNSMismatch.
-	host := "agent.example.com"
-	version := "v1.0.0"
 	cn := "other.example.com"
-	identityFP := "SHA256:aebdc9da0c20d6d5e4999a773839095ed050a9d7252bf212056fddc0c38f3496"
-
-	badge := createTestBadge(host, version, "SHA256:server", identityFP)
-	badgeURL := "https://tlog.example.com/v1/agents/test-id"
-
-	dnsRecord := AnsBadgeRecord{
-		FormatVersion: "ans-badge1",
-		Version:       ptr(models.NewVersion(1, 0, 0)),
-		URL:           badgeURL,
-	}
-
-	dnsResolver := NewMockDNSResolver().
-		WithRecords(host, []AnsBadgeRecord{dnsRecord})
-
-	tlogClient := NewMockTransparencyLogClient().
-		WithBadge(badgeURL, badge)
+	fp, _ := ParseCertFingerprint("SHA256:aebdc9da0c20d6d5e4999a773839095ed050a9d7252bf212056fddc0c38f3496")
+	cert := NewCertIdentity(&cn, []string{cn}, []string{"ans://v1.0.0.agent.example.com"}, fp)
 
 	verifier := NewClientVerifier(
-		WithDNSResolver(dnsResolver),
-		WithTlogClient(tlogClient),
+		WithDNSResolver(NewMockDNSResolver()),
+		WithTlogClient(NewMockTransparencyLogClient()),
 		WithoutURLValidation(),
 	)
-
-	fp, _ := ParseCertFingerprint(identityFP)
-	cert := NewCertIdentity(&cn, []string{cn}, []string{"ans://v1.0.0.agent.example.com"}, fp)
 
 	outcome := verifier.Verify(context.Background(), cert)
 
@@ -900,9 +881,10 @@ func TestClientVerifier_DNSSANDisagreesWithURISAN_Rejected(t *testing.T) {
 }
 
 // assertIdentityDNSMismatch checks that outcome is OutcomeCertError with
-// VerificationErrorIdentityDNSMismatch and, when wantExpected/wantActual are
-// non-empty, that verr.Expected and verr.Actual match.
-func assertIdentityDNSMismatch(t *testing.T, outcome *VerificationOutcome, wantExpected, wantActual string) {
+// VerificationErrorIdentityDNSMismatch. When wantExpected is non-empty, it
+// asserts verr.Expected matches. When checkActual is true, it always asserts
+// verr.Actual == wantActual (allowing explicit assertion of an empty string).
+func assertIdentityDNSMismatch(t *testing.T, outcome *VerificationOutcome, wantExpected, wantActual string, checkActual bool) {
 	t.Helper()
 	if outcome.Type != OutcomeCertError {
 		t.Errorf("outcome type = %v, want OutcomeCertError", outcome.Type)
@@ -918,7 +900,7 @@ func assertIdentityDNSMismatch(t *testing.T, outcome *VerificationOutcome, wantE
 	if wantExpected != "" && verr.Expected != wantExpected {
 		t.Errorf("Expected = %q, want %q", verr.Expected, wantExpected)
 	}
-	if wantActual != "" && verr.Actual != wantActual {
+	if checkActual && verr.Actual != wantActual {
 		t.Errorf("Actual = %q, want %q", verr.Actual, wantActual)
 	}
 }
@@ -940,17 +922,19 @@ func TestClientVerifier_IdentityCertNameValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		dnsSANs    []string
-		cn         *string
-		reject     bool
-		wantActual string // for reject rows only; empty means "don't check"
+		name        string
+		dnsSANs     []string
+		cn          *string
+		reject      bool
+		wantActual  string // asserted when checkActual is true
+		checkActual bool
 	}{
-		{name: "URI-only no DNS SANs", dnsSANs: nil, cn: nil, reject: true, wantActual: ""},
-		{name: "two DNS SANs", dnsSANs: []string{ansHost, "other.example.com"}, cn: nil, reject: true, wantActual: ansHost + ", other.example.com"},
-		{name: "wildcard DNS SAN", dnsSANs: []string{"*.example.com"}, cn: nil, reject: true},
-		{name: "DNS SAN differs", dnsSANs: []string{"other.example.com"}, cn: nil, reject: true},
-		{name: "CN differs", dnsSANs: []string{ansHost}, cn: ptr("wrong.example.com"), reject: true, wantActual: "wrong.example.com"},
+		{name: "URI-only no DNS SANs", dnsSANs: nil, cn: nil, reject: true, wantActual: "", checkActual: true},
+		{name: "two DNS SANs", dnsSANs: []string{ansHost, "other.example.com"}, cn: nil, reject: true, wantActual: ansHost + ", other.example.com", checkActual: true},
+		{name: "wildcard DNS SAN", dnsSANs: []string{"*.example.com"}, cn: nil, reject: true, wantActual: "*.example.com", checkActual: true},
+		{name: "DNS SAN differs", dnsSANs: []string{"other.example.com"}, cn: nil, reject: true, wantActual: "other.example.com", checkActual: true},
+		{name: "empty-string DNS SAN", dnsSANs: []string{""}, cn: nil, reject: true, wantActual: "", checkActual: true},
+		{name: "CN differs", dnsSANs: []string{ansHost}, cn: ptr("wrong.example.com"), reject: true, wantActual: "wrong.example.com", checkActual: true},
 		{name: "CN absent DNS matches", dnsSANs: []string{ansHost}, cn: nil, reject: false},
 		{name: "CN matches DNS matches", dnsSANs: []string{ansHost}, cn: ptr(ansHost), reject: false},
 		{name: "case-insensitive DNS SAN", dnsSANs: []string{"AGENT.Example.COM"}, cn: nil, reject: false},
@@ -975,7 +959,7 @@ func TestClientVerifier_IdentityCertNameValidation(t *testing.T) {
 			outcome := verifier.Verify(context.Background(), cert)
 
 			if tc.reject {
-				assertIdentityDNSMismatch(t, outcome, ansHost, tc.wantActual)
+				assertIdentityDNSMismatch(t, outcome, ansHost, tc.wantActual, tc.checkActual)
 				return
 			}
 			if outcome.Type != OutcomeVerified {
@@ -1026,7 +1010,7 @@ func TestClientVerifier_VerifyWithScitt_IdentityCertNameValidation(t *testing.T)
 			outcome := verifier.VerifyWithScitt(context.Background(), cert, headers)
 
 			if tc.reject {
-				assertIdentityDNSMismatch(t, outcome, ansHost, "")
+				assertIdentityDNSMismatch(t, outcome, ansHost, "", false)
 				return
 			}
 			// Accept row: should NOT be OutcomeCertError (will be ScittError — no key lookup — but not CertError)
