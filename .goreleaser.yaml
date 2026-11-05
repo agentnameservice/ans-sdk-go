@@ -44,6 +44,8 @@ archives:
           - zip
     files:
       - LICENSE
+      - LICENSES/MIT.txt
+      - NOTICE
       - src: cmd/ans-cli/README.md
         dst: README.md
 
@@ -59,7 +61,8 @@ brews:
     directory: Formula
     homepage: "https://github.com/agentnameservice/ans-sdk-go"
     description: "Command-line tool for the Agent Name Service (ANS) Registry"
-    license: "MIT"
+    custom_block: |
+      license all_of: ["Apache-2.0", "MIT"]
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
@@ -81,7 +84,7 @@ scoops:
     directory: bucket
     homepage: "https://github.com/agentnameservice/ans-sdk-go"
     description: "Command-line tool for the Agent Name Service (ANS) Registry"
-    license: "MIT"
+    license: "https://github.com/agentnameservice/ans-sdk-go#license"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com

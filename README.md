@@ -687,4 +687,11 @@ report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+New original contributions use the [Apache License, Version 2.0](LICENSE),
+under the [contribution policy](CONTRIBUTING.md#licensing-new-contributions).
+Pre-existing MIT-licensed contributions retain their [MIT license](LICENSES/MIT.txt)
+and copyright notices; see [NOTICE](NOTICE).
+
+Distributions containing both kinds of material must comply with the applicable
+terms of both licenses (`Apache-2.0 AND MIT`). New contributions are not offered
+under MIT as an alternative. Separately licensed material retains its own terms.
