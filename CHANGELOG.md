@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.20...v0.2.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** badge no longer infers the transparency log URL from --base-url; set --transparency-url or ANS_TRANSPARENCY_URL.
+
+### Bug Fixes
+
+* **cli:** badge needs an explicit transparency log URL; DNS record counts; host search docs ([#95](https://github.com/agentnameservice/ans-sdk-go/issues/95)) ([27084d5](https://github.com/agentnameservice/ans-sdk-go/commit/27084d5b2016624dc43f88c3097f03ed7e39eaa5))
+
+
+### Miscellaneous
+
+* **deps:** bump github.com/fxamacker/cbor/v2 from 2.9.6 to 2.10.0 ([#105](https://github.com/agentnameservice/ans-sdk-go/issues/105)) ([c411918](https://github.com/agentnameservice/ans-sdk-go/commit/c41191835d75675b52dc626691959be4a8f7f1b9))
+* **deps:** bump goreleaser/goreleaser-action from 7.2.3 to 7.3.0 ([#94](https://github.com/agentnameservice/ans-sdk-go/issues/94)) ([725c1e4](https://github.com/agentnameservice/ans-sdk-go/commit/725c1e4b428a9277f3073f2d624ce67a2ae5e3e8))
+
 ## [0.1.20](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.19...v0.1.20) (2026-10-15)
 
 
