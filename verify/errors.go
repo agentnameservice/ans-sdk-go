@@ -123,9 +123,13 @@ const (
 	// VerificationErrorAnsNameMismatch indicates ANS name mismatch.
 	VerificationErrorAnsNameMismatch
 	// VerificationErrorNoCN indicates no CN in certificate.
+	// Retained for backward compatibility; the verifiers no longer produce it and report VerificationErrorNoURISAN when a certificate lacks an ANS identity.
 	VerificationErrorNoCN
 	// VerificationErrorNoURISAN indicates no URI SAN in certificate.
 	VerificationErrorNoURISAN
+	// VerificationErrorIdentityDNSMismatch indicates the identity certificate's DNS SAN
+	// or Common Name does not match the host named by its ans:// URI SAN.
+	VerificationErrorIdentityDNSMismatch
 )
 
 // VerificationError represents a verification error.
@@ -151,6 +155,8 @@ func (e *VerificationError) Error() string {
 		return "no CN or DNS SAN found in certificate"
 	case VerificationErrorNoURISAN:
 		return "no ANS name (ans://) found in URI SANs"
+	case VerificationErrorIdentityDNSMismatch:
+		return fmt.Sprintf("identity certificate name mismatch: expected %s, got %s", e.Expected, e.Actual)
 	default:
 		if e.Message != "" {
 			return e.Message

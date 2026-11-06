@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/agentnameservice/ans-sdk-go/models"
@@ -215,8 +216,13 @@ func CertIdentityFromFingerprintAndCN(fingerprint CertFingerprint, cn string) *C
 	}
 }
 
-// FQDN returns the FQDN from the certificate.
-// Prefers DNS SAN (more reliable) over CN.
+// FQDN returns the first DNS SAN, or the Common Name when the certificate has
+// no DNS SANs.
+//
+// Deprecated: a certificate may carry several DNS SANs and the first one is
+// not necessarily the agent's hostname. Use MatchesHost to test whether a
+// hostname is covered by the certificate, or AnsName to read the ANS identity
+// from the URI SAN.
 func (c *CertIdentity) FQDN() *string {
 	if len(c.DNSSANs) > 0 {
 		return &c.DNSSANs[0]
@@ -243,4 +249,137 @@ func (c *CertIdentity) Version() *models.Version {
 		return &ans.Version
 	}
 	return nil
+}
+
+// MatchesHost reports whether host is covered by one of the certificate's
+// DNS Subject Alternative Names under the RFC 6125 rules that TLS clients
+// apply: labels compare case-insensitively, a trailing dot on host is
+// ignored, and a SAN may use a single "*" as its entire leftmost label to
+// match exactly one label of host. Partial-label wildcards ("f*.example.com"),
+// a bare "*", and wildcards in any other position never match. The Common
+// Name is never consulted, and IP-address hosts never match a DNS SAN.
+//
+// The semantics mirror (*crypto/x509.Certificate).VerifyHostname restricted to
+// DNS names, so a CertIdentity built without the raw certificate behaves the
+// same as one built from it.
+func (c *CertIdentity) MatchesHost(host string) bool {
+	if host == "" || len(c.DNSSANs) == 0 {
+		return false
+	}
+	candidateIP := host
+	if len(host) >= 3 && host[0] == '[' && host[len(host)-1] == ']' {
+		candidateIP = host[1 : len(host)-1]
+	}
+	if net.ParseIP(candidateIP) != nil {
+		return false
+	}
+	candidateName := toLowerCaseASCII(host)
+	validCandidate := validHostnameInput(candidateName)
+	hostParts := strings.Split(strings.TrimSuffix(candidateName, "."), ".")
+	for _, san := range c.DNSSANs {
+		if validCandidate && validHostnamePattern(san) {
+			if matchHostnames(san, hostParts) {
+				return true
+			}
+		} else {
+			if matchExactly(san, candidateName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// The helpers below mirror crypto/x509 hostname matching as of Go 1.26.
+
+// toLowerCaseASCII returns a lowercase version of in, converting only ASCII
+// uppercase letters. Non-ASCII bytes are left unchanged. See RFC 6125 §6.4.1.
+func toLowerCaseASCII(in string) string {
+	hasUpper := false
+	for i := range len(in) {
+		if in[i] >= 'A' && in[i] <= 'Z' {
+			hasUpper = true
+			break
+		}
+	}
+	if !hasUpper {
+		return in
+	}
+	out := []byte(in)
+	for i := range out {
+		if out[i] >= 'A' && out[i] <= 'Z' {
+			out[i] += 'a' - 'A'
+		}
+	}
+	return string(out)
+}
+
+func validHostnamePattern(host string) bool { return validHostname(host, true) }
+func validHostnameInput(host string) bool   { return validHostname(host, false) }
+
+// validHostname mirrors the logic in crypto/x509 validHostname.
+// isPattern=true allows "*" as the entire first label; isPattern=false strips
+// a trailing dot before validation (FQDN handling).
+func validHostname(host string, isPattern bool) bool {
+	if !isPattern {
+		host = strings.TrimSuffix(host, ".")
+	}
+	if len(host) == 0 {
+		return false
+	}
+	if host == "*" {
+		return false
+	}
+	for i, part := range strings.Split(host, ".") {
+		if part == "" {
+			return false
+		}
+		if isPattern && i == 0 && part == "*" {
+			continue
+		}
+		for j, ch := range part {
+			switch {
+			case ch >= 'a' && ch <= 'z':
+			case ch >= '0' && ch <= '9':
+			case ch >= 'A' && ch <= 'Z':
+			case ch == '-' && j != 0:
+			case ch == '_':
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// matchExactly returns true when hostA and hostB are equal under
+// case-insensitive ASCII comparison. Empty strings and bare "." never match.
+func matchExactly(hostA, hostB string) bool {
+	if hostA == "" || hostA == "." || hostB == "" || hostB == "." {
+		return false
+	}
+	return toLowerCaseASCII(hostA) == toLowerCaseASCII(hostB)
+}
+
+// matchHostnames checks whether pattern (a DNS SAN, possibly with a leading
+// "*" label) covers hostParts (the candidate host split on "."). Label counts
+// must be equal; "*" matches exactly one label in the first position only.
+func matchHostnames(pattern string, hostParts []string) bool {
+	pattern = toLowerCaseASCII(pattern)
+	if len(pattern) == 0 || len(hostParts) == 0 {
+		return false
+	}
+	patternParts := strings.Split(pattern, ".")
+	if len(patternParts) != len(hostParts) {
+		return false
+	}
+	for i, patternPart := range patternParts {
+		if i == 0 && patternPart == "*" {
+			continue
+		}
+		if patternPart != hostParts[i] {
+			return false
+		}
+	}
+	return true
 }
