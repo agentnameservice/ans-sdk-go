@@ -23,6 +23,11 @@ func createClient(cfg *config.Config) (*ans.Client, error) {
 		return nil, err
 	}
 
+	baseURL, err := resolveBaseURL(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// Diagnostics go to stderr so JSON output on stdout stays parseable, and
 	// they name the credential method only (never the value) so an
 	// unexpected 401 is diagnosable without -v.
@@ -43,7 +48,7 @@ func createClient(cfg *config.Config) (*ans.Client, error) {
 	// so the SDK option validates every value — an unknown version
 	// fails fast with guidance instead of silently using the V1 lane.
 	opts := []ans.Option{
-		ans.WithBaseURL(cfg.BaseURL),
+		ans.WithBaseURL(baseURL),
 		ans.WithVerbose(cfg.Verbose),
 		ans.WithAPIVersion(ans.APIVersion(cfg.APIVersion)),
 		authOpt,
@@ -73,4 +78,20 @@ func authOption(cfg *config.Config) (ans.Option, string, error) {
 	}
 
 	return ans.WithAPIKey(parts[0], parts[1]), "API key", nil
+}
+
+// resolveBaseURL applies the RA URL precedence: an explicit --base-url /
+// ANS_BASE_URL, then the --registry entry, else ErrNoBaseURL.
+func resolveBaseURL(cfg *config.Config) (string, error) {
+	if cfg.BaseURL != "" {
+		return cfg.BaseURL, nil
+	}
+	urls, err := resolveRegistryURLs(cfg.Registry)
+	if err != nil {
+		return "", err
+	}
+	if urls.ra == "" {
+		return "", config.ErrNoBaseURL
+	}
+	return urls.ra, nil
 }

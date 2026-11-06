@@ -15,39 +15,43 @@ import (
 
 func TestNewTransparencyClient(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    []Option
-		wantErr bool
+		name      string
+		opts      []Option
+		wantErrIs error
 	}{
 		{
-			name:    "default config",
-			opts:    nil,
-			wantErr: false,
+			name:      "no options is rejected: the SDK ships no default log",
+			opts:      nil,
+			wantErrIs: ErrBaseURLRequired,
+		},
+		{
+			name:      "verbose alone is rejected",
+			opts:      []Option{WithVerbose(true)},
+			wantErrIs: ErrBaseURLRequired,
 		},
 		{
 			name: "with base URL",
-			opts: []Option{
-				WithBaseURL("https://transparency.ans.godaddy.com"),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://tl.example.com")},
 		},
 		{
-			name: "with verbose",
-			opts: []Option{
-				WithVerbose(true),
-			},
-			wantErr: false,
+			name: "with base URL and verbose",
+			opts: []Option{WithBaseURL("https://tl.example.com"), WithVerbose(true)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, err := NewTransparencyClient(tt.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewTransparencyClient() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErrIs != nil {
+				if !errors.Is(err, tt.wantErrIs) {
+					t.Fatalf("NewTransparencyClient() error = %v, want errors.Is %v", err, tt.wantErrIs)
+				}
 				return
 			}
-			if !tt.wantErr && client == nil {
+			if err != nil {
+				t.Fatalf("NewTransparencyClient() error = %v", err)
+			}
+			if client == nil {
 				t.Error("NewTransparencyClient() returned nil client")
 			}
 		})
@@ -73,7 +77,7 @@ func TestTransparencyClient_GetAgentTransparencyLog(t *testing.T) {
 				Payload: map[string]any{
 					"ansId":    "test-agent-123",
 					"ansName":  "ans://v1.0.0.agent-0.ai.domain.com",
-					"raId":     "api.godaddy.com",
+					"raId":     "ra.example.com",
 					"issuedAt": "2025-09-24T21:03:47.055000Z",
 				},
 				MerkleProof: &models.MerkleProof{
@@ -942,7 +946,7 @@ func TestTransparencyClient_SchemaVersionHandling(t *testing.T) {
 								},
 							},
 							"issuedAt":  "2025-01-15T10:00:00Z",
-							"raId":      "api.godaddy.com",
+							"raId":      "ra.example.com",
 							"timestamp": "2025-01-15T10:00:00Z",
 						},
 						"keyId":     "test-key",
@@ -987,7 +991,7 @@ func TestTransparencyClient_SchemaVersionHandling(t *testing.T) {
 								},
 								"badgeUrlStatus": "verified_link",
 								"issuedAt":       "2025-01-15T10:00:00Z",
-								"raId":           "api.godaddy.com",
+								"raId":           "ra.example.com",
 							},
 							"timestamp": "2025-01-15T10:00:00Z",
 						},

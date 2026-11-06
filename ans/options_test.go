@@ -112,7 +112,7 @@ func TestAuthOptions_LastOptionWins(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewClient(tt.opts...)
+			client, err := NewClient(append([]Option{WithBaseURL("https://ra.example.com")}, tt.opts...)...)
 			if tt.wantErrIs != nil {
 				if err == nil {
 					t.Fatal("NewClient() expected error, got nil")

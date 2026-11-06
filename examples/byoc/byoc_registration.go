@@ -95,7 +95,7 @@ func main() {
 	// Step 3: Create ANS client
 	fmt.Println("Creating ANS client...")
 	client, err := ans.NewClient(
-		ans.WithBaseURL("https://api.ote-godaddy.com"), // Use ote for testing
+		ans.WithBaseURL("https://ra.example.com"), // pick a registry from agentnameservice/ans-spec registries/known-registries.json
 		ans.WithAPIKey(apiKey, apiSecret),
 	)
 	if err != nil {

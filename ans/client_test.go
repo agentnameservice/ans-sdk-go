@@ -15,81 +15,73 @@ import (
 
 func TestNewClient(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    []Option
-		wantErr bool
+		name      string
+		opts      []Option
+		wantErrIs error
 	}{
 		{
-			name:    "default config",
-			opts:    nil,
-			wantErr: false,
+			name:      "no options is rejected: the SDK ships no default registry",
+			opts:      nil,
+			wantErrIs: ErrBaseURLRequired,
+		},
+		{
+			name:      "options without a base URL are rejected",
+			opts:      []Option{WithJWT("test-token"), WithTimeout(60 * time.Second), WithVerbose(true)},
+			wantErrIs: ErrBaseURLRequired,
+		},
+		{
+			name:      "empty base URL is rejected",
+			opts:      []Option{WithBaseURL("")},
+			wantErrIs: ErrBaseURLRequired,
 		},
 		{
 			name: "with base URL",
-			opts: []Option{
-				WithBaseURL("https://api.godaddy.com"),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com")},
 		},
 		{
 			name: "with JWT",
-			opts: []Option{
-				WithJWT("test-token"),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com"), WithJWT("test-token")},
 		},
 		{
 			name: "with API key",
-			opts: []Option{
-				WithAPIKey("key", "secret"),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com"), WithAPIKey("key", "secret")},
 		},
 		{
 			name: "with timeout",
-			opts: []Option{
-				WithTimeout(60 * time.Second),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com"), WithTimeout(60 * time.Second)},
 		},
 		{
 			name: "with verbose",
-			opts: []Option{
-				WithVerbose(true),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com"), WithVerbose(true)},
 		},
 		{
 			name: "with bearer token",
-			opts: []Option{
-				WithBearerToken("test-token"),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com"), WithBearerToken("test-token")},
 		},
 		{
 			name: "with token source",
-			opts: []Option{
-				WithTokenSource(&fakeTokenSource{tokens: []string{"tok"}}),
-			},
-			wantErr: false,
+			opts: []Option{WithBaseURL("https://ra.example.com"), WithTokenSource(&fakeTokenSource{tokens: []string{"tok"}})},
 		},
 		{
-			name: "with nil token source",
-			opts: []Option{
-				WithTokenSource(nil),
-			},
-			wantErr: true,
+			name:      "with nil token source",
+			opts:      []Option{WithBaseURL("https://ra.example.com"), WithTokenSource(nil)},
+			wantErrIs: models.ErrBadRequest,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, err := NewClient(tt.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewClient() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErrIs != nil {
+				if !errors.Is(err, tt.wantErrIs) {
+					t.Fatalf("NewClient() error = %v, want errors.Is %v", err, tt.wantErrIs)
+				}
 				return
 			}
-			if !tt.wantErr && client == nil {
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+			if client == nil {
 				t.Error("NewClient() returned nil client")
 			}
 		})
@@ -1327,7 +1319,7 @@ func TestClient_ParameterValidation(t *testing.T) {
 
 func TestClient_WithHTTPClient(t *testing.T) {
 	customClient := &http.Client{}
-	client, err := NewClient(WithHTTPClient(customClient))
+	client, err := NewClient(WithBaseURL("https://ra.example.com"), WithHTTPClient(customClient))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

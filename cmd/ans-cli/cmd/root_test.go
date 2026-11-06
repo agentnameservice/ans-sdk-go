@@ -35,6 +35,7 @@ func TestBuildRootCmd(t *testing.T) {
 		"get-identity-certs",
 		"get-server-certs",
 		"register",
+		"registries",
 		"resolve",
 		"revoke",
 		"search",
@@ -58,7 +59,7 @@ func TestBuildRootCmd(t *testing.T) {
 	}
 
 	// Verify persistent flags exist
-	persistentFlags := []string{"api-key", "token-file", "oauth-token", "base-url", "verbose", "json"}
+	persistentFlags := []string{"api-key", "token-file", "oauth-token", "base-url", "registry", "verbose", "json"}
 	for _, flagName := range persistentFlags {
 		if cmd.PersistentFlags().Lookup(flagName) == nil {
 			t.Errorf("missing persistent flag %q", flagName)

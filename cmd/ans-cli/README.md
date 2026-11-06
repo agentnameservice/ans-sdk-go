@@ -101,10 +101,13 @@ The CLI can be configured using environment variables or command-line flags:
 | `ANS_API_KEY` | `--api-key` | API key (`key:secret`) for authentication | (required unless a bearer token is set) |
 | `ANS_TOKEN` | `--token-file` | Bearer token — a Personal Access Token (PAT) or OAuth 2.0 access token. The flag reads it from a file, or from stdin when `-`; takes precedence over the API key | (unset) |
 | `ANS_OAUTH_TOKEN` | `--oauth-token` | Deprecated; still accepted and prints a migration note | (unset) |
-| `ANS_BASE_URL` | `--base-url` | API base URL | `https://api.ote-godaddy.com` |
-| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL; required by `badge` | (unset; see [Environment URLs](../../README.md#environment-urls)) |
+| `ANS_REGISTRY` | `--registry` | Known registry id; supplies the RA and transparency log URLs. `ans-cli registries` lists the ids | (unset) |
+| `ANS_BASE_URL` | `--base-url` | Registration Authority base URL; overrides `--registry` | (unset; one of `--registry` or `--base-url` is required) |
+| `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL; overrides `--registry`; used by `badge` | (unset) |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
+
+There is no default registry. Release builds of `ans-cli` carry the known-registries list published in the ANS specification repository ([`registries/known-registries.json`](https://github.com/agentnameservice/ans-spec/blob/main/registries/known-registries.json)); `ans-cli registries` prints it with the `ans-spec` ref it was built from, and `--registry <id>` selects an entry. Binaries built with `go install` or `go build` carry no list and need `--base-url` (and `--transparency-url` for `badge`); `make build` produces a binary with the list injected the same way a release is.
 
 Keep tokens out of command-line arguments — they are visible to other local processes (`ps`) and saved in shell history. Use `ANS_TOKEN` in a shell, or `--token-file` (a path, or `-` for stdin) in scripts and CI; prefer `ANS_API_KEY` over the `--api-key` flag for the same reason. Explicit flags take precedence over environment variables, and a bearer token takes precedence over the API key — when both credentials are configured the CLI prints a note to stderr saying the bearer token is being used. An explicitly empty `--token-file ""` is an error rather than a fallback to the environment, so a script whose token-file variable is unset fails instead of running under another identity. When both `ANS_TOKEN` and the deprecated `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
 
@@ -114,7 +117,7 @@ Bearer tokens can expire; for long-lived automation and `events --follow`, use a
 
 ### generate-csr
 
-Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the GoDaddy-operated ANS registry accepts (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them. A key the registry would reject for a CSR type (for example `--key-size 3072` or `--key-type ec` together with a server CSR) is refused before anything is written; the error names the accepted keys.
+Generate key pairs and Certificate Signing Requests (CSRs) for identity and server certificates. By default the identity CSR uses an EC P-256 key and the server CSR an RSA-2048 key, which is what the public ANS registries accept (RSA 2048, 3072, or 4096 bits or EC P-256 for identity; RSA 2048 or 4096 for server). Pass `--key-type rsa` or `--key-type ec` to force one algorithm for both CSRs, and `--csr-type` to generate only one of them. A key the registry would reject for a CSR type (for example `--key-size 3072` or `--key-type ec` together with a server CSR) is refused before anything is written; the error names the accepted keys.
 
 ```bash
 ans-cli generate-csr \
@@ -417,8 +420,8 @@ ans-cli get-server-certs <agentId>
 Retrieve the transparency log entry for an agent.
 
 ```bash
-# Point badge at the OTE transparency log, or pass --transparency-url
-export ANS_TRANSPARENCY_URL="https://transparency.ans.ote-godaddy.com"
+# Pick a known registry (its transparency log is used), or pass --transparency-url
+export ANS_REGISTRY="<id>"
 
 # Get transparency log entry
 ans-cli badge <agentId>
@@ -527,7 +530,7 @@ ans-cli status 550e8400-e29b-41d4-a716-446655440000 --json
 ### Register with environment variables
 ```bash
 export ANS_API_KEY="your-api-key"
-export ANS_BASE_URL="https://api.ote-godaddy.com"
+export ANS_REGISTRY="<id>"   # or ANS_BASE_URL="https://ra.example.com"
 
 ans-cli register \
   --name "My Agent" \

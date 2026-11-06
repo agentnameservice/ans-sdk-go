@@ -23,14 +23,15 @@ type TransparencyClient struct {
 // NewTransparencyClient creates a new Transparency Log API client with functional options
 func NewTransparencyClient(opts ...Option) (*TransparencyClient, error) {
 	cfg := defaultConfig()
-	// Override default base URL for transparency log
-	cfg.baseURL = "https://transparency.ans.godaddy.com"
 
-	// Apply options (which may override the default)
+	// Apply options
 	for _, opt := range opts {
 		if err := opt(cfg); err != nil {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
+	}
+	if cfg.baseURL == "" {
+		return nil, ErrBaseURLRequired
 	}
 
 	return &TransparencyClient{

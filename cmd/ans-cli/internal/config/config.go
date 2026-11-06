@@ -12,8 +12,13 @@ import (
 
 // Config represents application configuration
 type Config struct {
+	// BaseURL is the Registration Authority origin. It is empty when neither
+	// --base-url nor a --registry entry supplied one; cmd.createClient reports
+	// ErrNoBaseURL in that case.
 	BaseURL string
-	APIKey  string //nolint:gosec // G117 - config struct field definition, not logged
+	// Registry is the known-registry id from --registry / ANS_REGISTRY, or empty.
+	Registry string
+	APIKey   string //nolint:gosec // G117 - config struct field definition, not logged
 	// Token is the bearer credential — a Personal Access Token or an OAuth 2.0
 	// access token — sent verbatim as "Authorization: Bearer <token>".
 	Token string
@@ -42,8 +47,9 @@ func Load() (*Config, error) {
 
 func load(stdin io.Reader) (*Config, error) {
 	cfg := &Config{
-		BaseURL: viper.GetString("base-url"),
-		APIKey:  viper.GetString("api-key"),
+		BaseURL:  viper.GetString("base-url"),
+		Registry: strings.TrimSpace(viper.GetString("registry")),
+		APIKey:   viper.GetString("api-key"),
 		// Normalized here so "V2" from env plumbing selects the lane;
 		// value validation happens in cmd.createClient where the SDK
 		// option can reject with proper guidance.
@@ -129,6 +135,9 @@ func readTokenFile(path string, stdin io.Reader) (string, error) {
 
 	return token, nil
 }
+
+// ErrNoBaseURL is returned when no Registration Authority URL is configured.
+var ErrNoBaseURL = errors.New("a Registration Authority URL is required. Pass --base-url or set ANS_BASE_URL, or pick a known registry with --registry <id> (see `ans-cli registries`)")
 
 // ErrNoCredentials is returned when neither a bearer token nor an API key is
 // configured. It is the single source of truth for the guidance message —
