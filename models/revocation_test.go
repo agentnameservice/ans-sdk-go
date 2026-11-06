@@ -12,61 +12,20 @@ func TestIsValidRevocationReason(t *testing.T) {
 		reason RevocationReason
 		want   bool
 	}{
-		{
-			name:   "KEY_COMPROMISE",
-			reason: RevocationReasonKeyCompromise,
-			want:   true,
-		},
-		{
-			name:   "CESSATION_OF_OPERATION",
-			reason: RevocationReasonCessationOfOperation,
-			want:   true,
-		},
-		{
-			name:   "AFFILIATION_CHANGED",
-			reason: RevocationReasonAffiliationChanged,
-			want:   true,
-		},
-		{
-			name:   "SUPERSEDED",
-			reason: RevocationReasonSuperseded,
-			want:   true,
-		},
-		{
-			name:   "CERTIFICATE_HOLD",
-			reason: RevocationReasonCertificateHold,
-			want:   true,
-		},
-		{
-			name:   "PRIVILEGE_WITHDRAWN",
-			reason: RevocationReasonPrivilegeWithdrawn,
-			want:   true,
-		},
-		{
-			name:   "AA_COMPROMISE",
-			reason: RevocationReasonAACompromise,
-			want:   true,
-		},
-		{
-			name:   "CA_COMPROMISE",
-			reason: RevocationReasonCACompromise,
-			want:   true,
-		},
-		{
-			name:   "UNSPECIFIED",
-			reason: RevocationReasonUnspecified,
-			want:   true,
-		},
-		{
-			name:   "invalid reason",
-			reason: RevocationReason("INVALID_REASON"),
-			want:   false,
-		},
-		{
-			name:   "empty string",
-			reason: RevocationReason(""),
-			want:   false,
-		},
+		{name: "KEY_COMPROMISE accepted", reason: RevocationReasonKeyCompromise, want: true},
+		{name: "CESSATION_OF_OPERATION accepted", reason: RevocationReasonCessationOfOperation, want: true},
+		{name: "AFFILIATION_CHANGED accepted", reason: RevocationReasonAffiliationChanged, want: true},
+		{name: "CERTIFICATE_HOLD accepted", reason: RevocationReasonCertificateHold, want: true},
+		{name: "PRIVILEGE_WITHDRAWN accepted", reason: RevocationReasonPrivilegeWithdrawn, want: true},
+		{name: "AA_COMPROMISE accepted", reason: RevocationReasonAACompromise, want: true},
+		{name: "SUPERSEDED accepted", reason: RevocationReasonSuperseded, want: true},
+		// RFC-only codes not in the registry enum.
+		{name: "CA_COMPROMISE rejected", reason: RevocationReasonCACompromise, want: false},
+		{name: "EXPIRED_CERT rejected", reason: RevocationReasonExpiredCert, want: false},
+		{name: "REMOVE_FROM_CRL rejected", reason: RevocationReasonRemoveFromCRL, want: false},
+		{name: "UNSPECIFIED rejected", reason: RevocationReasonUnspecified, want: false},
+		{name: "unknown rejected", reason: RevocationReason("INVALID_REASON"), want: false},
+		{name: "empty string rejected", reason: RevocationReason(""), want: false},
 	}
 
 	for _, tt := range tests {
