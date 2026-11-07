@@ -31,9 +31,22 @@ func (t *TransparencyLog) GetV0Payload() *TransparencyLogV0 {
 	return nil
 }
 
+// GetV2Payload returns the parsed payload as a V2 schema object, or nil if not V2
+func (t *TransparencyLog) GetV2Payload() *TransparencyLogV2 {
+	if v2, ok := t.ParsedPayload.(*TransparencyLogV2); ok {
+		return v2
+	}
+	return nil
+}
+
 // IsV1 returns true if this is a V1 schema entry
 func (t *TransparencyLog) IsV1() bool {
 	return t.SchemaVersion == string(SchemaVersionV1) || t.GetV1Payload() != nil
+}
+
+// IsV2 returns true if this is a V2 schema entry
+func (t *TransparencyLog) IsV2() bool {
+	return t.SchemaVersion == string(SchemaVersionV2) || t.GetV2Payload() != nil
 }
 
 // IsV0 returns true if this is a V0 schema entry

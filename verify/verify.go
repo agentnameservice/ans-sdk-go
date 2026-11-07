@@ -255,10 +255,23 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare server certificate fingerprint
-	expectedFP := badge.ServerCertFingerprint()
-	if !cert.Fingerprint.Matches(expectedFP) {
-		return NewFingerprintMismatchOutcome(badge, expectedFP, cert.Fingerprint.String())
+	// Compare server certificate fingerprint against any valid cert in the badge.
+	// Using cert.Fingerprint.Matches (rather than badge.MatchesServerCert) ensures
+	// hex decoding and length validation via ParseCertFingerprint.
+	candidates := badge.ServerCertFingerprints()
+	matched := false
+	for _, candidate := range candidates {
+		if cert.Fingerprint.Matches(candidate) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return NewFingerprintMismatchOutcome(
+			badge,
+			firstOrEmpty(candidates),
+			cert.Fingerprint.String(),
+		)
 	}
 
 	// Compare hostname
@@ -269,7 +282,7 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewHostnameMismatchOutcome(badge, fqdn.String(), badgeHost)
 	}
 
-	if certFqdn != nil && !strings.EqualFold(*certFqdn, badgeHost) {
+	if certFqdn != nil && !wildcardHostMatch(*certFqdn, badgeHost) {
 		return NewHostnameMismatchOutcome(badge, badgeHost, *certFqdn)
 	}
 
@@ -278,6 +291,27 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		outcome.Warnings = append(outcome.Warnings, "badge status is DEPRECATED")
 	}
 	return outcome
+}
+
+// wildcardHostMatch reports whether certSAN covers host using RFC 6125 single-label
+// wildcard rules. An exact case-insensitive match always passes. A wildcard of the
+// form "*.suffix" matches any single-label subdomain of suffix (e.g.
+// "*.example.com" matches "foo.example.com" but not "foo.bar.example.com" or
+// "example.com").
+func wildcardHostMatch(certSAN, host string) bool {
+	if strings.EqualFold(certSAN, host) {
+		return true
+	}
+	if !strings.HasPrefix(certSAN, "*.") {
+		return false
+	}
+	suffix := strings.ToLower(certSAN[1:]) // ".example.com"
+	hostLower := strings.ToLower(host)
+	if !strings.HasSuffix(hostLower, suffix) {
+		return false
+	}
+	prefix := hostLower[:len(hostLower)-len(suffix)]
+	return len(prefix) > 0 && !strings.Contains(prefix, ".")
 }
 
 // ClientVerifier verifies mTLS client certificates against the ANS transparency log.
@@ -433,10 +467,23 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare identity certificate fingerprint
-	expectedFP := badge.IdentityCertFingerprint()
-	if !cert.Fingerprint.Matches(expectedFP) {
-		return NewFingerprintMismatchOutcome(badge, expectedFP, cert.Fingerprint.String())
+	// Compare identity certificate fingerprint against any valid cert in the badge.
+	// Using cert.Fingerprint.Matches (rather than badge.MatchesIdentityCert) ensures
+	// hex decoding and length validation via ParseCertFingerprint.
+	idCandidates := badge.IdentityCertFingerprints()
+	idMatched := false
+	for _, candidate := range idCandidates {
+		if cert.Fingerprint.Matches(candidate) {
+			idMatched = true
+			break
+		}
+	}
+	if !idMatched {
+		return NewFingerprintMismatchOutcome(
+			badge,
+			firstOrEmpty(idCandidates),
+			cert.Fingerprint.String(),
+		)
 	}
 
 	// Compare hostname
@@ -512,6 +559,16 @@ func (v *AnsVerifier) Prefetch(ctx context.Context, fqdnStr string) (*models.Bad
 		return nil, err
 	}
 	return v.server.Prefetch(ctx, fqdn)
+}
+
+// firstOrEmpty returns the first element of s, or "" if s is empty.
+// Used only when constructing fingerprint-mismatch outcomes so the human-readable
+// "expected" field carries the first badge fingerprint rather than a blank string.
+func firstOrEmpty(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
 }
 
 // configLogger returns the configured logger or the default.
