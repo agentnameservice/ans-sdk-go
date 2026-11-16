@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/agentnameservice/ans-sdk-go/compare/v0.2.0...v0.2.1) (2026-11-16)
+
+
+### Miscellaneous
+
+* adopt ANS governance and contribution licensing ([#98](https://github.com/agentnameservice/ans-sdk-go/issues/98)) ([a36e019](https://github.com/agentnameservice/ans-sdk-go/commit/a36e0195b2dce5ece80c1c992bc72b686409fa5d))
+
 ## [0.2.0](https://github.com/agentnameservice/ans-sdk-go/compare/v0.1.20...v0.2.0) (2026-11-05)
 
 
