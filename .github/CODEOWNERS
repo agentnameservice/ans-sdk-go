@@ -1,0 +1,2 @@
+# Review routing; merge permissions are managed separately.
+* @agentnameservice/sdk-go-maintainers @agentnameservice/sdk-go-reviewers @agentnameservice/tsc @agentnameservice/tsc-owners
