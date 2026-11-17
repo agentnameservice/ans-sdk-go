@@ -23,7 +23,7 @@ func buildRevokeCmd() *cobra.Command {
 		Short: "Revoke an agent registration",
 		Long: `Revoke an agent registration, marking it as no longer valid.
 
-Valid revocation reasons (RFC 5280):
+Revocation reasons the registry accepts:
   KEY_COMPROMISE          - Private key was compromised
   CESSATION_OF_OPERATION  - Agent is no longer operational
   AFFILIATION_CHANGED     - Agent ownership/affiliation changed
@@ -31,14 +31,15 @@ Valid revocation reasons (RFC 5280):
   CERTIFICATE_HOLD        - Temporarily suspended
   PRIVILEGE_WITHDRAWN     - Authorization was revoked
   AA_COMPROMISE           - Attribute authority was compromised
-  CA_COMPROMISE           - Certificate authority was compromised
-  EXPIRED_CERT            - Certificate has expired
-  REMOVE_FROM_CRL         - Remove from certificate revocation list
-  UNSPECIFIED             - Reason not specified
+
+Revoking a PENDING_CERTS or PENDING_DNS registration cancels it: no certificate
+was sealed and no transparency-log event is written. A PENDING_VALIDATION
+registration cannot be canceled; it auto-expires after the challenge window
+closes. Name and version reuse after cancellation is not yet fully specified.
 
 Examples:
   ans-cli revoke abc123 --reason KEY_COMPROMISE
-  ans-cli revoke abc123 --reason SUPERSEDED --comments "Replaced by v2.0.0"`,
+  ans-cli revoke abc123 --reason CESSATION_OF_OPERATION --comments "Replaced by v2.0.0"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return runRevoke(args[0], revokeReason, revokeComments)
@@ -62,10 +63,9 @@ func runRevoke(agentID, reason, comments string) error {
 		return err
 	}
 
-	// Validate reason
 	revocationReason := models.RevocationReason(strings.ToUpper(reason))
 	if !models.IsValidRevocationReason(revocationReason) {
-		return fmt.Errorf("invalid revocation reason: %s. See 'ans-cli revoke --help' for valid reasons", reason)
+		return fmt.Errorf("revocation reason %q is not accepted by the registry. See 'ans-cli revoke --help' for accepted reasons", reason)
 	}
 
 	c, err := createClient(cfg)

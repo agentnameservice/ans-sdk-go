@@ -2,16 +2,19 @@ package models
 
 import "time"
 
-// IsValidRevocationReason checks if the revocation reason is a valid enum value
+// IsValidRevocationReason reports whether r is a valid revocation reason for
+// this registry. The RFC-only codes (CA_COMPROMISE, EXPIRED_CERT,
+// REMOVE_FROM_CRL, UNSPECIFIED) are not in the registry enum and are rejected.
 func IsValidRevocationReason(r RevocationReason) bool {
 	switch r {
 	case RevocationReasonKeyCompromise, RevocationReasonCessationOfOperation,
 		RevocationReasonAffiliationChanged, RevocationReasonSuperseded,
 		RevocationReasonCertificateHold, RevocationReasonPrivilegeWithdrawn,
-		RevocationReasonAACompromise, RevocationReasonCACompromise,
-		RevocationReasonExpiredCert, RevocationReasonRemoveFromCRL,
-		RevocationReasonUnspecified:
+		RevocationReasonAACompromise:
 		return true
+	case RevocationReasonCACompromise, RevocationReasonExpiredCert,
+		RevocationReasonRemoveFromCRL, RevocationReasonUnspecified:
+		return false
 	default:
 		return false
 	}
