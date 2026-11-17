@@ -171,6 +171,11 @@ func TestVerificationError_Error(t *testing.T) {
 			contains: "no ANS name",
 		},
 		{
+			name:     "identity DNS mismatch",
+			err:      &VerificationError{Type: VerificationErrorIdentityDNSMismatch, Expected: "agent.example.com", Actual: "other.example.com"},
+			contains: "identity certificate name mismatch",
+		},
+		{
 			name:     "unknown type with message",
 			err:      &VerificationError{Type: VerificationErrorType(99), Message: "custom error"},
 			contains: "custom error",

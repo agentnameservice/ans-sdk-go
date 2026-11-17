@@ -248,6 +248,29 @@ func (v *ServerVerifier) fetchBadge(ctx context.Context, fqdn models.Fqdn) (*mod
 	return badge, nil
 }
 
+// certCoversHost reports whether the certificate covers host, returning the
+// string to use as the "actual" value in a mismatch outcome.
+//
+// If the certificate has DNS SANs, MatchesHost is used (RFC 6125 multi-SAN
+// matching). If it has no SANs but has a CommonName, a case-insensitive exact
+// match is used (legacy CN fallback). If neither is present, the check is
+// skipped and ok is true.
+func certCoversHost(cert *CertIdentity, host string) (bool, string) {
+	if len(cert.DNSSANs) > 0 {
+		if cert.MatchesHost(host) {
+			return true, ""
+		}
+		return false, strings.Join(cert.DNSSANs, ", ")
+	}
+	if cert.CommonName != nil {
+		return strings.EqualFold(*cert.CommonName, host), *cert.CommonName
+	}
+	// Neither DNS SANs nor a CN are present. Skip the hostname check: the
+	// fingerprint pin earlier in verifyWithBadge already binds this exact
+	// certificate to the badge, and ANS-2 identity certificates carry no DNS SAN.
+	return true, ""
+}
+
 // verifyWithBadge verifies a certificate against a badge.
 func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity, fqdn models.Fqdn) *VerificationOutcome {
 	// Check badge status
@@ -263,14 +286,13 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 
 	// Compare hostname
 	badgeHost := badge.AgentHost()
-	certFqdn := cert.FQDN()
 
 	if !strings.EqualFold(badgeHost, fqdn.String()) {
 		return NewHostnameMismatchOutcome(badge, fqdn.String(), badgeHost)
 	}
 
-	if certFqdn != nil && !strings.EqualFold(*certFqdn, badgeHost) {
-		return NewHostnameMismatchOutcome(badge, badgeHost, *certFqdn)
+	if ok, actual := certCoversHost(cert, badgeHost); !ok {
+		return NewHostnameMismatchOutcome(badge, badgeHost, actual)
 	}
 
 	outcome := NewVerifiedOutcome(badge, cert.Fingerprint)
@@ -278,6 +300,30 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		outcome.Warnings = append(outcome.Warnings, "badge status is DEPRECATED")
 	}
 	return outcome
+}
+
+// validateIdentityCertName checks that an identity certificate names the host
+// carried in its ans:// URI SAN consistently: exactly one DNS SAN equal to the
+// host (case-insensitive) and, when a Common Name is present, a CN equal to the
+// host. The exact comparison means wildcard DNS SANs never satisfy it. It runs
+// before any badge or transparency-log lookup so a malformed certificate never
+// triggers network activity.
+func validateIdentityCertName(cert *CertIdentity, ansHost string) *VerificationOutcome {
+	if len(cert.DNSSANs) != 1 || !strings.EqualFold(cert.DNSSANs[0], ansHost) {
+		return NewCertErrorOutcome(&VerificationError{
+			Type:     VerificationErrorIdentityDNSMismatch,
+			Expected: ansHost,
+			Actual:   strings.Join(cert.DNSSANs, ", "),
+		})
+	}
+	if cert.CommonName != nil && !strings.EqualFold(*cert.CommonName, ansHost) {
+		return NewCertErrorOutcome(&VerificationError{
+			Type:     VerificationErrorIdentityDNSMismatch,
+			Expected: ansHost,
+			Actual:   *cert.CommonName,
+		})
+	}
+	return nil
 }
 
 // ClientVerifier verifies mTLS client certificates against the ANS transparency log.
@@ -297,51 +343,50 @@ func NewClientVerifier(opts ...Option) *ClientVerifier {
 
 // Verify verifies an mTLS client certificate.
 func (v *ClientVerifier) Verify(ctx context.Context, cert *CertIdentity) *VerificationOutcome {
-	// 1. Extract FQDN from cert
-	fqdnStr := cert.FQDN()
-	if fqdnStr == nil {
-		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoCN})
-	}
-
-	fqdn, err := models.NewFqdn(*fqdnStr)
-	if err != nil {
-		return NewCertErrorOutcome(err)
-	}
-
-	// 2. Extract ANS name from URI SANs
+	// 1. Extract ANS name from URI SANs; validate that the identity certificate's
+	//    DNS SAN names exactly the same host (and CN when present); then look up the badge.
 	ansName := cert.AnsName()
 	if ansName == nil {
 		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
 	}
 
-	// 3. Extract version
+	if outcome := validateIdentityCertName(cert, ansName.Host); outcome != nil {
+		return outcome
+	}
+
+	fqdn, err := models.NewFqdn(ansName.Host)
+	if err != nil {
+		return NewCertErrorOutcome(err)
+	}
+
+	// 2. Extract version
 	version := ansName.Version
 
-	// 4. Check cache first (by FQDN + version)
+	// 3. Check cache first (by FQDN + version)
 	if v.config.cache != nil {
 		if cached, ok := v.config.cache.GetByFqdnVersion(fqdn, version); ok {
 			return v.verifyWithBadge(cached.Badge, cert, fqdn, ansName)
 		}
 	}
 
-	// 5. Fetch badge from DNS + TLog (matching version)
+	// 4. Fetch badge from DNS + TLog (matching version)
 	badge, outcome := v.fetchBadge(ctx, fqdn, version)
 	if outcome != nil {
 		return outcome
 	}
 
-	// 6. Cache the badge
+	// 5. Cache the badge
 	if v.config.cache != nil {
 		v.config.cache.InsertForVersion(fqdn, version, badge)
 	}
 
-	// 7. Verify against badge
+	// 6. Verify against badge
 	outcome = v.verifyWithBadge(badge, cert, fqdn, ansName)
 	if !outcome.IsSuccess() {
 		return outcome
 	}
 
-	// 8. Optional DANE/TLSA check (can reject even if badge verification passed)
+	// 7. Optional DANE/TLSA check (can reject even if badge verification passed)
 	if rejection := verifyDANE(ctx, v.config, fqdn, cert, outcome); rejection != nil {
 		return rejection
 	}
@@ -369,18 +414,18 @@ func (v *ClientVerifier) VerifyWithScitt(ctx context.Context, cert *CertIdentity
 		return NewScittErrorOutcome(errors.New("both X-SCITT-Receipt and X-ANS-Status-Token headers are required"))
 	}
 
-	fqdnStr := cert.FQDN()
-	if fqdnStr == nil {
-		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoCN})
-	}
-	fqdn, err := models.NewFqdn(*fqdnStr)
-	if err != nil {
-		return NewCertErrorOutcome(err)
+	ansName := cert.AnsName()
+	if ansName == nil {
+		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
 	}
 
-	// Parity with badge path: client cert must carry an ans:// URI SAN.
-	if cert.AnsName() == nil {
-		return NewCertErrorOutcome(&VerificationError{Type: VerificationErrorNoURISAN})
+	if outcome := validateIdentityCertName(cert, ansName.Host); outcome != nil {
+		return outcome
+	}
+
+	fqdn, err := models.NewFqdn(ansName.Host)
+	if err != nil {
+		return NewCertErrorOutcome(err)
 	}
 
 	return verifyWithHeaders(ctx, v.config, fqdn, cert, headers, log, roleIdentity,
