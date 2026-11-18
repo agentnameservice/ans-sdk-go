@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/registries"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/trust"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -20,7 +21,11 @@ var knownRegistries = registries.Known
 const registriesTablePadding = 2
 
 func buildRegistriesCmd() *cobra.Command {
-	return &cobra.Command{
+	return buildRegistriesCmdWithDeps(defaultTrustDeps())
+}
+
+func buildRegistriesCmdWithDeps(deps trustDeps) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "registries",
 		Short: "List the known public ANS registries built into this binary",
 		Long: `List the known public ANS registries built into this binary.
@@ -39,6 +44,13 @@ anchors.`,
 			return runRegistries(cmd.OutOrStdout(), viper.GetBool("json"))
 		},
 	}
+	cmd.AddCommand(
+		buildFetchKeysCmd(deps),
+		buildFetchCACmd(deps),
+		buildTrustRootsCmd(),
+		buildShowRegistryCmd(),
+	)
+	return cmd
 }
 
 func runRegistries(w io.Writer, asJSON bool) error {
@@ -101,14 +113,25 @@ func resolveRegistryURLs(value string) (registryURLs, error) {
 	if value == "" {
 		return registryURLs{}, nil
 	}
-	list, err := knownRegistries()
-	if err != nil {
-		return registryURLs{}, err
-	}
-	sel, err := list.Select(value)
+	sel, err := selectRegistry(value)
 	if err != nil {
 		return registryURLs{}, err
 	}
 	fmt.Fprintf(os.Stderr, "Using registry %s (%s): RA %s, TL %s\n", sel, sel.Registry.Operator, sel.Environment.RA, sel.Environment.TL)
 	return registryURLs{ra: sel.Environment.RA, tl: sel.Environment.TL}, nil
+}
+
+// selectRegistry resolves a <id>/<environment> value against the built-in
+// directory.
+func selectRegistry(value string) (registries.Selected, error) {
+	list, err := knownRegistries()
+	if err != nil {
+		return registries.Selected{}, err
+	}
+	return list.Select(value)
+}
+
+// trustScope names the trust material directory for a selected environment.
+func trustScope(sel registries.Selected) trust.Scope {
+	return trust.Scope{RegistryID: sel.Registry.ID, Environment: sel.Name}
 }

@@ -104,10 +104,13 @@ The CLI can be configured using environment variables or command-line flags:
 | `ANS_REGISTRY` | `--registry` | Known registry and environment as `<id>/<environment>`; supplies the RA and transparency log URLs. `ans-cli registries` lists them | (unset) |
 | `ANS_BASE_URL` | `--base-url` | Registration Authority base URL; overrides `--registry` | (unset; one of `--registry` or `--base-url` is required) |
 | `ANS_TRANSPARENCY_URL` | `--transparency-url` | Transparency log base URL; overrides `--registry`; used by `badge` | (unset) |
+| `ANS_CONFIG_DIR` | `--config-dir` | Directory for saved transparency log keys and trusted CA roots, kept per registry environment | the platform user config directory, `ans-cli` (for example `~/.config/ans-cli` on Linux, `~/Library/Application Support/ans-cli` on macOS) |
 | N/A | `--verbose` / `-v` | Enable verbose output | `false` |
 | N/A | `--json` / `-j` | Output in JSON format | `false` |
 
 There is no default registry and no default environment. Release builds of `ans-cli` carry the known-registries directory published in the ANS specification repository ([`registries/known-registries.json`](https://github.com/agentnameservice/ans-spec/blob/main/registries/known-registries.json)); `ans-cli registries` prints it with the `ans-spec` ref it was built from, and `--registry <id>/<environment>` selects one registry's `production` or `test` environment. The environment is always required, so a command never reaches production by omission. Being listed is not an endorsement and does not make a registry trusted; the directory carries endpoints only, not log keys or trust anchors. Binaries built with `go install` or `go build` carry no directory and need `--base-url` (and `--transparency-url` for `badge`); `make build` produces a binary with the directory injected the same way a release is.
+
+Trust in a registry environment is something you configure, in two explicit steps that are never run for you (see [Trust configuration](#trust-configuration)): `ans-cli registries fetch-keys <id>/<environment>` saves the log's checkpoint signing keys so `badge --checkpoint` can verify checkpoint signatures offline, and `ans-cli registries trust-roots <id>/<environment> --bundle <file>` records which CA roots you accept for that environment's identity certificates. Both are stored under `--config-dir` per registry and environment, so trusting a test environment says nothing about production.
 
 Keep tokens out of command-line arguments — they are visible to other local processes (`ps`) and saved in shell history. Use `ANS_TOKEN` in a shell, or `--token-file` (a path, or `-` for stdin) in scripts and CI; prefer `ANS_API_KEY` over the `--api-key` flag for the same reason. Explicit flags take precedence over environment variables, and a bearer token takes precedence over the API key — when both credentials are configured the CLI prints a note to stderr saying the bearer token is being used. An explicitly empty `--token-file ""` is an error rather than a fallback to the environment, so a script whose token-file variable is unset fails instead of running under another identity. When both `ANS_TOKEN` and the deprecated `ANS_OAUTH_TOKEN` are exported with different values, `ANS_TOKEN` wins and the CLI says so.
 
@@ -122,7 +125,45 @@ List the known public ANS registries built into this binary, one row per registr
 ```bash
 ans-cli registries
 ans-cli registries --json
+ans-cli registries show <id>/<environment>
 ```
+
+`registries show` prints one environment's endpoints, the identity CA bundle reference the directory publishes for it (a pointer, not a trust anchor), and the trust material saved for it: the transparency log keys and the CA roots you have accepted. The subcommands below manage that material.
+
+#### Trust configuration
+
+The known-registries directory records where a registry's endpoints are and nothing more: it carries no Transparency Log keys and no trust anchors, and being listed is not an endorsement. What the CLI verifies is decided by two explicit steps, each scoped to one registry environment and stored under `--config-dir` (`ANS_CONFIG_DIR`) at `registries/<id>/<environment>/`.
+
+**Transparency log keys.** `fetch-keys` reads the keys a log publishes at `{tl}/root-keys`, validates every line (C2SP key shape, key id equal to the SHA-256 prefix of the key, key name equal to the log host or a path under it), and saves them to `tl-keys.txt`. Nothing fetches keys implicitly; run it once after choosing an environment, and again whenever the log announces a new key. A refresh appends keys the log has added and keeps every key already saved, so receipts and checkpoints signed under an older key still verify. A fetched key whose id is already saved under a different name or key material is refused, reported, and leaves the saved key in place; the command then exits non-zero.
+
+```bash
+ans-cli registries fetch-keys <id>/<environment>
+ans-cli registries fetch-keys <id>/<environment> --json
+```
+
+With keys saved, `badge --checkpoint --registry <id>/<environment>` fetches the log's raw signed checkpoint note and verifies its signature against them. When it cannot, because no registry is selected, `--transparency-url` points at a different log, no keys are saved, or the signature does not verify, the output says so plainly and, where a command would fix it, names that command. A verified checkpoint proves that the log signed that tree head with a key you saved. It does not prove that the head extends earlier heads or that other clients are shown the same head; those need consistency proofs or witnesses the CLI does not implement.
+
+**Identity CA roots.** The directory may reference the PEM bundle an operator publishes for the CAs that issue an environment's identity certificates, with the SHA-256 of its bytes. `fetch-ca` downloads that bundle, checks the hash, saves it to `identity-ca-bundle.pem`, and prints each root so you can review it. Downloading does not trust anything: fetching the directory, fetching the bundle, and fetching keys never add or replace a trusted root.
+
+```bash
+ans-cli registries fetch-ca <id>/<environment>
+```
+
+`trust-roots` is the only step that makes roots trusted. It reads a PEM bundle (the one `fetch-ca` saved, or any file you choose), requires every certificate in it to be a CA, and records the roots in `trusted-roots.pem` for that registry environment. By default they are added to the roots already trusted; `--only <sha256>` limits the bundle to named roots and `--replace` makes the selection the whole trusted set.
+
+```bash
+# Review, then accept every root in the published bundle
+ans-cli registries fetch-ca <id>/<environment>
+ans-cli registries trust-roots <id>/<environment> --bundle "$ANS_CONFIG_DIR/registries/<id>/<environment>/identity-ca-bundle.pem"
+
+# Accept one root and drop any previously trusted root
+ans-cli registries trust-roots <id>/<environment> --bundle ca.pem --only <sha256> --replace
+```
+
+**Flags:**
+- `trust-roots --bundle` (required): PEM file holding the CA certificates to trust
+- `trust-roots --only`: Trust only the root with this SHA-256 fingerprint (hex; colons optional); repeatable
+- `trust-roots --replace`: Replace the trusted set instead of adding to it
 
 ### generate-csr
 
@@ -438,7 +479,7 @@ ans-cli badge <agentId>
 # Include audit trail
 ans-cli badge <agentId> --audit
 
-# Include log checkpoint
+# Include the log checkpoint, verified against the keys saved by `registries fetch-keys`
 ans-cli badge <agentId> --checkpoint
 
 # Get everything
@@ -447,10 +488,12 @@ ans-cli badge <agentId> --audit --checkpoint
 
 **Flags:**
 - `--audit`: Also retrieve audit trail
-- `--checkpoint`: Also retrieve log checkpoint
+- `--checkpoint`: Also retrieve the log checkpoint and verify its signature against saved keys
 - `--transparency-url`: Transparency log base URL (env: ANS_TRANSPARENCY_URL)
 
-`badge` reads from the transparency log, a separate host from the API, so it needs `--transparency-url` or `ANS_TRANSPARENCY_URL` and fails before any request when neither is set. The repository README's [Environment URLs](../../README.md#environment-urls) table lists the log URL for each hosted environment.
+`badge` reads from the transparency log, a separate host from the API, so it needs a registry environment (`--registry`) or `--transparency-url` / `ANS_TRANSPARENCY_URL`, and fails before any request when none is set.
+
+With `--checkpoint`, the signed checkpoint is verified only when a registry environment is selected and its log keys have been saved with `ans-cli registries fetch-keys` (see [Trust configuration](#trust-configuration)). The human output then shows `Checkpoint signature verified against saved key <id>`, and `--json` adds a `checkpointVerification` object with `verified`, the registry environment, the key id and name, the origin, tree size, and root hash. When verification is not possible the output says `Checkpoint signature NOT verified` with the reason, `--json` sets `verified: false` with a `reason`, and the exit status is unchanged: the badge was still retrieved, it just was not verified. The `Log Checkpoint` block printed above the verification, and the `checkpoint` object in `--json`, come from the log's JSON API and are the log's statement about itself, `signatures[].valid` included; the CLI compares that view's size and root hash with the verified note and reports `matchesJsonView` (or a warning when they describe different tree heads). The badge entry's own inclusion proof is not checked against the checkpoint.
 
 ## Complete Registration Workflow
 

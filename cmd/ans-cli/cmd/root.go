@@ -51,6 +51,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	_ = cmd.PersistentFlags().MarkHidden("oauth-token")
 	cmd.PersistentFlags().String("base-url", "", "Registration Authority base URL (env: ANS_BASE_URL; overrides --registry)")
 	cmd.PersistentFlags().String("registry", "", "Known registry environment that supplies the RA and transparency log URLs, as `<id>/<environment>` from ans-cli registries (env: ANS_REGISTRY)")
+	cmd.PersistentFlags().String("config-dir", "", "Directory for saved transparency log keys and trusted roots, per registry environment (env: ANS_CONFIG_DIR; default: the user config directory, ans-cli)")
 	cmd.PersistentFlags().String("api-version", "v1", "RA API lane for agent lifecycle routes: v1 or v2 (env: ANS_API_VERSION; discovery profiles require v2)")
 	cmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 	cmd.PersistentFlags().BoolP("json", "j", false, "Output in JSON format")
@@ -61,6 +62,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	_ = viper.BindPFlag("oauth-token", cmd.PersistentFlags().Lookup("oauth-token"))
 	_ = viper.BindPFlag("base-url", cmd.PersistentFlags().Lookup("base-url"))
 	_ = viper.BindPFlag("registry", cmd.PersistentFlags().Lookup("registry"))
+	_ = viper.BindPFlag("config-dir", cmd.PersistentFlags().Lookup("config-dir"))
 	_ = viper.BindPFlag("api-version", cmd.PersistentFlags().Lookup("api-version"))
 	_ = viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
 	_ = viper.BindPFlag("json", cmd.PersistentFlags().Lookup("json"))
@@ -98,6 +100,7 @@ func initConfig() {
 	_ = viper.BindEnv("oauth-token-env", "ANS_OAUTH_TOKEN")
 	_ = viper.BindEnv("base-url", "ANS_BASE_URL")
 	_ = viper.BindEnv("registry", "ANS_REGISTRY")
+	_ = viper.BindEnv("config-dir", "ANS_CONFIG_DIR")
 	_ = viper.BindEnv("api-version", "ANS_API_VERSION")
 
 	viper.AutomaticEnv()

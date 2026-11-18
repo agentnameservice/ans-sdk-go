@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -19,7 +20,12 @@ type Config struct {
 	// Registry is the known-registry selector, <id>/<environment>, from
 	// --registry / ANS_REGISTRY, or empty.
 	Registry string
-	APIKey   string //nolint:gosec // G117 - config struct field definition, not logged
+	// ConfigDir is where the CLI keeps per-registry trust material: saved
+	// Transparency Log keys and explicitly trusted CA roots. It comes from
+	// --config-dir / ANS_CONFIG_DIR, else <os.UserConfigDir()>/ans-cli, and is
+	// empty when neither is available.
+	ConfigDir string
+	APIKey    string //nolint:gosec // G117 - config struct field definition, not logged
 	// Token is the bearer credential — a Personal Access Token or an OAuth 2.0
 	// access token — sent verbatim as "Authorization: Bearer <token>".
 	Token string
@@ -48,9 +54,10 @@ func Load() (*Config, error) {
 
 func load(stdin io.Reader) (*Config, error) {
 	cfg := &Config{
-		BaseURL:  viper.GetString("base-url"),
-		Registry: strings.TrimSpace(viper.GetString("registry")),
-		APIKey:   viper.GetString("api-key"),
+		BaseURL:   viper.GetString("base-url"),
+		Registry:  strings.TrimSpace(viper.GetString("registry")),
+		ConfigDir: configDir(viper.GetString("config-dir"), os.UserConfigDir),
+		APIKey:    viper.GetString("api-key"),
 		// Normalized here so "V2" from env plumbing selects the lane;
 		// value validation happens in cmd.createClient where the SDK
 		// option can reject with proper guidance.
@@ -72,6 +79,20 @@ func load(stdin io.Reader) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// configDir returns the explicit --config-dir / ANS_CONFIG_DIR value, else the
+// ans-cli directory under the platform's user configuration directory, else
+// empty when the platform cannot name one (for example, no HOME).
+func configDir(explicit string, userConfigDir func() (string, error)) string {
+	if dir := strings.TrimSpace(explicit); dir != "" {
+		return dir
+	}
+	base, err := userConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "ans-cli")
 }
 
 // resolveToken applies the precedence documented on Load. The deprecated
