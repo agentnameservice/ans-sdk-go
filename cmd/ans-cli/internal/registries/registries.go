@@ -197,7 +197,7 @@ func Parse(data []byte) (List, error) {
 }
 
 func validateRegistry(r Registry) error {
-	if err := validateID(r.ID); err != nil {
+	if err := ValidateID(r.ID); err != nil {
 		return err
 	}
 	if r.Operator == "" {
@@ -241,8 +241,12 @@ func validateEnvironment(env Environment) error {
 	return nil
 }
 
-// validateID enforces the schema's id pattern ^[a-z0-9]+(-[a-z0-9]+)*$.
-func validateID(id string) error {
+// ValidateID enforces the schema's id pattern ^[a-z0-9]+(-[a-z0-9]+)*$, which
+// also makes an id a safe single path segment.
+func ValidateID(id string) error {
+	if id == "" {
+		return errors.New("id must not be empty")
+	}
 	for i := range len(id) {
 		c := id[i]
 		switch {

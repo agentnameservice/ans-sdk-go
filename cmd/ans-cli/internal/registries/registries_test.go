@@ -216,3 +216,27 @@ func TestKnownDefaultsToEmpty(t *testing.T) {
 		t.Fatal("test binary should carry no injected list")
 	}
 }
+
+func TestValidateID(t *testing.T) {
+	tests := []struct {
+		id string
+		ok bool
+	}{
+		{"godaddy", true},
+		{"my-reg2", true},
+		{"", false},
+		{"A", false},
+		{"-a", false},
+		{"a-", false},
+		{"a--b", false},
+		{"a/b", false},
+		{"..", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			if err := ValidateID(tt.id); (err == nil) != tt.ok {
+				t.Errorf("ValidateID(%q) = %v, want ok=%v", tt.id, err, tt.ok)
+			}
+		})
+	}
+}

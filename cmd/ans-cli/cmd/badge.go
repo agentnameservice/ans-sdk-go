@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -10,7 +13,10 @@ import (
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/registries"
+	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/trust"
 	"github.com/agentnameservice/ans-sdk-go/models"
+	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +26,27 @@ const (
 
 	transparencyURLEnv = "ANS_TRANSPARENCY_URL"
 )
+
+// badgeDeps are the network clients badge uses beyond the JSON API; tests
+// inject doubles.
+type badgeDeps struct {
+	// newTransparencyClient builds the client for the log's JSON API.
+	newTransparencyClient func(baseURL string, verbose bool) (*ans.TransparencyClient, error)
+	// newCheckpointFetcher builds the client that reads a log's raw signed
+	// checkpoint note at {tl}/checkpoint.
+	newCheckpointFetcher func(tlOrigin string) (scitt.CheckpointFetcher, error)
+}
+
+func defaultBadgeDeps() badgeDeps {
+	return badgeDeps{
+		newTransparencyClient: func(baseURL string, verbose bool) (*ans.TransparencyClient, error) {
+			return ans.NewTransparencyClient(ans.WithBaseURL(baseURL), ans.WithVerbose(verbose))
+		},
+		newCheckpointFetcher: func(tlOrigin string) (scitt.CheckpointFetcher, error) {
+			return scitt.NewHTTPClient(tlOrigin, scitt.WithHTTPClient(httpsOnlyClient()))
+		},
+	}
+}
 
 func buildBadgeCmd() *cobra.Command {
 	var (
@@ -32,7 +59,13 @@ func buildBadgeCmd() *cobra.Command {
 		Use:   "badge <agentId>",
 		Short: "Retrieve transparency log entry for an agent",
 		Long: `Retrieve the transparency log entry from the Transparency Log
-for a given agent ID. This includes the Merkle proof, payload data, and status.`,
+for a given agent ID. This includes the Merkle proof, payload data, and status.
+
+With --checkpoint, the log's signed checkpoint is also retrieved. When a
+registry environment is selected with --registry and its log keys have been
+saved with "ans-cli registries fetch-keys", the checkpoint signature is
+verified against those keys; otherwise the output says plainly that it was
+not verified and why.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return runBadgeWithParams(args[0], badgeAuditTrail, badgeCheckpoint, transparencyBaseURL)
@@ -40,13 +73,17 @@ for a given agent ID. This includes the Merkle proof, payload data, and status.`
 	}
 
 	cmd.Flags().BoolVar(&badgeAuditTrail, "audit", false, "Also retrieve audit trail")
-	cmd.Flags().BoolVar(&badgeCheckpoint, "checkpoint", false, "Also retrieve log checkpoint")
+	cmd.Flags().BoolVar(&badgeCheckpoint, "checkpoint", false, "Also retrieve the log checkpoint and verify its signature against saved keys")
 	cmd.Flags().StringVar(&transparencyBaseURL, "transparency-url", "", "Transparency log base URL (env: "+transparencyURLEnv+")")
 
 	return cmd
 }
 
 func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparencyBaseURL string) error {
+	return runBadge(agentID, auditTrail, checkpoint, transparencyBaseURL, defaultBadgeDeps())
+}
+
+func runBadge(agentID string, auditTrail, checkpoint bool, transparencyBaseURL string, deps badgeDeps) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -58,10 +95,7 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 	}
 
 	// Create Transparency Log client (no authentication needed - public endpoint)
-	c, err := ans.NewTransparencyClient(
-		ans.WithBaseURL(baseURL),
-		ans.WithVerbose(cfg.Verbose),
-	)
+	c, err := deps.newTransparencyClient(baseURL, cfg.Verbose)
 	if err != nil {
 		return fmt.Errorf("failed to create transparency client: %w", err)
 	}
@@ -74,14 +108,133 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 		return fmt.Errorf("failed to retrieve transparency log entry: %w", err)
 	}
 
+	var verification *checkpointVerification
+	if checkpoint {
+		v := verifyCheckpoint(ctx, cfg, baseURL, deps)
+		verification = &v
+	}
+
 	// Output result
 	if cfg.JSON {
-		outputBadgeJSON(ctx, c, agentID, logEntry, auditTrail, checkpoint)
+		outputBadgeJSON(ctx, c, agentID, logEntry, auditTrail, verification)
 		return nil
 	}
 
-	outputBadgeHuman(ctx, c, agentID, logEntry, auditTrail, checkpoint)
+	outputBadgeHuman(ctx, c, agentID, logEntry, auditTrail, verification)
 	return nil
+}
+
+// checkpointVerification is the outcome of checking the log's signed
+// checkpoint note against the keys saved for the selected registry
+// environment. Reason is set whenever Verified is false and says what was
+// missing or wrong.
+type checkpointVerification struct {
+	Verified bool   `json:"verified"`
+	Registry string `json:"registry,omitempty"`
+	KeyID    string `json:"keyId,omitempty"`
+	KeyName  string `json:"keyName,omitempty"`
+	Origin   string `json:"origin,omitempty"`
+	// Size is meaningful only when Verified; an empty log has size 0.
+	Size     uint64 `json:"size"`
+	RootHash string `json:"rootHash,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	// MatchesJSONView reports whether the log's JSON checkpoint view (the
+	// unverified /v1/log/checkpoint response printed beside this) describes
+	// the same tree head as the verified note. Nil when the view was not
+	// retrieved or the note was not verified.
+	MatchesJSONView *bool `json:"matchesJsonView,omitempty"`
+}
+
+// bindJSONView compares the verified note to the log's JSON checkpoint view
+// so the output never shows an unverified size and root beside a verified
+// stamp without saying whether they agree. The view's root hash is accepted
+// as hex or base64.
+func (v *checkpointVerification) bindJSONView(view *models.CheckpointResponse) {
+	if !v.Verified || view == nil {
+		return
+	}
+	same := view.LogSize >= 0 && uint64(view.LogSize) == v.Size && rootHashEqual(view.RootHash, v.RootHash)
+	v.MatchesJSONView = &same
+}
+
+func rootHashEqual(view, verifiedHex string) bool {
+	if strings.EqualFold(view, verifiedHex) {
+		return true
+	}
+	raw, err := base64.StdEncoding.DecodeString(view)
+	return err == nil && hex.EncodeToString(raw) == verifiedHex
+}
+
+// verifyCheckpoint fetches the raw signed checkpoint note from the selected
+// registry environment's log and verifies it against that environment's saved
+// keys. It never fetches keys: a missing or stale set is reported, with the
+// command that would fix it, rather than filled in.
+func verifyCheckpoint(ctx context.Context, cfg *config.Config, tlURL string, deps badgeDeps) checkpointVerification {
+	keys, sel, reason := savedCheckpointKeys(cfg, tlURL)
+	if keys == nil {
+		return checkpointVerification{Reason: reason}
+	}
+	result := checkpointVerification{Registry: sel.String()}
+	fetcher, err := deps.newCheckpointFetcher(sel.Environment.TL)
+	if err != nil {
+		result.Reason = fmt.Sprintf("cannot read %s/checkpoint: %v", sel.Environment.TL, err)
+		return result
+	}
+	note, err := fetcher.FetchCheckpoint(ctx)
+	if err != nil {
+		result.Reason = fmt.Sprintf("could not fetch %s/checkpoint: %v", sel.Environment.TL, err)
+		return result
+	}
+	cp, err := scitt.VerifyCheckpoint(note, keys)
+	if err != nil {
+		result.Reason = fmt.Sprintf("signature did not verify against the %d saved key(s) for %s: %v", keys.Len(), sel, err)
+		var sigErr *scitt.SignatureError
+		if errors.As(err, &sigErr) && sigErr.Type == scitt.SigErrUnknownKeyID {
+			result.Reason += fmt.Sprintf(" (if the log added a key, run: ans-cli registries fetch-keys %s)", sel)
+		}
+		return result
+	}
+	result.Verified = true
+	result.KeyID = hex.EncodeToString(cp.KeyID[:])
+	if key, err := keys.Get(cp.KeyID); err == nil {
+		result.KeyName = key.Name
+	}
+	result.Origin = cp.Origin
+	result.Size = cp.Size
+	result.RootHash = hex.EncodeToString(cp.RootHash[:])
+	return result
+}
+
+// savedCheckpointKeys loads the keys saved for the selected registry
+// environment when the log being read is that environment's. When it cannot,
+// the returned reason says why in terms the user can act on.
+func savedCheckpointKeys(cfg *config.Config, tlURL string) (*scitt.KeyStore, *registries.Selected, string) {
+	if cfg.Registry == "" {
+		return nil, nil, "no registry environment selected; saved log keys are kept per registry environment (pass --registry <id>/<environment> and run ans-cli registries fetch-keys)"
+	}
+	sel, err := selectRegistry(cfg.Registry)
+	if err != nil {
+		return nil, nil, err.Error()
+	}
+	if !strings.EqualFold(strings.TrimRight(tlURL, "/"), sel.Environment.TL) {
+		return nil, nil, fmt.Sprintf("transparency log URL %s overrides the %s log %s; saved keys are bound to that log", tlURL, sel, sel.Environment.TL)
+	}
+	store, err := trust.NewStore(cfg.ConfigDir)
+	if err != nil {
+		return nil, nil, err.Error()
+	}
+	keys, err := store.LoadKeys(trustScope(sel))
+	if err != nil {
+		if errors.Is(err, trust.ErrNoSavedKeys) {
+			return nil, nil, fmt.Sprintf("no saved log keys for %s; run: ans-cli registries fetch-keys %s", sel, sel)
+		}
+		return nil, nil, err.Error()
+	}
+	lookup, err := trust.Lookup(keys)
+	if err != nil {
+		return nil, nil, err.Error()
+	}
+	return lookup, &sel, ""
 }
 
 // resolveTransparencyURL applies the TL URL precedence: --transparency-url,
@@ -103,9 +256,10 @@ func resolveTransparencyURL(flagValue, envValue, registryID string) (string, err
 	return "", fmt.Errorf("no transparency log URL configured: pass --transparency-url, set %s, or pick a known registry with --registry <id>/<environment> (see `ans-cli registries`)", transparencyURLEnv)
 }
 
-func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail, checkpoint bool) {
+func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail bool, verification *checkpointVerification) {
 	result := map[string]any{"transparencyLog": logEntry}
 	var warnings []string
+	checkpoint := verification != nil
 
 	if auditTrail {
 		params := &models.AgentAuditParams{Limit: defaultBadgeAuditLimit, Offset: 0}
@@ -125,6 +279,12 @@ func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID str
 			warnings = append(warnings, warning)
 		} else {
 			result["checkpoint"] = checkpointData
+			verification.bindJSONView(checkpointData)
+		}
+		result["checkpointVerification"] = verification
+		if warning := verification.warning(); warning != "" {
+			fmt.Fprintln(os.Stderr, "Warning: "+warning)
+			warnings = append(warnings, warning)
 		}
 	}
 
@@ -136,7 +296,7 @@ func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID str
 	fmt.Fprintln(os.Stdout, string(jsonData))
 }
 
-func outputBadgeHuman(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail, checkpoint bool) {
+func outputBadgeHuman(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail bool, verification *checkpointVerification) {
 	printTransparencyLog(logEntry)
 
 	if auditTrail {
@@ -149,14 +309,46 @@ func outputBadgeHuman(ctx context.Context, c *ans.TransparencyClient, agentID st
 		}
 	}
 
-	if checkpoint {
+	if verification != nil {
 		if checkpointData, checkpointErr := c.GetCheckpoint(ctx); checkpointErr != nil {
 			fmt.Fprintf(os.Stdout, "\n⚠️  Failed to retrieve checkpoint: %v\n", checkpointErr)
 		} else {
 			fmt.Fprintln(os.Stdout)
 			printCheckpoint(checkpointData)
+			verification.bindJSONView(checkpointData)
 		}
+		printCheckpointVerification(verification)
 	}
+}
+
+// warning returns the line a caller should surface when the checkpoint is not
+// fully verified, or empty when it is.
+func (v *checkpointVerification) warning() string {
+	switch {
+	case !v.Verified:
+		return "checkpoint signature not verified: " + v.Reason
+	case v.MatchesJSONView != nil && !*v.MatchesJSONView:
+		return "the log's JSON checkpoint view describes a different tree head than the verified signed note"
+	default:
+		return ""
+	}
+}
+
+func printCheckpointVerification(v *checkpointVerification) {
+	if !v.Verified {
+		fmt.Fprintf(os.Stdout, "\n⚠️  Checkpoint signature NOT verified: %s\n", v.Reason)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "\n✅ Checkpoint signature verified against saved key %s (%s) for %s\n", v.KeyID, v.KeyName, v.Registry)
+	fmt.Fprintf(os.Stdout, "   Origin: %s  Size: %d  Root: %s\n", v.Origin, v.Size, truncateHash(v.RootHash))
+	switch {
+	case v.MatchesJSONView == nil:
+	case *v.MatchesJSONView:
+		fmt.Fprintln(os.Stdout, "   The JSON checkpoint view above describes this same tree head.")
+	default:
+		fmt.Fprintln(os.Stdout, "   ⚠️  The JSON checkpoint view above describes a DIFFERENT tree head; only the signed note was verified.")
+	}
+	fmt.Fprintln(os.Stdout, "   This proves the log signed this tree head with a key you saved. It does not prove the head extends earlier heads, that other clients see the same head, or anything about the log entry above, whose inclusion proof is not checked here.")
 }
 
 func printTransparencyLog(logEntry *models.TransparencyLog) {
@@ -604,7 +796,7 @@ func printAuditEntryProof(proof *models.MerkleProof) {
 }
 
 func printCheckpoint(checkpoint *models.CheckpointResponse) {
-	fmt.Fprintln(os.Stdout, "🔖 Log Checkpoint")
+	fmt.Fprintln(os.Stdout, "🔖 Log Checkpoint (JSON view, as reported by the log)")
 	fmt.Fprintln(os.Stdout, strings.Repeat("=", SeparatorWidthWide))
 	fmt.Fprintf(os.Stdout, "Log Size:         %d\n", checkpoint.LogSize)
 	fmt.Fprintf(os.Stdout, "Root Hash:        %s\n", truncateHash(checkpoint.RootHash))
@@ -619,7 +811,7 @@ func printCheckpoint(checkpoint *models.CheckpointResponse) {
 	}
 
 	if len(checkpoint.Signatures) > 0 {
-		fmt.Fprintf(os.Stdout, "\nSignatures:       %d\n", len(checkpoint.Signatures))
+		fmt.Fprintf(os.Stdout, "\nSignatures:       %d (validity as reported by the log, not checked here)\n", len(checkpoint.Signatures))
 		for i, sig := range checkpoint.Signatures {
 			fmt.Fprintf(os.Stdout, "  [%d] %s - %s (Valid: %v)\n",
 				i+1, sig.SignerName, sig.Algorithm, sig.Valid)

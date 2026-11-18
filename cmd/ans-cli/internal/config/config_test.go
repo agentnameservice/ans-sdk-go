@@ -322,3 +322,61 @@ func TestRequireCredentials(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigDir(t *testing.T) {
+	tests := []struct {
+		name     string
+		explicit string
+		userDir  func() (string, error)
+		want     string
+	}{
+		{
+			name:     "explicit value wins",
+			explicit: "/etc/ans",
+			userDir:  func() (string, error) { return "/home/u/.config", nil },
+			want:     "/etc/ans",
+		},
+		{
+			name:     "explicit value is trimmed",
+			explicit: "  /etc/ans \n",
+			userDir:  func() (string, error) { return "/home/u/.config", nil },
+			want:     "/etc/ans",
+		},
+		{
+			name:    "user config directory gets an ans-cli subdirectory",
+			userDir: func() (string, error) { return "/home/u/.config", nil },
+			want:    filepath.Join("/home/u/.config", "ans-cli"),
+		},
+		{
+			name:     "whitespace explicit value falls back to the user directory",
+			explicit: "   ",
+			userDir:  func() (string, error) { return "/home/u/.config", nil },
+			want:     filepath.Join("/home/u/.config", "ans-cli"),
+		},
+		{
+			name:    "no user directory yields empty",
+			userDir: func() (string, error) { return "", os.ErrNotExist },
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := configDir(tt.explicit, tt.userDir); got != tt.want {
+				t.Errorf("configDir(%q) = %q, want %q", tt.explicit, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_ConfigDir(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("config-dir", "/tmp/ans-cli-test")
+	cfg, err := load(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ConfigDir != "/tmp/ans-cli-test" {
+		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, "/tmp/ans-cli-test")
+	}
+}
