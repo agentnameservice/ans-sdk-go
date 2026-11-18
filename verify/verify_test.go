@@ -1870,8 +1870,15 @@ func TestValidateBadgeURL(t *testing.T) {
 		},
 		{
 			name:        "valid URL returns nil",
-			url:         "https://transparency.ans.godaddy.com/badge/123",
+			url:         "https://tl.example.com/badge/123",
+			validator:   NewURLValidator([]string{"tl.example.com"}),
 			wantOutcome: false,
+		},
+		{
+			name:        "default config has no trusted domains and fails closed",
+			url:         "https://tl.example.com/badge/123",
+			wantOutcome: true,
+			wantType:    OutcomeURLValidationError,
 		},
 		{
 			name:        "untrusted domain returns error outcome",

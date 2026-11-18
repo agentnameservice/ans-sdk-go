@@ -1,19 +1,20 @@
 package verify
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
 	"strings"
 )
 
-// DefaultTrustedRADomains returns the default trusted Registration Authority domains.
-func DefaultTrustedRADomains() []string {
-	return []string{
-		"transparency.ans.godaddy.com",
-		"transparency.ans.ote-godaddy.com",
-	}
-}
+// ErrNoTrustedDomains is returned, wrapped in a URLValidationError of type
+// URLErrorUntrustedDomain, when a badge URL is validated against an empty
+// trusted-domain list. The SDK ships no default trust anchors; configure the
+// transparency logs you trust with WithTrustedRADomains. The public registries
+// and their log hosts are listed in the ANS specification repository
+// (agentnameservice/ans-spec, registries/known-registries.json).
+var ErrNoTrustedDomains = errors.New("no trusted transparency log domains configured; use WithTrustedRADomains")
 
 // URLErrorType represents the type of URL validation failure.
 type URLErrorType int
@@ -34,7 +35,12 @@ type URLValidationError struct {
 	Type   URLErrorType
 	URL    string
 	Reason string
+	err    error
 }
+
+// Unwrap returns the underlying cause, when one is recorded, so callers can
+// use errors.Is(err, ErrNoTrustedDomains).
+func (e *URLValidationError) Unwrap() error { return e.err }
 
 // Error implements the error interface.
 func (e *URLValidationError) Error() string {
@@ -66,11 +72,6 @@ func NewURLValidator(trustedDomains []string) *URLValidator {
 	return &URLValidator{trustedDomains: lower}
 }
 
-// NewDefaultURLValidator creates a URLValidator with default trusted RA domains.
-func NewDefaultURLValidator() *URLValidator {
-	return NewURLValidator(DefaultTrustedRADomains())
-}
-
 // Validate checks a badge URL against security requirements:
 // 1. HTTPS required
 // 2. Domain must be in trusted list (case-insensitive)
@@ -94,7 +95,16 @@ func (v *URLValidator) Validate(rawURL string) error {
 		}
 	}
 
-	// 2. Trusted domain check (case-insensitive)
+	// 2. Trusted domain check (case-insensitive). An empty list is a
+	// configuration error, not an untrusted host, so name it.
+	if len(v.trustedDomains) == 0 {
+		return &URLValidationError{
+			Type:   URLErrorUntrustedDomain,
+			URL:    rawURL,
+			Reason: ErrNoTrustedDomains.Error(),
+			err:    ErrNoTrustedDomains,
+		}
+	}
 	hostname := strings.ToLower(parsed.Hostname())
 	if !v.isDomainTrusted(hostname) {
 		return &URLValidationError{

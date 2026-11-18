@@ -2,13 +2,14 @@ package verify
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
 func TestURLValidator_Validate(t *testing.T) {
 	validator := NewURLValidator([]string{
-		"transparency.ans.godaddy.com",
-		"transparency.ans.ote-godaddy.com",
+		"tl.example.com",
+		"tl.test.example.com",
 	})
 
 	tests := []struct {
@@ -19,19 +20,19 @@ func TestURLValidator_Validate(t *testing.T) {
 	}{
 		{
 			name: "valid trusted domain",
-			url:  "https://transparency.ans.godaddy.com/v1/agents/test-id",
+			url:  "https://tl.example.com/v1/agents/test-id",
 		},
 		{
 			name: "valid trusted domain OTE",
-			url:  "https://transparency.ans.ote-godaddy.com/v1/agents/test-id",
+			url:  "https://tl.test.example.com/v1/agents/test-id",
 		},
 		{
 			name: "valid trusted domain case insensitive",
-			url:  "https://TRANSPARENCY.ANS.GODADDY.COM/v1/agents/test-id",
+			url:  "https://TL.EXAMPLE.COM/v1/agents/test-id",
 		},
 		{
 			name:        "HTTP rejected",
-			url:         "http://transparency.ans.godaddy.com/v1/agents/test-id",
+			url:         "http://tl.example.com/v1/agents/test-id",
 			wantErr:     true,
 			wantErrType: URLErrorHTTPScheme,
 		},
@@ -43,29 +44,29 @@ func TestURLValidator_Validate(t *testing.T) {
 		},
 		{
 			name:        "trusted domain but non-standard port",
-			url:         "https://transparency.ans.godaddy.com:8443/v1/agents/test-id",
+			url:         "https://tl.example.com:8443/v1/agents/test-id",
 			wantErr:     true,
 			wantErrType: URLErrorNonStandardPort,
 		},
 		{
 			name: "trusted domain with port 443 is ok",
-			url:  "https://transparency.ans.godaddy.com:443/v1/agents/test-id",
+			url:  "https://tl.example.com:443/v1/agents/test-id",
 		},
 		{
 			name:        "path traversal rejected",
-			url:         "https://transparency.ans.godaddy.com/v1/agents/../../admin",
+			url:         "https://tl.example.com/v1/agents/../../admin",
 			wantErr:     true,
 			wantErrType: URLErrorPathTraversal,
 		},
 		{
 			name:        "query params rejected",
-			url:         "https://transparency.ans.godaddy.com/v1/agents/test-id?admin=true",
+			url:         "https://tl.example.com/v1/agents/test-id?admin=true",
 			wantErr:     true,
 			wantErrType: URLErrorPathTraversal,
 		},
 		{
 			name:        "query injection rejected",
-			url:         "https://transparency.ans.godaddy.com/v1/agents/test-id?callback=evil.com",
+			url:         "https://tl.example.com/v1/agents/test-id?callback=evil.com",
 			wantErr:     true,
 			wantErrType: URLErrorPathTraversal,
 		},
@@ -96,21 +97,32 @@ func TestURLValidator_Validate(t *testing.T) {
 	}
 }
 
-func TestDefaultURLValidator(t *testing.T) {
-	validator := NewDefaultURLValidator()
-
-	// All default trusted domains should pass
-	for _, domain := range DefaultTrustedRADomains() {
-		url := "https://" + domain + "/v1/agents/test-id"
-		if err := validator.Validate(url); err != nil {
-			t.Errorf("Default validator rejected trusted domain %s: %v", domain, err)
+func TestURLValidator_EmptyTrustedDomainsFailsClosed(t *testing.T) {
+	for _, domains := range [][]string{nil, {}} {
+		validator := NewURLValidator(domains)
+		err := validator.Validate("https://tl.example.com/v1/agents/test-id")
+		if err == nil {
+			t.Fatal("validator with no trusted domains accepted a URL")
+		}
+		if !errors.Is(err, ErrNoTrustedDomains) {
+			t.Errorf("errors.Is(err, ErrNoTrustedDomains) = false; err = %v", err)
+		}
+		var vErr *URLValidationError
+		if !errors.As(err, &vErr) || vErr.Type != URLErrorUntrustedDomain {
+			t.Errorf("want URLValidationError of type URLErrorUntrustedDomain, got %#v", err)
+		}
+		if !strings.Contains(err.Error(), "badge URL domain not trusted") {
+			t.Errorf("message = %q", err.Error())
 		}
 	}
 
-	// Untrusted domain should fail
-	err := validator.Validate("https://evil.example.com/v1/agents/test-id")
+	// A populated validator does not report the configuration error.
+	err := NewURLValidator([]string{"tl.example.com"}).Validate("https://evil.example.com/v1/agents/x")
+	if errors.Is(err, ErrNoTrustedDomains) {
+		t.Error("populated validator reported ErrNoTrustedDomains for an untrusted host")
+	}
 	if err == nil {
-		t.Error("Default validator accepted untrusted domain")
+		t.Error("populated validator accepted an untrusted host")
 	}
 }
 
