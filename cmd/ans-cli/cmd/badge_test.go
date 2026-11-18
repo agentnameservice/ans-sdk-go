@@ -799,18 +799,23 @@ func TestResolveTransparencyURL(t *testing.T) {
 		{
 			name:       "env wins over registry",
 			envValue:   "https://env.example",
-			registryID: "example-production",
+			registryID: "example/production",
 			want:       "https://env.example",
 		},
 		{
-			name:       "registry supplies the log URL when flag and env are empty",
-			registryID: "example-production",
+			name:       "registry environment supplies the log URL when flag and env are empty",
+			registryID: "example/production",
 			want:       "https://tl.example.com",
 		},
 		{
 			name:       "unknown registry is an error",
-			registryID: "nope",
-			wantErr:    []string{"unknown registry", "example-production"},
+			registryID: "nope/production",
+			wantErr:    []string{"unknown registry", "example"},
+		},
+		{
+			name:       "registry without an environment is an error",
+			registryID: "example",
+			wantErr:    []string{"environment required", "example/<environment>"},
 		},
 		{
 			name:    "neither set names all three settings",

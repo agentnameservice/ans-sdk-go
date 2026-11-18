@@ -1,12 +1,17 @@
-// Package registries exposes the known-registries list published by the ANS
-// specification repository (agentnameservice/ans-spec, registries/known-registries.json).
+// Package registries exposes the known-registries directory published by the
+// ANS specification repository (agentnameservice/ans-spec,
+// registries/known-registries.json).
 //
-// The list is not stored in this repository. The release build fetches it at
-// the ans-spec ref pinned in cmd/ans-cli/ANS_SPEC_REF and injects it through the
-// linker (see scripts/fetch-registries.sh and .goreleaser.yaml). A binary built
-// with plain `go build` or `go install` carries no list; Known returns an empty
-// List and every lookup fails with ErrNoRegistries so callers can tell the user
-// to pass explicit URLs or install a release build.
+// The directory is not stored in this repository. The release build fetches it
+// at the ans-spec ref pinned in cmd/ans-cli/ANS_SPEC_REF and injects it through
+// the linker (see scripts/fetch-registries.sh and .goreleaser.yaml). A binary
+// built with plain `go build` or `go install` carries no directory; Known
+// returns an empty List and every lookup fails with ErrNoRegistries so callers
+// can tell the user to pass explicit URLs or install a release build.
+//
+// The directory records endpoints only. It carries no Transparency Log keys
+// (each log serves its own at /root-keys) and no trust anchors. Being listed is
+// not an endorsement and does not make a registry trusted.
 package registries
 
 import (
@@ -14,7 +19,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -27,70 +34,81 @@ var (
 	specRef        = ""
 )
 
-// ErrNoRegistries reports that this binary was built without the known-registries list.
+// ErrNoRegistries reports that this binary was built without the known-registries directory.
 var ErrNoRegistries = errors.New("this build carries no known-registries list: pass --base-url (and --transparency-url for badge), or install a release build from https://github.com/agentnameservice/ans-sdk-go/releases")
 
-// ErrUnknownRegistry reports that an id is not in the list. Use errors.Is; the
-// wrapped error names the id and lists the ids that exist.
+// ErrUnknownRegistry reports that an id is not in the directory. Use errors.Is;
+// the wrapped error names the id and lists the ids that exist.
 var ErrUnknownRegistry = errors.New("unknown registry")
 
-// State is a registry's lifecycle state as defined in ans-spec registries/README.md.
-type State string
+// ErrEnvironmentRequired reports a --registry value that names a registry but
+// not one of its environments.
+var ErrEnvironmentRequired = errors.New("registry environment required")
 
-// Lifecycle states.
+// ErrUnknownEnvironment reports a --registry value whose environment the
+// registry does not run.
+var ErrUnknownEnvironment = errors.New("unknown registry environment")
+
+// Environment names the directory may carry.
 const (
-	StatePending  State = "pending"
-	StateUsable   State = "usable"
-	StateReadOnly State = "readonly"
-	StateRetired  State = "retired"
+	EnvironmentProduction = "production"
+	EnvironmentTest       = "test"
 )
 
-// Registry is one entry of known-registries.json.
+// Separator divides the registry id from the environment in a --registry value.
+// The schema's id pattern keeps it out of ids.
+const Separator = "/"
+
+const sha256HexLen = 64
+
+func environmentOrder() []string { return []string{EnvironmentProduction, EnvironmentTest} }
+
+// Registry is one entry of known-registries.json: an operator and the
+// environments it runs.
 type Registry struct {
-	ID          string   `json:"id"`
-	Operator    Operator `json:"operator"`
-	Environment string   `json:"environment"`
-	State       State    `json:"state"`
-	Since       string   `json:"since"`
-	Until       *string  `json:"until"`
-	RA          RA       `json:"ra"`
-	TL          TL       `json:"tl"`
+	ID            string                 `json:"id"`
+	Operator      string                 `json:"operator"`
+	Documentation string                 `json:"documentation,omitempty"`
+	Environments  map[string]Environment `json:"environments"`
 }
 
-// Operator identifies who runs a registry.
-type Operator struct {
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	Contact string `json:"contact"`
+// Environment is one deployment of a registry: a Registration Authority and
+// the Transparency Log it publishes to.
+type Environment struct {
+	RA         string      `json:"ra"`
+	TL         string      `json:"tl"`
+	IdentityCA *IdentityCA `json:"identityCa,omitempty"`
 }
 
-// RA is the registry's Registration Authority.
-type RA struct {
-	BaseURL     string   `json:"baseUrl"`
-	APIVersions []string `json:"apiVersions"`
-	Auth        []string `json:"auth"`
+// IdentityCA says where the operator publishes the CA bundle that issues an
+// environment's identity certificates and what its bytes hash to. It is
+// informational: fetching the bundle does not make its roots trusted.
+type IdentityCA struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
 }
 
-// TL is the registry's Transparency Log.
-type TL struct {
-	BaseURL          string   `json:"baseUrl"`
-	VerificationKeys []string `json:"verificationKeys"`
-}
-
-// Host returns the TL hostname, which is also the checkpoint origin and the
-// prefix of every verification key name.
-func (t TL) Host() string {
-	u, err := url.Parse(t.BaseURL)
-	if err != nil {
-		return ""
+// EnvironmentNames returns the registry's environment names in display order,
+// production before test.
+func (r Registry) EnvironmentNames() []string {
+	out := make([]string, 0, len(r.Environments))
+	for _, name := range environmentOrder() {
+		if _, ok := r.Environments[name]; ok {
+			out = append(out, name)
+		}
 	}
-	return strings.ToLower(u.Hostname())
+	return out
 }
 
-// Trusted reports whether verifiers should trust this registry's log.
-func (r Registry) Trusted() bool {
-	return r.State == StateUsable || r.State == StateReadOnly
+// Selected is the registry environment a --registry <id>/<environment> value names.
+type Selected struct {
+	Registry    Registry
+	Name        string
+	Environment Environment
 }
+
+// String returns the --registry value that selects this environment.
+func (s Selected) String() string { return s.Registry.ID + Separator + s.Name }
 
 // List is the parsed known-registries document.
 type List struct {
@@ -126,28 +144,31 @@ func (l List) IDs() []string {
 	return ids
 }
 
-// Trusted returns the registries whose logs verifiers should trust.
-func (l List) Trusted() []Registry {
-	var out []Registry
-	for _, r := range l.Registries {
-		if r.Trusted() {
-			out = append(out, r)
-		}
+// Select resolves a --registry value of the form <id>/<environment>. The
+// environment is always required, even when the registry runs only one, so a
+// command never reaches production by default.
+func (l List) Select(value string) (Selected, error) {
+	id, name, hasEnv := strings.Cut(value, Separator)
+	r, err := l.Get(id)
+	if err != nil {
+		return Selected{}, err
 	}
-	return out
+	runs := strings.Join(r.EnvironmentNames(), " and ")
+	if !hasEnv || name == "" {
+		return Selected{}, fmt.Errorf("%w: %q runs %s; pass --registry %s%s<environment>", ErrEnvironmentRequired, id, runs, id, Separator)
+	}
+	env, ok := r.Environments[name]
+	if !ok {
+		return Selected{}, fmt.Errorf("%w %q: %q runs %s", ErrUnknownEnvironment, name, id, runs)
+	}
+	return Selected{Registry: r, Name: name, Environment: env}, nil
 }
 
-// TLDomains returns the TL hosts of the trusted registries.
-func (l List) TLDomains() []string {
-	trusted := l.Trusted()
-	out := make([]string, 0, len(trusted))
-	for _, r := range trusted {
-		out = append(out, r.TL.Host())
-	}
-	return out
-}
-
-// Parse decodes a known-registries document.
+// Parse decodes a known-registries document and checks what the schema
+// requires: schemaVersion 1, at least one entry, unique ids matching
+// ^[a-z0-9]+(-[a-z0-9]+)*$, a named operator, https documentation and
+// identityCa URLs, a 64-digit lower-case hex sha256, and for every environment
+// a known name and https origins for the RA and TL. updatedAt is not checked.
 func Parse(data []byte) (List, error) {
 	var l List
 	if err := json.Unmarshal(data, &l); err != nil {
@@ -155,6 +176,9 @@ func Parse(data []byte) (List, error) {
 	}
 	if l.SchemaVersion != 1 {
 		return List{}, fmt.Errorf("known-registries: unsupported schemaVersion %d", l.SchemaVersion)
+	}
+	if len(l.Registries) == 0 {
+		return List{}, errors.New("known-registries: no registries listed")
 	}
 	seen := make(map[string]struct{}, len(l.Registries))
 	for _, r := range l.Registries {
@@ -165,26 +189,116 @@ func Parse(data []byte) (List, error) {
 			return List{}, fmt.Errorf("known-registries: duplicate id %q", r.ID)
 		}
 		seen[r.ID] = struct{}{}
-		if r.RA.BaseURL == "" || r.TL.BaseURL == "" {
-			return List{}, fmt.Errorf("known-registries: %s: ra.baseUrl and tl.baseUrl are required", r.ID)
-		}
-		host := r.TL.Host()
-		if host == "" {
-			return List{}, fmt.Errorf("known-registries: %s: tl.baseUrl %q has no host", r.ID, r.TL.BaseURL)
-		}
-		for _, k := range r.TL.VerificationKeys {
-			name, _, ok := strings.Cut(k, "+")
-			if !ok || name != host {
-				return List{}, fmt.Errorf("known-registries: %s: verification key name does not match tl host %q", r.ID, host)
-			}
+		if err := validateRegistry(r); err != nil {
+			return List{}, fmt.Errorf("known-registries: %s: %w", r.ID, err)
 		}
 	}
 	return l, nil
 }
 
-// Known returns the list injected at build time, or an empty List when this
-// binary was built without one. A corrupt injected value is a build defect
-// and is reported through the returned error rather than hidden.
+func validateRegistry(r Registry) error {
+	if err := validateID(r.ID); err != nil {
+		return err
+	}
+	if r.Operator == "" {
+		return errors.New("operator is required")
+	}
+	if r.Documentation != "" {
+		if err := validateHTTPSURL(r.Documentation); err != nil {
+			return fmt.Errorf("documentation: %w", err)
+		}
+	}
+	if len(r.Environments) == 0 {
+		return errors.New("at least one environment is required")
+	}
+	for _, name := range slices.Sorted(maps.Keys(r.Environments)) {
+		if !slices.Contains(environmentOrder(), name) {
+			return fmt.Errorf("unknown environment %q", name)
+		}
+		if err := validateEnvironment(r.Environments[name]); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateEnvironment(env Environment) error {
+	if err := validateOrigin(env.RA); err != nil {
+		return fmt.Errorf("ra: %w", err)
+	}
+	if err := validateOrigin(env.TL); err != nil {
+		return fmt.Errorf("tl: %w", err)
+	}
+	if env.IdentityCA == nil {
+		return nil
+	}
+	if err := validateHTTPSURL(env.IdentityCA.URL); err != nil {
+		return fmt.Errorf("identityCa.url: %w", err)
+	}
+	if !isLowerHex(env.IdentityCA.SHA256, sha256HexLen) {
+		return fmt.Errorf("identityCa.sha256 %q is not %d lower-case hex digits", env.IdentityCA.SHA256, sha256HexLen)
+	}
+	return nil
+}
+
+// validateID enforces the schema's id pattern ^[a-z0-9]+(-[a-z0-9]+)*$.
+func validateID(id string) error {
+	for i := range len(id) {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-' && i > 0 && i < len(id)-1 && id[i-1] != '-':
+		default:
+			return fmt.Errorf("id %q must match ^[a-z0-9]+(-[a-z0-9]+)*$", id)
+		}
+	}
+	return nil
+}
+
+// validateOrigin accepts an https origin for ra and tl: the literal scheme, a
+// host, and nothing else. The raw string is compared because url.Parse drops
+// an empty query or fragment and lower-cases the scheme, all of which the
+// schema rejects. Unlike the schema it also rejects user info in the authority.
+func validateOrigin(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%q: %w", raw, err)
+	}
+	if u.Host == "" || raw != "https://"+u.Host {
+		return fmt.Errorf("%q is not an https origin", raw)
+	}
+	return nil
+}
+
+// validateHTTPSURL accepts what the schema's `format: uri` plus `^https://`
+// pattern accepts for documentation and identityCa.url.
+func validateHTTPSURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%q: %w", raw, err)
+	}
+	if !strings.HasPrefix(raw, "https://") || u.Host == "" {
+		return fmt.Errorf("%q is not an https URL", raw)
+	}
+	return nil
+}
+
+func isLowerHex(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// Known returns the directory injected at build time, or an empty List when
+// this binary was built without one. A corrupt injected value is a build
+// defect and is reported through the returned error rather than hidden.
 func Known() (List, error) {
 	return fromInjected(registriesJSON, specRef)
 }

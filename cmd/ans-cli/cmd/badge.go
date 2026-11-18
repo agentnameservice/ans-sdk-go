@@ -85,7 +85,7 @@ func runBadgeWithParams(agentID string, auditTrail, checkpoint bool, transparenc
 }
 
 // resolveTransparencyURL applies the TL URL precedence: --transparency-url,
-// ANS_TRANSPARENCY_URL, then the --registry entry.
+// ANS_TRANSPARENCY_URL, then the --registry <id>/<environment> entry.
 func resolveTransparencyURL(flagValue, envValue, registryID string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
@@ -100,7 +100,7 @@ func resolveTransparencyURL(flagValue, envValue, registryID string) (string, err
 	if urls.tl != "" {
 		return urls.tl, nil
 	}
-	return "", fmt.Errorf("no transparency log URL configured: pass --transparency-url, set %s, or pick a known registry with --registry <id> (see `ans-cli registries`)", transparencyURLEnv)
+	return "", fmt.Errorf("no transparency log URL configured: pass --transparency-url, set %s, or pick a known registry with --registry <id>/<environment> (see `ans-cli registries`)", transparencyURLEnv)
 }
 
 func outputBadgeJSON(ctx context.Context, c *ans.TransparencyClient, agentID string, logEntry *models.TransparencyLog, auditTrail, checkpoint bool) {

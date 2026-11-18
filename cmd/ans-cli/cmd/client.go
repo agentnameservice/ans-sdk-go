@@ -81,7 +81,7 @@ func authOption(cfg *config.Config) (ans.Option, string, error) {
 }
 
 // resolveBaseURL applies the RA URL precedence: an explicit --base-url /
-// ANS_BASE_URL, then the --registry entry, else ErrNoBaseURL.
+// ANS_BASE_URL, then the --registry <id>/<environment> entry, else ErrNoBaseURL.
 func resolveBaseURL(cfg *config.Config) (string, error) {
 	if cfg.BaseURL != "" {
 		return cfg.BaseURL, nil

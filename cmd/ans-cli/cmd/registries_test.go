@@ -13,27 +13,23 @@ import (
 
 const registriesFixture = `{
   "schemaVersion": 1,
-  "updatedAt": "2026-10-31T00:00:00Z",
+  "updatedAt": "2026-11-18T00:00:00Z",
   "registries": [
     {
-      "id": "example-production",
-      "operator": {"name": "Example", "url": "https://example.com", "contact": "mailto:ops@example.com"},
-      "environment": "production",
-      "state": "usable",
-      "since": "2026-01-01",
-      "until": null,
-      "ra": {"baseUrl": "https://ra.example.com", "apiVersions": ["v1", "v2"], "auth": ["sso-key", "bearer"]},
-      "tl": {"baseUrl": "https://tl.example.com", "verificationKeys": ["tl.example.com+01234567+AjBZ"]}
+      "id": "example",
+      "operator": "Example",
+      "documentation": "https://example.com/docs/ans",
+      "environments": {
+        "production": {"ra": "https://ra.example.com", "tl": "https://tl.example.com"},
+        "test": {"ra": "https://ra.test.example.com", "tl": "https://tl.test.example.com"}
+      }
     },
     {
-      "id": "example-test",
-      "operator": {"name": "Example", "url": "https://example.com", "contact": "mailto:ops@example.com"},
-      "environment": "test",
-      "state": "pending",
-      "since": "2026-01-01",
-      "until": null,
-      "ra": {"baseUrl": "https://ra.test.example.com", "apiVersions": ["v2"], "auth": ["bearer"]},
-      "tl": {"baseUrl": "https://tl.test.example.com", "verificationKeys": []}
+      "id": "other",
+      "operator": "Other",
+      "environments": {
+        "test": {"ra": "https://ra.other.example", "tl": "https://tl.other.example"}
+      }
     }
   ]
 }`
@@ -73,10 +69,22 @@ func TestRunRegistries_Table(t *testing.T) {
 		t.Fatalf("runRegistries: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"ans-spec v9.9.9", "example-production", "example-test", "https://ra.example.com", "https://tl.test.example.com", "usable", "pending", "REGISTRATION AUTHORITY"} {
+	for _, want := range []string{
+		"ans-spec v9.9.9",
+		"REGISTRY", "OPERATOR", "REGISTRATION AUTHORITY", "TRANSPARENCY LOG",
+		"example/production", "example/test", "other/test",
+		"https://ra.example.com", "https://tl.test.example.com", "https://tl.other.example",
+		"example documentation: https://example.com/docs/ans",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("table missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "other documentation") {
+		t.Errorf("entry without documentation should print no documentation line:\n%s", got)
+	}
+	if prod, test := strings.Index(got, "example/production"), strings.Index(got, "example/test"); prod > test {
+		t.Errorf("production should be listed before test:\n%s", got)
 	}
 }
 
@@ -89,25 +97,45 @@ func TestRunRegistries_JSON(t *testing.T) {
 	var doc struct {
 		SpecRef    string `json:"specRef"`
 		Registries []struct {
-			ID string `json:"id"`
+			ID           string `json:"id"`
+			Operator     string `json:"operator"`
+			Environments map[string]struct {
+				RA string `json:"ra"`
+				TL string `json:"tl"`
+			} `json:"environments"`
 		} `json:"registries"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
 	}
-	if doc.SpecRef != "v9.9.9" || len(doc.Registries) != 2 || doc.Registries[0].ID != "example-production" {
-		t.Errorf("unexpected JSON: %s", out.String())
+	if doc.SpecRef != "v9.9.9" || len(doc.Registries) != 2 || doc.Registries[0].ID != "example" {
+		t.Fatalf("unexpected JSON: %s", out.String())
+	}
+	if got := doc.Registries[0].Environments["production"].TL; got != "https://tl.example.com" {
+		t.Errorf("production tl = %q", got)
 	}
 }
 
 func TestRunRegistries_EmptyBuild(t *testing.T) {
 	withNoRegistries(t)
-	var out bytes.Buffer
-	if err := runRegistries(&out, false); err != nil {
-		t.Fatalf("runRegistries: %v", err)
+	tests := []struct {
+		name   string
+		asJSON bool
+	}{
+		{name: "table", asJSON: false},
+		{name: "json", asJSON: true},
 	}
-	if !strings.Contains(out.String(), "no known-registries list") {
-		t.Errorf("empty build should explain itself, got %q", out.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runRegistries(&out, tt.asJSON)
+			if !errors.Is(err, registries.ErrNoRegistries) {
+				t.Fatalf("err = %v, want ErrNoRegistries", err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("empty build must write nothing to stdout, got %q", out.String())
+			}
+		})
 	}
 }
 
@@ -128,10 +156,12 @@ func TestResolveBaseURL(t *testing.T) {
 		wantErrIs error
 		wantSub   string
 	}{
-		{name: "explicit base URL wins", cfg: config.Config{BaseURL: "https://flag.example", Registry: "example-production"}, want: "https://flag.example"},
-		{name: "registry supplies the RA URL", cfg: config.Config{Registry: "example-production"}, want: "https://ra.example.com"},
-		{name: "pending registries are still selectable by id", cfg: config.Config{Registry: "example-test"}, want: "https://ra.test.example.com"},
-		{name: "unknown registry", cfg: config.Config{Registry: "nope"}, wantErrIs: registries.ErrUnknownRegistry},
+		{name: "explicit base URL wins", cfg: config.Config{BaseURL: "https://flag.example", Registry: "example/production"}, want: "https://flag.example"},
+		{name: "registry environment supplies the RA URL", cfg: config.Config{Registry: "example/production"}, want: "https://ra.example.com"},
+		{name: "test environment", cfg: config.Config{Registry: "example/test"}, want: "https://ra.test.example.com"},
+		{name: "environment is required", cfg: config.Config{Registry: "example"}, wantErrIs: registries.ErrEnvironmentRequired, wantSub: "example/<environment>"},
+		{name: "unknown environment", cfg: config.Config{Registry: "example/staging"}, wantErrIs: registries.ErrUnknownEnvironment},
+		{name: "unknown registry", cfg: config.Config{Registry: "nope/production"}, wantErrIs: registries.ErrUnknownRegistry},
 		{name: "nothing configured", cfg: config.Config{}, wantErrIs: config.ErrNoBaseURL, wantSub: "--registry"},
 	}
 	for _, tt := range tests {
@@ -158,7 +188,7 @@ func TestResolveBaseURL(t *testing.T) {
 
 func TestResolveBaseURL_NoListInBuild(t *testing.T) {
 	withNoRegistries(t)
-	_, err := resolveBaseURL(&config.Config{Registry: "example-production"})
+	_, err := resolveBaseURL(&config.Config{Registry: "example/production"})
 	if !errors.Is(err, registries.ErrNoRegistries) {
 		t.Fatalf("err = %v, want ErrNoRegistries", err)
 	}
@@ -170,14 +200,14 @@ func TestResolveBaseURL_NoListInBuild(t *testing.T) {
 func TestResolveRegistryURLs_LoaderError(t *testing.T) {
 	boom := errors.New("corrupt injection")
 	withBrokenRegistries(t, boom)
-	if _, err := resolveRegistryURLs("example-production"); !errors.Is(err, boom) {
+	if _, err := resolveRegistryURLs("example/production"); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want %v", err, boom)
 	}
 }
 
 func TestCreateClient_UsesRegistry(t *testing.T) {
 	withFixtureRegistries(t)
-	client, err := createClient(&config.Config{APIVersion: "v1", Registry: "example-production", APIKey: "k:s"})
+	client, err := createClient(&config.Config{APIVersion: "v1", Registry: "example/production", APIKey: "k:s"})
 	if err != nil {
 		t.Fatalf("createClient: %v", err)
 	}

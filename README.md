@@ -31,7 +31,7 @@ scoop install ans/ans-cli
 
 ```bash
 export ANS_API_KEY="your-api-key"
-export ANS_REGISTRY="<id>"   # a known registry id from `ans-cli registries`; or set ANS_BASE_URL / ANS_TRANSPARENCY_URL explicitly
+export ANS_REGISTRY="<id>/<environment>"   # from `ans-cli registries`; or set ANS_BASE_URL / ANS_TRANSPARENCY_URL explicitly
 ```
 
 Or authenticate with a bearer token — a Personal Access Token (PAT) or an OAuth 2.0 access token — instead of an API key. Export it, or have the CLI read it from a file or stdin so it never appears in process listings or shell history:
@@ -344,13 +344,15 @@ Notes:
 The SDK ships no default registry and no default trust anchors. `ans.NewClient` and
 `ans.NewTransparencyClient` return `ans.ErrBaseURLRequired` without `WithBaseURL`, and a
 `verify` verifier built without `WithTrustedRADomains` fails every badge with
-`verify.ErrNoTrustedDomains`. Public registries, their Registration Authority and Transparency
-Log URLs, and each log's checkpoint verification keys are listed in the ANS specification
-repository: [`registries/known-registries.json`](https://github.com/agentnameservice/ans-spec/blob/main/registries/known-registries.json).
-Pick an entry there, or point at your own deployment.
+`verify.ErrNoTrustedDomains`. Public registries and the Registration Authority and Transparency
+Log URLs of each of their environments are listed in the ANS specification repository:
+[`registries/known-registries.json`](https://github.com/agentnameservice/ans-spec/blob/main/registries/known-registries.json).
+Being listed is not an endorsement and does not make a registry trusted; the directory carries
+no log keys or trust anchors. Pick an entry there, or point at your own deployment.
 
-Release builds of `ans-cli` carry that list; `ans-cli registries` prints it and `--registry <id>`
-selects an entry. See the [CLI README](cmd/ans-cli/README.md#configuration).
+Release builds of `ans-cli` carry that directory; `ans-cli registries` prints it and
+`--registry <id>/<environment>` selects an entry. See the
+[CLI README](cmd/ans-cli/README.md#configuration).
 
 ## API Reference
 

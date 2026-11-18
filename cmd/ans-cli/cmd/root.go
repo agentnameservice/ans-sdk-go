@@ -50,7 +50,7 @@ Use this tool to register agents, verify domain ownership, and search for regist
 	cmd.PersistentFlags().String("oauth-token", "", "Deprecated: export ANS_TOKEN or use --token-file")
 	_ = cmd.PersistentFlags().MarkHidden("oauth-token")
 	cmd.PersistentFlags().String("base-url", "", "Registration Authority base URL (env: ANS_BASE_URL; overrides --registry)")
-	cmd.PersistentFlags().String("registry", "", "Known registry id to use for the RA and transparency log URLs; see `ans-cli registries` (env: ANS_REGISTRY)")
+	cmd.PersistentFlags().String("registry", "", "Known registry environment that supplies the RA and transparency log URLs, as `<id>/<environment>` from ans-cli registries (env: ANS_REGISTRY)")
 	cmd.PersistentFlags().String("api-version", "v1", "RA API lane for agent lifecycle routes: v1 or v2 (env: ANS_API_VERSION; discovery profiles require v2)")
 	cmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 	cmd.PersistentFlags().BoolP("json", "j", false, "Output in JSON format")
