@@ -39,6 +39,7 @@ const (
 	EventTypeV1AgentRegistered EventTypeV1 = "AGENT_REGISTERED"
 	EventTypeV1AgentRenewed    EventTypeV1 = "AGENT_RENEWED"
 	EventTypeV1AgentRevoked    EventTypeV1 = "AGENT_REVOKED"
+	EventTypeV1AgentUpdated    EventTypeV1 = "AGENT_UPDATED"
 )
 
 // AgentV1 represents the agent information in V1 schema
@@ -49,7 +50,10 @@ type AgentV1 struct {
 	ProviderID *string `json:"providerId,omitempty"`
 }
 
-// AttestationsV1 represents the attestations in V1 schema
+// AttestationsV1 represents the attestations in V1 schema. The
+// dnsRecordsProvisioned wire field is a JSON object of name→value strings.
+// V2 attestations (array DNS, plural cert arrays without the "valid" prefix)
+// live on AttestationsV2.
 type AttestationsV1 struct {
 	DNSRecordsProvisioned map[string]string       `json:"dnsRecordsProvisioned,omitempty"`
 	DomainValidation      *string                 `json:"domainValidation,omitempty"`
@@ -59,6 +63,42 @@ type AttestationsV1 struct {
 	ValidIdentityCerts    []CertificateV1Extended `json:"validIdentityCerts,omitempty"`
 	ValidServerCerts      []CertificateV1Extended `json:"validServerCerts,omitempty"`
 }
+
+// TransparencyLogV2 represents the V2 schema for ANS Transparency Log entries.
+// V2 changes only the attestations layout: identityCerts/serverCerts arrays and
+// typed dnsRecordsProvisioned records. Event, agent and event-type shapes are
+// the V1 ones.
+type TransparencyLogV2 struct {
+	LogID    string     `json:"logId"`
+	Producer ProducerV2 `json:"producer"`
+}
+
+// ProducerV2 represents the producer section of V2 schema
+type ProducerV2 struct {
+	Event     EventV2 `json:"event"`
+	KeyID     string  `json:"keyId"`
+	Signature string  `json:"signature"`
+}
+
+// EventV2 represents the event structure in V2 schema.
+type EventV2 struct {
+	ANSID                string            `json:"ansId"`
+	ANSName              string            `json:"ansName"`
+	EventType            EventTypeV1       `json:"eventType"`
+	Agent                AgentV1           `json:"agent"`
+	Attestations         AttestationsV2    `json:"attestations"`
+	ExpiresAt            *time.Time        `json:"expiresAt,omitempty"`
+	IssuedAt             time.Time         `json:"issuedAt"`
+	RAID                 string            `json:"raId"`
+	RenewalStatus        *string           `json:"renewalStatus,omitempty"`
+	RevocationReasonCode *RevocationReason `json:"revocationReasonCode,omitempty"`
+	RevokedAt            *time.Time        `json:"revokedAt,omitempty"`
+	Timestamp            time.Time         `json:"timestamp"`
+}
+
+// AttestationsV2 is the V2 attestations layout. It is the same shape the
+// version-neutral Badge exposes, because V2 is the layout Badge normalizes to.
+type AttestationsV2 = Attestations
 
 // CertificateV1 represents certificate information in V1 schema
 type CertificateV1 struct {
@@ -184,5 +224,6 @@ type SchemaVersion string
 const (
 	SchemaVersionV0      SchemaVersion = "V0"
 	SchemaVersionV1      SchemaVersion = "V1"
+	SchemaVersionV2      SchemaVersion = "V2"
 	SchemaVersionUnknown SchemaVersion = ""
 )

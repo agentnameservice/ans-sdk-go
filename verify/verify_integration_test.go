@@ -147,9 +147,7 @@ func TestServerVerifier_InvalidBadgeStatus(t *testing.T) {
 				Event: models.AgentEvent{
 					Agent: models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:0000000000000000000000000000000000000000000000000000000000000000",
-						},
+						ServerCerts: []models.AttestedCert{{Fingerprint: "SHA256:0000000000000000000000000000000000000000000000000000000000000000"}},
 					},
 				},
 			},
@@ -186,9 +184,7 @@ func TestServerVerifier_SuccessfulVerification(t *testing.T) {
 				Event: models.AgentEvent{
 					Agent: models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000",
-						},
+						ServerCerts: []models.AttestedCert{{Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000"}},
 					},
 				},
 			},
@@ -225,9 +221,7 @@ func TestServerVerifier_CachedBadge(t *testing.T) {
 				Event: models.AgentEvent{
 					Agent: models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000",
-						},
+						ServerCerts: []models.AttestedCert{{Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000"}},
 					},
 				},
 			},
@@ -314,9 +308,7 @@ func TestServerVerifier_HostnameMismatch_BadgeHost(t *testing.T) {
 				Event: models.AgentEvent{
 					Agent: models.AgentInfo{Host: "other.example.com"},
 					Attestations: models.Attestations{
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000",
-						},
+						ServerCerts: []models.AttestedCert{{Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000"}},
 					},
 				},
 			},
@@ -353,9 +345,7 @@ func TestServerVerifier_FingerprintMismatch_BadgeCert(t *testing.T) {
 				Event: models.AgentEvent{
 					Agent: models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-						},
+						ServerCerts: []models.AttestedCert{{Fingerprint: "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 					},
 				},
 			},
@@ -392,9 +382,7 @@ func TestServerVerifier_DeprecatedBadge(t *testing.T) {
 				Event: models.AgentEvent{
 					Agent: models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000",
-						},
+						ServerCerts: []models.AttestedCert{{Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000"}},
 					},
 				},
 			},
@@ -454,9 +442,7 @@ func TestClientVerifier_SuccessfulVerification(t *testing.T) {
 					ANSName: "ans://v1.0.0.test.example.com",
 					Agent:   models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						IdentityCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000",
-						},
+						IdentityCerts: []models.AttestedCert{{Fingerprint: "SHA256:0102030000000000000000000000000000000000000000000000000000000000"}},
 					},
 				},
 			},
@@ -501,9 +487,7 @@ func TestClientVerifier_IdentityFingerprintMismatch(t *testing.T) {
 					ANSName: "ans://v1.0.0.test.example.com",
 					Agent:   models.AgentInfo{Host: "test.example.com"},
 					Attestations: models.Attestations{
-						IdentityCert: &models.CertAttestationV1{
-							Fingerprint: "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-						},
+						IdentityCerts: []models.AttestedCert{{Fingerprint: "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 					},
 				},
 			},

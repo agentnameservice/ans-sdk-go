@@ -32,14 +32,8 @@ func createTestBadge(host, version, serverFP, identityFP string) *models.Badge {
 					},
 					Attestations: models.Attestations{
 						DomainValidation: "ACME-DNS-01",
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: serverFP,
-							Type:        "X509-DV-SERVER",
-						},
-						IdentityCert: &models.CertAttestationV1{
-							Fingerprint: identityFP,
-							Type:        "X509-OV-CLIENT",
-						},
+						ServerCerts:      []models.AttestedCert{{Fingerprint: serverFP, Type: "X509-DV-SERVER"}},
+						IdentityCerts:    []models.AttestedCert{{Fingerprint: identityFP, Type: "X509-OV-CLIENT"}},
 					},
 					IssuedAt:  time.Now(),
 					Timestamp: time.Now(),

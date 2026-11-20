@@ -90,14 +90,8 @@ func TestBadge_Helpers(t *testing.T) {
 					},
 					Attestations: Attestations{
 						DomainValidation: "ACME-DNS-01",
-						ServerCert: &CertAttestationV1{
-							Fingerprint: "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904",
-							Type:        "X509-DV-SERVER",
-						},
-						IdentityCert: &CertAttestationV1{
-							Fingerprint: "SHA256:aebdc9da0c20d6d5e4999a773839095ed050a9d7252bf212056fddc0c38f3496",
-							Type:        "X509-OV-CLIENT",
-						},
+						ServerCerts:      []AttestedCert{{Fingerprint: "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904", Type: "X509-DV-SERVER"}},
+						IdentityCerts:    []AttestedCert{{Fingerprint: "SHA256:aebdc9da0c20d6d5e4999a773839095ed050a9d7252bf212056fddc0c38f3496", Type: "X509-OV-CLIENT"}},
 					},
 				},
 			},

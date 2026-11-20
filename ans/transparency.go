@@ -146,13 +146,18 @@ func (c *TransparencyClient) parsePayloadBySchema(payload map[string]any, schema
 		return nil
 	}
 
-	switch schemaVersion {
-	case "V1":
+	switch models.SchemaVersion(schemaVersion) {
+	case models.SchemaVersionV2:
+		var v2 models.TransparencyLogV2
+		if err := json.Unmarshal(payloadJSON, &v2); err == nil {
+			return &v2
+		}
+	case models.SchemaVersionV1:
 		var v1 models.TransparencyLogV1
 		if err := json.Unmarshal(payloadJSON, &v1); err == nil {
 			return &v1
 		}
-	case "V0", "":
+	case models.SchemaVersionV0, models.SchemaVersionUnknown:
 		// V0 is the default for missing schema version
 		var v0 models.TransparencyLogV0
 		if err := json.Unmarshal(payloadJSON, &v0); err == nil {

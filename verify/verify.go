@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
@@ -255,10 +256,10 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare server certificate fingerprint
-	expectedFP := badge.ServerCertFingerprint()
-	if !cert.Fingerprint.Matches(expectedFP) {
-		return NewFingerprintMismatchOutcome(badge, expectedFP, cert.Fingerprint.String())
+	// Compare the server certificate fingerprint against every unexpired cert the badge attests.
+	candidates := currentFingerprints(badge.Payload.Producer.Event.Attestations.ServerCerts, time.Now())
+	if !matchesAny(cert.Fingerprint, candidates) {
+		return NewFingerprintMismatchOutcome(badge, strings.Join(candidates, ", "), cert.Fingerprint.String())
 	}
 
 	// Compare hostname
@@ -433,10 +434,10 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare identity certificate fingerprint
-	expectedFP := badge.IdentityCertFingerprint()
-	if !cert.Fingerprint.Matches(expectedFP) {
-		return NewFingerprintMismatchOutcome(badge, expectedFP, cert.Fingerprint.String())
+	// Compare the identity certificate fingerprint against every unexpired cert the badge attests.
+	candidates := currentFingerprints(badge.Payload.Producer.Event.Attestations.IdentityCerts, time.Now())
+	if !matchesAny(cert.Fingerprint, candidates) {
+		return NewFingerprintMismatchOutcome(badge, strings.Join(candidates, ", "), cert.Fingerprint.String())
 	}
 
 	// Compare hostname
@@ -512,6 +513,30 @@ func (v *AnsVerifier) Prefetch(ctx context.Context, fqdnStr string) (*models.Bad
 		return nil, err
 	}
 	return v.server.Prefetch(ctx, fqdn)
+}
+
+// currentFingerprints returns the fingerprints of the certs still valid at now.
+// A cert the log attests with a past notAfter is excluded even while the TL
+// still lists it, so a rotated-out key cannot pass the badge check.
+func currentFingerprints(certs []models.AttestedCert, now time.Time) []string {
+	out := make([]string, 0, len(certs))
+	for _, c := range certs {
+		if c.ValidAt(now) {
+			out = append(out, c.Fingerprint)
+		}
+	}
+	return out
+}
+
+// matchesAny reports whether fp equals any candidate. CertFingerprint.Matches
+// hex-decodes and length-checks each candidate instead of comparing text.
+func matchesAny(fp CertFingerprint, candidates []string) bool {
+	for _, candidate := range candidates {
+		if fp.Matches(candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 // configLogger returns the configured logger or the default.
