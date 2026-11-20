@@ -1,8 +1,10 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -229,4 +231,162 @@ func loadBadgeFixture(t *testing.T, path string) *Badge {
 		t.Fatalf("unmarshal %s: %v", path, err)
 	}
 	return &b
+}
+
+// TestBadgeMarshalRoundTripsV2 proves a decoded V2 badge re-encodes with V2
+// wire names and decodes again without losing certificates or DNS records.
+func TestBadgeMarshalRoundTripsV2(t *testing.T) {
+	in := loadBadgeFixture(t, "testdata/badge-v2.json")
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"serverCerts"`, `"identityCerts"`, `"dnsRecordsProvisioned":[`} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Errorf("marshaled V2 badge missing %s: %s", want, data)
+		}
+	}
+	for _, reject := range []string{`"validServerCerts"`, `"validIdentityCerts"`, `"serverCert"`} {
+		if bytes.Contains(data, []byte(reject)) {
+			t.Errorf("marshaled V2 badge must not contain %s: %s", reject, data)
+		}
+	}
+
+	var out Badge
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v; json=%s", err, data)
+	}
+	if got := out.ServerCertFingerprints(); len(got) != 2 || got[0] != "v2-srv-fp-a" || got[1] != "v2-srv-fp-b" {
+		t.Errorf("ServerCertFingerprints after round trip = %v", got)
+	}
+	if got := out.IdentityCertFingerprints(); len(got) != 1 || got[0] != "v2-id-fp-a" {
+		t.Errorf("IdentityCertFingerprints after round trip = %v", got)
+	}
+	att := out.Payload.Producer.Event.Attestations
+	if len(att.DNSRecordsProvisionedV2) != 1 || att.DNSRecordsProvisionedV2[0].Name != "_ans.agent.example.com" {
+		t.Errorf("DNSRecordsProvisionedV2 after round trip = %+v", att.DNSRecordsProvisionedV2)
+	}
+	if att.MetadataHashes["agent.json"] != "sha256-abc" {
+		t.Errorf("MetadataHashes after round trip = %+v", att.MetadataHashes)
+	}
+	if out.SchemaVersion != SchemaVersionV2 || out.Status != BadgeStatusActive || out.Payload.LogID != "log-456" {
+		t.Errorf("envelope fields after round trip: version=%q status=%q logId=%q", out.SchemaVersion, out.Status, out.Payload.LogID)
+	}
+}
+
+// TestBadgeMarshalRoundTripsV1 proves a V1 badge keeps singular certs and the
+// map-shaped DNS records across Marshal->Unmarshal.
+func TestBadgeMarshalRoundTripsV1(t *testing.T) {
+	in := loadBadgeFixture(t, "testdata/badge-v1.json")
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"serverCert":{`)) || !bytes.Contains(data, []byte(`"dnsRecordsProvisioned":{`)) {
+		t.Errorf("marshaled V1 badge lost V1 wire shape: %s", data)
+	}
+	var out Badge
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v; json=%s", err, data)
+	}
+	if got := out.ServerCertFingerprints(); len(got) != 1 || got[0] != "v1-srv-fp" {
+		t.Errorf("ServerCertFingerprints after round trip = %v", got)
+	}
+	if got := out.IdentityCertFingerprints(); len(got) != 1 || got[0] != "v1-id-fp" {
+		t.Errorf("IdentityCertFingerprints after round trip = %v", got)
+	}
+	if out.Payload.Producer.Event.Attestations.DNSRecordsProvisioned["_ans.agent.example.com"] != "txt-data" {
+		t.Errorf("DNSRecordsProvisioned after round trip = %+v", out.Payload.Producer.Event.Attestations.DNSRecordsProvisioned)
+	}
+}
+
+// TestBadgeMarshalV2FoldsSingularCerts proves a V2-tagged badge built with the
+// V1 singular cert fields (as older callers do) still emits those certs.
+func TestBadgeMarshalV2FoldsSingularCerts(t *testing.T) {
+	b := Badge{SchemaVersion: SchemaVersionV2, Status: BadgeStatusActive}
+	b.Payload.Producer.Event.Attestations = Attestations{
+		ServerCert:   &CertAttestationV1{Fingerprint: "srv", Type: "X509-DV-SERVER"},
+		IdentityCert: &CertAttestationV1{Fingerprint: "id", Type: "X509-OV-CLIENT"},
+	}
+	data, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out Badge
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v; json=%s", err, data)
+	}
+	if got := out.ServerCertFingerprints(); len(got) != 1 || got[0] != "srv" {
+		t.Errorf("ServerCertFingerprints = %v; json=%s", got, data)
+	}
+	if got := out.IdentityCertFingerprints(); len(got) != 1 || got[0] != "id" {
+		t.Errorf("IdentityCertFingerprints = %v; json=%s", got, data)
+	}
+}
+
+// TestBadgeMarshalUnknownVersionUsesV1 proves a badge with no schemaVersion
+// encodes and decodes through the V1 codec, matching the decode fallback.
+func TestBadgeMarshalUnknownVersionUsesV1(t *testing.T) {
+	b := Badge{Status: BadgeStatusActive}
+	b.Payload.Producer.Event.Attestations.ServerCert = &CertAttestationV1{Fingerprint: "srv", Type: "X509-DV-SERVER"}
+	data, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"serverCert":{`)) {
+		t.Errorf("unknown-version badge should use V1 wire shape: %s", data)
+	}
+	var out Badge
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := out.ServerCertFingerprint(); got != "srv" {
+		t.Errorf("ServerCertFingerprint = %q", got)
+	}
+}
+
+func TestBadgeUnmarshalRejectsMalformedAttestations(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "V1 array dns in map field",
+			raw:  `{"schemaVersion":"V1","payload":{"producer":{"event":{"attestations":{"dnsRecordsProvisioned":[1]}}}}}`,
+		},
+		{
+			name: "V2 map dns in array field",
+			raw:  `{"schemaVersion":"V2","payload":{"producer":{"event":{"attestations":{"dnsRecordsProvisioned":{"a":"b"}}}}}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b Badge
+			err := json.Unmarshal([]byte(tt.raw), &b)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "parse attestations") {
+				t.Errorf("error should name the attestations stage: %v", err)
+			}
+		})
+	}
+}
+
+func TestDNSRecordAttestationDNSSECVerified(t *testing.T) {
+	raw := []byte(`{"name":"_443._tcp.agent.example.com","data":"3 1 1 abcd","type":"TLSA","dnssecVerified":true}`)
+	var rec DNSRecordAttestation
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !rec.DNSSECVerified {
+		t.Fatal("DNSSECVerified should be true")
+	}
+	data, err := json.Marshal(DNSRecordAttestation{Name: "n", Data: "d", Type: "TXT"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(data, []byte("dnssecVerified")) {
+		t.Errorf("false DNSSECVerified must be omitted: %s", data)
+	}
 }

@@ -256,22 +256,9 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	}
 
 	// Compare server certificate fingerprint against any valid cert in the badge.
-	// Using cert.Fingerprint.Matches (rather than badge.MatchesServerCert) ensures
-	// hex decoding and length validation via ParseCertFingerprint.
 	candidates := badge.ServerCertFingerprints()
-	matched := false
-	for _, candidate := range candidates {
-		if cert.Fingerprint.Matches(candidate) {
-			matched = true
-			break
-		}
-	}
-	if !matched {
-		return NewFingerprintMismatchOutcome(
-			badge,
-			firstOrEmpty(candidates),
-			cert.Fingerprint.String(),
-		)
+	if !matchesAny(cert.Fingerprint, candidates) {
+		return NewFingerprintMismatchOutcome(badge, firstOrEmpty(candidates), cert.Fingerprint.String())
 	}
 
 	// Compare hostname
@@ -468,22 +455,9 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 	}
 
 	// Compare identity certificate fingerprint against any valid cert in the badge.
-	// Using cert.Fingerprint.Matches (rather than badge.MatchesIdentityCert) ensures
-	// hex decoding and length validation via ParseCertFingerprint.
-	idCandidates := badge.IdentityCertFingerprints()
-	idMatched := false
-	for _, candidate := range idCandidates {
-		if cert.Fingerprint.Matches(candidate) {
-			idMatched = true
-			break
-		}
-	}
-	if !idMatched {
-		return NewFingerprintMismatchOutcome(
-			badge,
-			firstOrEmpty(idCandidates),
-			cert.Fingerprint.String(),
-		)
+	candidates := badge.IdentityCertFingerprints()
+	if !matchesAny(cert.Fingerprint, candidates) {
+		return NewFingerprintMismatchOutcome(badge, firstOrEmpty(candidates), cert.Fingerprint.String())
 	}
 
 	// Compare hostname
@@ -561,9 +535,20 @@ func (v *AnsVerifier) Prefetch(ctx context.Context, fqdnStr string) (*models.Bad
 	return v.server.Prefetch(ctx, fqdn)
 }
 
-// firstOrEmpty returns the first element of s, or "" if s is empty.
-// Used only when constructing fingerprint-mismatch outcomes so the human-readable
-// "expected" field carries the first badge fingerprint rather than a blank string.
+// matchesAny reports whether fp equals any candidate. CertFingerprint.Matches
+// (rather than Badge.MatchesServerCert) is used so each candidate is hex-decoded
+// and length-checked instead of compared as text.
+func matchesAny(fp CertFingerprint, candidates []string) bool {
+	for _, candidate := range candidates {
+		if fp.Matches(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstOrEmpty returns the first element of s, or "" if s is empty, so a
+// fingerprint-mismatch outcome's "expected" field names a badge fingerprint.
 func firstOrEmpty(s []string) string {
 	if len(s) == 0 {
 		return ""

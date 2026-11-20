@@ -290,7 +290,6 @@ func TestServerVerifier_WildcardCertVerified(t *testing.T) {
 		wantType    OutcomeType
 	}{
 		{
-			// *.domain.api.int.dev-godaddy.com covers agent.domain.api.int.dev-godaddy.com
 			name:        "single-label wildcard covers badge host",
 			wildcardSAN: "*.example.com",
 			badgeHost:   "agent.example.com",

@@ -228,16 +228,16 @@ type AgentInfo struct {
 // v1 shape populates IdentityCert / ServerCert (singular).
 // v2 shape populates ValidIdentityCerts / ValidServerCerts (plural).
 //
-// The dnsRecordsProvisioned wire field carries two historic shapes which
-// UnmarshalJSON decodes without erroring:
+// The dnsRecordsProvisioned wire field carries two historic shapes:
 //   - v1 map shape: a JSON object of name→value strings, decoded into
 //     DNSRecordsProvisioned.
 //   - v2 array shape: a JSON array of {name,data,type} objects, decoded into
 //     DNSRecordsProvisionedV2.
 //
-// MarshalJSON re-emits whichever shape is populated, so values round-trip
-// losslessly. Consumers should prefer DNSRecordsProvisionedV2 and fall back to
-// DNSRecordsProvisioned for historical entries.
+// Badge.UnmarshalJSON and Badge.MarshalJSON pick the shape from the badge's
+// schemaVersion, so a decoded badge re-encodes losslessly. Consumers should
+// prefer DNSRecordsProvisionedV2 and fall back to DNSRecordsProvisioned for
+// historical entries.
 type Attestations struct {
 	DomainValidation   string                 `json:"domainValidation"`
 	IdentityCert       *CertAttestationV1     `json:"identityCert,omitempty"`
@@ -251,15 +251,18 @@ type Attestations struct {
 	// DNSRecordsProvisionedV2 holds v2 array-shaped DNS provisioning data.
 	// Populated only by parseV2BadgeAtts via Badge.UnmarshalJSON. The
 	// json:"-" tag prevents default decoding from competing with the v1 map
-	// field on the same wire key; MarshalJSON re-emits this shape when set.
+	// field on the same wire key; the marshalers re-emit this shape when set.
 	DNSRecordsProvisionedV2 []DNSRecordAttestation `json:"-"`
 	MetadataHashes          map[string]string      `json:"metadataHashes,omitempty"`
 }
 
-// badgeAttParser parses a raw attestations JSON block into an Attestations
-// value for one schema version. Register new versions in badgeAttParsers —
-// no other code changes are needed.
-type badgeAttParser func(raw json.RawMessage) (Attestations, error)
+// badgeAttCodec converts the attestations JSON block of one schema version
+// to and from Attestations. Register new versions in badgeAttCodecs — no
+// other code changes are needed.
+type badgeAttCodec struct {
+	decode func(raw json.RawMessage) (Attestations, error)
+	encode func(a Attestations) ([]byte, error)
+}
 
 // parseV1BadgeAtts handles V1 schema attestations: singular identityCert/serverCert
 // plus optional rotation arrays, and map-shaped dnsRecordsProvisioned.
@@ -316,25 +319,59 @@ func parseV2BadgeAtts(raw json.RawMessage) (Attestations, error) {
 	}, nil
 }
 
-// badgeAttParsers maps each schema version to its attestations parser.
-// V0 and SchemaVersionUnknown are intentionally absent: V0 predates the Badge
-// type and is handled via TransparencyLogV0; Unknown falls back to v1 in
-// parserForBadgeAtts.
-//
-//nolint:exhaustive,gochecknoglobals // V0/Unknown handled by parserForBadgeAtts fallback; registry pattern requires package-level dispatch table
-var badgeAttParsers = map[SchemaVersion]badgeAttParser{
-	SchemaVersionV1: parseV1BadgeAtts,
-	SchemaVersionV2: parseV2BadgeAtts,
+// encodeV1BadgeAtts emits the V1 wire shape via Attestations.MarshalJSON.
+func encodeV1BadgeAtts(a Attestations) ([]byte, error) {
+	return json.Marshal(a)
 }
 
-// parserForBadgeAtts returns the parser for the given schema version.
+// encodeV2BadgeAtts emits the V2 wire shape: plural serverCerts/identityCerts
+// and array-shaped dnsRecordsProvisioned. A singular V1 cert left on the struct
+// is folded into its array so no attested fingerprint is dropped.
+func encodeV2BadgeAtts(a Attestations) ([]byte, error) {
+	wire := struct {
+		DomainValidation      string                 `json:"domainValidation"`
+		ServerCerts           []ValidCertAttestation `json:"serverCerts,omitempty"`
+		IdentityCerts         []ValidCertAttestation `json:"identityCerts,omitempty"`
+		DNSRecordsProvisioned []DNSRecordAttestation `json:"dnsRecordsProvisioned,omitempty"`
+		MetadataHashes        map[string]string      `json:"metadataHashes,omitempty"`
+	}{
+		DomainValidation:      a.DomainValidation,
+		ServerCerts:           certsOrSingular(a.ValidServerCerts, a.ServerCert),
+		IdentityCerts:         certsOrSingular(a.ValidIdentityCerts, a.IdentityCert),
+		DNSRecordsProvisioned: a.DNSRecordsProvisionedV2,
+		MetadataHashes:        a.MetadataHashes,
+	}
+	return json.Marshal(wire)
+}
+
+// certsOrSingular returns plural when populated, otherwise single wrapped in a
+// one-element slice — the same v2-then-v1 fallback ServerCertFingerprints uses.
+func certsOrSingular(plural []ValidCertAttestation, single *CertAttestationV1) []ValidCertAttestation {
+	if len(plural) > 0 || single == nil {
+		return plural
+	}
+	return []ValidCertAttestation{{Fingerprint: single.Fingerprint, Type: single.Type}}
+}
+
+// badgeAttCodecs maps each schema version to its attestations codec.
+// V0 and SchemaVersionUnknown are intentionally absent: V0 predates the Badge
+// type and is handled via TransparencyLogV0; Unknown falls back to v1 in
+// codecForBadgeAtts.
+//
+//nolint:exhaustive,gochecknoglobals // V0/Unknown handled by codecForBadgeAtts fallback; registry pattern requires package-level dispatch table
+var badgeAttCodecs = map[SchemaVersion]badgeAttCodec{
+	SchemaVersionV1: {decode: parseV1BadgeAtts, encode: encodeV1BadgeAtts},
+	SchemaVersionV2: {decode: parseV2BadgeAtts, encode: encodeV2BadgeAtts},
+}
+
+// codecForBadgeAtts returns the codec for the given schema version.
 // Unknown or empty versions default to v1 (backward compat with badges
 // that predate the schemaVersion field).
-func parserForBadgeAtts(sv SchemaVersion) badgeAttParser {
-	if p, ok := badgeAttParsers[sv]; ok {
-		return p
+func codecForBadgeAtts(sv SchemaVersion) badgeAttCodec {
+	if c, ok := badgeAttCodecs[sv]; ok {
+		return c
 	}
-	return parseV1BadgeAtts
+	return badgeAttCodecs[SchemaVersionV1]
 }
 
 // MarshalJSON re-emits dnsRecordsProvisioned in whichever shape is populated,
@@ -357,31 +394,52 @@ func (a Attestations) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aux)
 }
 
+// badgeWire mirrors Badge with the attestations block left raw so the
+// schema-version codec can convert it in both directions.
+type badgeWire struct {
+	Status  BadgeStatus `json:"status"`
+	Payload struct {
+		LogID    string `json:"logId"`
+		Producer struct {
+			Event struct {
+				AgentEvent
+				Attestations json.RawMessage `json:"attestations"`
+			} `json:"event"`
+			KeyID     string `json:"keyId"`
+			Signature string `json:"signature"`
+		} `json:"producer"`
+	} `json:"payload"`
+	SchemaVersion SchemaVersion `json:"schemaVersion"`
+	Signature     *string       `json:"signature,omitempty"`
+	MerkleProof   *MerkleProof  `json:"merkleProof,omitempty"`
+}
+
+// MarshalJSON encodes a Badge with its attestations in the wire shape of
+// SchemaVersion, mirroring UnmarshalJSON so a decoded badge re-encodes losslessly.
+func (b Badge) MarshalJSON() ([]byte, error) {
+	atts, err := codecForBadgeAtts(b.SchemaVersion).encode(b.Payload.Producer.Event.Attestations)
+	if err != nil {
+		return nil, fmt.Errorf("encode attestations (schemaVersion=%q): %w", b.SchemaVersion, err)
+	}
+
+	var raw badgeWire
+	raw.Status = b.Status
+	raw.SchemaVersion = b.SchemaVersion
+	raw.Signature = b.Signature
+	raw.MerkleProof = b.MerkleProof
+	raw.Payload.LogID = b.Payload.LogID
+	raw.Payload.Producer.KeyID = b.Payload.Producer.KeyID
+	raw.Payload.Producer.Signature = b.Payload.Producer.Signature
+	raw.Payload.Producer.Event.AgentEvent = b.Payload.Producer.Event
+	raw.Payload.Producer.Event.Attestations = atts
+	return json.Marshal(raw)
+}
+
 // UnmarshalJSON decodes a Badge from JSON. It reads schemaVersion first and
-// dispatches the nested attestations block to the matching badgeAttParser.
-// To add V3 support: write a parseV3BadgeAtts function and register it in badgeAttParsers.
+// dispatches the nested attestations block to the matching badgeAttCodec.
+// To add V3 support: write parseV3BadgeAtts/encodeV3BadgeAtts and register them in badgeAttCodecs.
 func (b *Badge) UnmarshalJSON(data []byte) error {
-	// rawEvent embeds AgentEvent so all its fields are decoded automatically,
-	// while overriding the Attestations field with json.RawMessage so we can
-	// dispatch parsing to the version-specific parser below.
-	type rawEvent struct {
-		AgentEvent
-		Attestations json.RawMessage `json:"attestations"`
-	}
-	var raw struct {
-		Status        BadgeStatus   `json:"status"`
-		SchemaVersion SchemaVersion `json:"schemaVersion"`
-		Signature     *string       `json:"signature,omitempty"`
-		MerkleProof   *MerkleProof  `json:"merkleProof,omitempty"`
-		Payload       struct {
-			LogID    string `json:"logId"`
-			Producer struct {
-				Event     rawEvent `json:"event"`
-				KeyID     string   `json:"keyId"`
-				Signature string   `json:"signature"`
-			} `json:"producer"`
-		} `json:"payload"`
-	}
+	var raw badgeWire
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -396,7 +454,7 @@ func (b *Badge) UnmarshalJSON(data []byte) error {
 	// Copy all AgentEvent fields; Attestations is zero here — set below.
 	b.Payload.Producer.Event = raw.Payload.Producer.Event.AgentEvent
 
-	atts, err := parserForBadgeAtts(b.SchemaVersion)(raw.Payload.Producer.Event.Attestations)
+	atts, err := codecForBadgeAtts(b.SchemaVersion).decode(raw.Payload.Producer.Event.Attestations)
 	if err != nil {
 		return fmt.Errorf("parse attestations (schemaVersion=%q): %w", b.SchemaVersion, err)
 	}
@@ -422,7 +480,8 @@ type ValidCertAttestation struct {
 // Distinct from DNSRecord in agent.go which uses the provisioning-request
 // shape with a Value field instead of Data.
 type DNSRecordAttestation struct {
-	Name string `json:"name"`
-	Data string `json:"data"`
-	Type string `json:"type"`
+	Name           string `json:"name"`
+	Data           string `json:"data"`
+	Type           string `json:"type"`
+	DNSSECVerified bool   `json:"dnssecVerified,omitempty"`
 }
