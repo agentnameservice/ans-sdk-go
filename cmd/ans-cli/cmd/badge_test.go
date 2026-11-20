@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -390,6 +391,120 @@ func TestPrintV1Payload(t *testing.T) {
 	}
 }
 
+func TestPrintV2Payload(t *testing.T) {
+	now := time.Now()
+	expiresAt := now.Add(24 * time.Hour)
+	revokedAt := now.Add(48 * time.Hour)
+	renewalStatus := "PENDING"
+	revocationCode := models.RevocationReasonKeyCompromise
+	agentName := "Test Agent"
+	providerID := "provider-123"
+
+	tests := []struct {
+		name   string
+		v2     *models.TransparencyLogV2
+		checks []string
+		absent []string
+	}{
+		{
+			name: "full V2 payload with all fields",
+			v2: &models.TransparencyLogV2{
+				LogID: "test-log-id",
+				Producer: models.ProducerV2{
+					KeyID:     "key-123",
+					Signature: "sig-456",
+					Event: models.EventV2{
+						ANSID:                "test-ans-id",
+						ANSName:              "ans://v1.0.0.example.com",
+						EventType:            models.EventTypeV1AgentRegistered,
+						RAID:                 "ra-123",
+						Timestamp:            now,
+						IssuedAt:             now,
+						ExpiresAt:            &expiresAt,
+						RevokedAt:            &revokedAt,
+						RenewalStatus:        &renewalStatus,
+						RevocationReasonCode: &revocationCode,
+						Agent: models.AgentV1{
+							Host:       "example.com",
+							Version:    "v1.0.0",
+							Name:       &agentName,
+							ProviderID: &providerID,
+						},
+						Attestations: models.AttestationsV2{
+							DomainValidation: "ACME-DNS-01",
+							IdentityCerts: []models.AttestedCert{
+								{Fingerprint: "SHA256:idcert1", Type: "X509-OV-CLIENT", NotAfter: &expiresAt},
+							},
+							ServerCerts: []models.AttestedCert{
+								{Fingerprint: "SHA256:srvcert1", Type: "X509-DV-SERVER"},
+							},
+							DNSRecordsProvisioned: []models.DNSRecordAttestation{
+								{Name: "_ans-badge.example.com", Data: "v=ans-badge1", Type: "TXT"},
+							},
+							MetadataHashes: map[string]string{"A2A": "SHA256:deadbeef1234"},
+						},
+					},
+				},
+			},
+			checks: []string{
+				"V2", "test-log-id", "test-ans-id", "AGENT_REGISTERED",
+				"Expires At", "Revoked At", "Renewal Status", "Revocation Code",
+				"Agent Info", "example.com", "v1.0.0", "Test Agent", "provider-123",
+				"Attestations", "ACME-DNS-01",
+				"Identity Certs: 1", "SHA256:idcert1", "Not After",
+				"Server Certs: 1", "SHA256:srvcert1",
+				"DNS Records", "TXT _ans-badge.example.com: v=ans-badge1",
+				"Metadata Hashes", "deadbeef1234",
+				"Signature Info", "key-123",
+			},
+		},
+		{
+			name: "minimal V2 payload omits empty sections",
+			v2: &models.TransparencyLogV2{
+				LogID: "min-log-id",
+				Producer: models.ProducerV2{
+					Event: models.EventV2{
+						ANSID:     "min-ans-id",
+						EventType: models.EventTypeV1AgentRevoked,
+						Agent:     models.AgentV1{Host: "min.example.com", Version: "v2.0.0"},
+					},
+				},
+			},
+			checks: []string{"V2", "min-log-id", "AGENT_REVOKED", "min.example.com"},
+			absent: []string{"Expires At", "Domain Validation", "Identity Certs", "Server Certs", "DNS Records", "Metadata Hashes", "    Name:", "Provider ID"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := captureStdout(func() {
+				printV2Payload(tt.v2)
+			})
+			for _, check := range tt.checks {
+				if !strings.Contains(output, check) {
+					t.Errorf("printV2Payload() output missing %q", check)
+				}
+			}
+			for _, check := range tt.absent {
+				if strings.Contains(output, check) {
+					t.Errorf("printV2Payload() output should not contain %q", check)
+				}
+			}
+		})
+	}
+}
+
+func TestPrintMetadataHashesTruncates(t *testing.T) {
+	hashes := make(map[string]string, maxMetadataHashesDisplay+3)
+	for i := range maxMetadataHashesDisplay + 3 {
+		hashes[fmt.Sprintf("proto-%02d", i)] = "SHA256:aa"
+	}
+	output := captureStdout(func() { printMetadataHashes(hashes) })
+	if !strings.Contains(output, "... and 3 more") {
+		t.Errorf("printMetadataHashes() should truncate after %d entries: %s", maxMetadataHashesDisplay, output)
+	}
+}
+
 func TestPrintV0Payload(t *testing.T) {
 	now := time.Now()
 	expiresAt := now.Add(24 * time.Hour)
@@ -585,6 +700,23 @@ func TestPrintPayload(t *testing.T) {
 			expect: "V1",
 		},
 		{
+			name: "V2 payload",
+			logEntry: &models.TransparencyLog{
+				SchemaVersion: string(models.SchemaVersionV2),
+				ParsedPayload: &models.TransparencyLogV2{
+					LogID: "test-log-id",
+					Producer: models.ProducerV2{
+						Event: models.EventV2{
+							ANSID:     "test-ans-id",
+							ANSName:   "ans://v1.0.0.example.com",
+							EventType: models.EventTypeV1AgentRegistered,
+						},
+					},
+				},
+			},
+			expect: "V2",
+		},
+		{
 			name: "V0 payload",
 			logEntry: &models.TransparencyLog{
 				SchemaVersion: string(models.SchemaVersionV0),
@@ -643,6 +775,20 @@ func TestPrintAuditEntryPayload(t *testing.T) {
 				},
 			},
 			expect: "V1:",
+		},
+		{
+			name: "V2 entry",
+			entry: &models.TransparencyLog{
+				SchemaVersion: string(models.SchemaVersionV2),
+				ParsedPayload: &models.TransparencyLogV2{
+					Producer: models.ProducerV2{
+						Event: models.EventV2{
+							EventType: models.EventTypeV1AgentRenewed,
+						},
+					},
+				},
+			},
+			expect: "V2: AGENT_RENEWED",
 		},
 		{
 			name: "V0 entry",

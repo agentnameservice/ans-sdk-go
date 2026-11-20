@@ -244,7 +244,6 @@ func ExampleSchemaValidation() {
 	v0Event := createV0Event()
 	slog.Info("created V0 event", "logID", v0Event.LogID, "eventType", v0Event.Producer.Event.EventType)
 
-	_ = v2Event
 	_ = v1Event
 	_ = v0Event
 }
@@ -256,18 +255,15 @@ func createV2Event() *models.TransparencyLogV2 {
 			Event: models.EventV2{
 				ANSID:     "6bf2b7a9-1383-4e33-a945-845f34af7528",
 				ANSName:   "ans://v1.0.0.agent-0.ai.domain.com",
-				EventType: models.EventTypeV2AgentRegistered,
-				Agent: models.AgentV2{
+				EventType: models.EventTypeV1AgentRegistered,
+				Agent: models.AgentV1{
 					Host:    "agent-0.ai.domain.com",
 					Version: "v1.0.0",
 				},
 				Attestations: models.AttestationsV2{
-					DomainValidation: stringPtr("ACME-DNS-01"),
-					ServerCerts: []models.CertificateV1Extended{
-						{CertificateV1: models.CertificateV1{
-							Fingerprint: "SHA256:abcdef1234567890",
-							Type:        models.CertTypeX509DVServer,
-						}},
+					DomainValidation: "ACME-DNS-01",
+					ServerCerts: []models.AttestedCert{
+						{Fingerprint: "SHA256:abcdef1234567890", Type: string(models.CertTypeX509DVServer)},
 					},
 					DNSRecordsProvisioned: []models.DNSRecordAttestation{
 						{Name: "_ans.agent-0.ai.domain.com", Data: "txt-data", Type: "TXT"},

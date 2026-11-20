@@ -39,6 +39,7 @@ const (
 	EventTypeV1AgentRegistered EventTypeV1 = "AGENT_REGISTERED"
 	EventTypeV1AgentRenewed    EventTypeV1 = "AGENT_RENEWED"
 	EventTypeV1AgentRevoked    EventTypeV1 = "AGENT_REVOKED"
+	EventTypeV1AgentUpdated    EventTypeV1 = "AGENT_UPDATED"
 )
 
 // AgentV1 represents the agent information in V1 schema
@@ -64,8 +65,9 @@ type AttestationsV1 struct {
 }
 
 // TransparencyLogV2 represents the V2 schema for ANS Transparency Log entries.
-// V2 mirrors V1 except for the attestations shape (plural cert arrays without the
-// "valid" prefix and array-shaped dnsRecordsProvisioned).
+// V2 changes only the attestations layout: identityCerts/serverCerts arrays and
+// typed dnsRecordsProvisioned records. Event, agent and event-type shapes are
+// the V1 ones.
 type TransparencyLogV2 struct {
 	LogID    string     `json:"logId"`
 	Producer ProducerV2 `json:"producer"`
@@ -78,13 +80,12 @@ type ProducerV2 struct {
 	Signature string  `json:"signature"`
 }
 
-// EventV2 represents the event structure in V2 schema. Field set mirrors EventV1;
-// only Attestations differs.
+// EventV2 represents the event structure in V2 schema.
 type EventV2 struct {
 	ANSID                string            `json:"ansId"`
 	ANSName              string            `json:"ansName"`
-	EventType            EventTypeV2       `json:"eventType"`
-	Agent                AgentV2           `json:"agent"`
+	EventType            EventTypeV1       `json:"eventType"`
+	Agent                AgentV1           `json:"agent"`
 	Attestations         AttestationsV2    `json:"attestations"`
 	ExpiresAt            *time.Time        `json:"expiresAt,omitempty"`
 	IssuedAt             time.Time         `json:"issuedAt"`
@@ -95,34 +96,9 @@ type EventV2 struct {
 	Timestamp            time.Time         `json:"timestamp"`
 }
 
-// EventTypeV2 represents the event types in V2 schema (same values as V1).
-type EventTypeV2 string
-
-const (
-	EventTypeV2AgentDeprecated EventTypeV2 = "AGENT_DEPRECATED"
-	EventTypeV2AgentRegistered EventTypeV2 = "AGENT_REGISTERED"
-	EventTypeV2AgentRenewed    EventTypeV2 = "AGENT_RENEWED"
-	EventTypeV2AgentRevoked    EventTypeV2 = "AGENT_REVOKED"
-)
-
-// AgentV2 represents the agent information in V2 schema (same shape as AgentV1).
-type AgentV2 struct {
-	Host       string  `json:"host"`
-	Name       *string `json:"name,omitempty"`
-	Version    string  `json:"version"`
-	ProviderID *string `json:"providerId,omitempty"`
-}
-
-// AttestationsV2 represents the attestations in V2 schema. Wire field names
-// match the Badge V2 surface: plural cert arrays (without the V1 "valid"
-// prefix) and array-shaped dnsRecordsProvisioned.
-type AttestationsV2 struct {
-	DomainValidation      *string                 `json:"domainValidation,omitempty"`
-	ServerCerts           []CertificateV1Extended `json:"serverCerts,omitempty"`
-	IdentityCerts         []CertificateV1Extended `json:"identityCerts,omitempty"`
-	DNSRecordsProvisioned []DNSRecordAttestation  `json:"dnsRecordsProvisioned,omitempty"`
-	MetadataHashes        map[string]string       `json:"metadataHashes,omitempty"`
-}
+// AttestationsV2 is the V2 attestations layout. It is the same shape the
+// version-neutral Badge exposes, because V2 is the layout Badge normalizes to.
+type AttestationsV2 = Attestations
 
 // CertificateV1 represents certificate information in V1 schema
 type CertificateV1 struct {

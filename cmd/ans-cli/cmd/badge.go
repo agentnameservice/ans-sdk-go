@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/agentnameservice/ans-sdk-go/ans"
 	"github.com/agentnameservice/ans-sdk-go/cmd/ans-cli/internal/config"
@@ -205,6 +206,8 @@ func printPayload(logEntry *models.TransparencyLog) {
 
 	// Use strongly-typed payload if available
 	switch {
+	case logEntry.IsV2() && logEntry.GetV2Payload() != nil:
+		printV2Payload(logEntry.GetV2Payload())
 	case logEntry.IsV1() && logEntry.GetV1Payload() != nil:
 		printV1Payload(logEntry.GetV1Payload())
 	case logEntry.IsV0() && logEntry.GetV0Payload() != nil:
@@ -216,48 +219,128 @@ func printPayload(logEntry *models.TransparencyLog) {
 }
 
 func printV1Payload(v1 *models.TransparencyLogV1) {
-	fmt.Fprintf(os.Stdout, "  Schema:          V1\n")
-	fmt.Fprintf(os.Stdout, "  Log ID:          %s\n", v1.LogID)
-
 	event := v1.Producer.Event
-	fmt.Fprintf(os.Stdout, "  ANS ID:          %s\n", event.ANSID)
-	fmt.Fprintf(os.Stdout, "  ANS Name:        %s\n", event.ANSName)
-	fmt.Fprintf(os.Stdout, "  Event Type:      %s\n", event.EventType)
-	fmt.Fprintf(os.Stdout, "  RA ID:           %s\n", event.RAID)
-	fmt.Fprintf(os.Stdout, "  Timestamp:       %s\n", event.Timestamp.Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(os.Stdout, "  Issued At:       %s\n", event.IssuedAt.Format("2006-01-02 15:04:05 MST"))
-
-	if event.ExpiresAt != nil {
-		fmt.Fprintf(os.Stdout, "  Expires At:      %s\n", event.ExpiresAt.Format("2006-01-02 15:04:05 MST"))
-	}
-	if event.RevokedAt != nil {
-		fmt.Fprintf(os.Stdout, "  Revoked At:      %s\n", event.RevokedAt.Format("2006-01-02 15:04:05 MST"))
-	}
-	if event.RenewalStatus != nil {
-		fmt.Fprintf(os.Stdout, "  Renewal Status:  %s\n", *event.RenewalStatus)
-	}
-	if event.RevocationReasonCode != nil {
-		fmt.Fprintf(os.Stdout, "  Revocation Code: %s\n", *event.RevocationReasonCode)
-	}
-
-	// Agent info
-	fmt.Fprintln(os.Stdout, "\n  Agent Info:")
-	fmt.Fprintf(os.Stdout, "    Host:          %s\n", event.Agent.Host)
-	fmt.Fprintf(os.Stdout, "    Version:       %s\n", event.Agent.Version)
-	if event.Agent.Name != nil {
-		fmt.Fprintf(os.Stdout, "    Name:          %s\n", *event.Agent.Name)
-	}
-	if event.Agent.ProviderID != nil {
-		fmt.Fprintf(os.Stdout, "    Provider ID:   %s\n", *event.Agent.ProviderID)
-	}
-
-	// Attestations
+	printEventHeader("V1", v1.LogID, eventHeader{
+		ANSID: event.ANSID, ANSName: event.ANSName, EventType: string(event.EventType), RAID: event.RAID,
+		Timestamp: event.Timestamp, IssuedAt: event.IssuedAt, ExpiresAt: event.ExpiresAt, RevokedAt: event.RevokedAt,
+		RenewalStatus: event.RenewalStatus, RevocationReasonCode: event.RevocationReasonCode,
+	})
+	printAgentV1Info(&event.Agent)
 	printV1Attestations(&event.Attestations)
+	printSignatureInfo(v1.Producer.KeyID, v1.Producer.Signature)
+}
 
-	// Signature info
+func printV2Payload(v2 *models.TransparencyLogV2) {
+	event := v2.Producer.Event
+	printEventHeader("V2", v2.LogID, eventHeader{
+		ANSID: event.ANSID, ANSName: event.ANSName, EventType: string(event.EventType), RAID: event.RAID,
+		Timestamp: event.Timestamp, IssuedAt: event.IssuedAt, ExpiresAt: event.ExpiresAt, RevokedAt: event.RevokedAt,
+		RenewalStatus: event.RenewalStatus, RevocationReasonCode: event.RevocationReasonCode,
+	})
+	printAgentV1Info(&event.Agent)
+	printV2Attestations(&event.Attestations)
+	printSignatureInfo(v2.Producer.KeyID, v2.Producer.Signature)
+}
+
+// eventHeader is the event summary shared by the V1 and V2 payload layouts.
+type eventHeader struct {
+	ANSID, ANSName, EventType, RAID string
+	Timestamp, IssuedAt             time.Time
+	ExpiresAt, RevokedAt            *time.Time
+	RenewalStatus                   *string
+	RevocationReasonCode            *models.RevocationReason
+}
+
+func printEventHeader(schema, logID string, h eventHeader) {
+	fmt.Fprintf(os.Stdout, "  Schema:          %s\n", schema)
+	fmt.Fprintf(os.Stdout, "  Log ID:          %s\n", logID)
+	fmt.Fprintf(os.Stdout, "  ANS ID:          %s\n", h.ANSID)
+	fmt.Fprintf(os.Stdout, "  ANS Name:        %s\n", h.ANSName)
+	fmt.Fprintf(os.Stdout, "  Event Type:      %s\n", h.EventType)
+	fmt.Fprintf(os.Stdout, "  RA ID:           %s\n", h.RAID)
+	fmt.Fprintf(os.Stdout, "  Timestamp:       %s\n", h.Timestamp.Format("2006-01-02 15:04:05 MST"))
+	fmt.Fprintf(os.Stdout, "  Issued At:       %s\n", h.IssuedAt.Format("2006-01-02 15:04:05 MST"))
+
+	if h.ExpiresAt != nil {
+		fmt.Fprintf(os.Stdout, "  Expires At:      %s\n", h.ExpiresAt.Format("2006-01-02 15:04:05 MST"))
+	}
+	if h.RevokedAt != nil {
+		fmt.Fprintf(os.Stdout, "  Revoked At:      %s\n", h.RevokedAt.Format("2006-01-02 15:04:05 MST"))
+	}
+	if h.RenewalStatus != nil {
+		fmt.Fprintf(os.Stdout, "  Renewal Status:  %s\n", *h.RenewalStatus)
+	}
+	if h.RevocationReasonCode != nil {
+		fmt.Fprintf(os.Stdout, "  Revocation Code: %s\n", *h.RevocationReasonCode)
+	}
+}
+
+func printSignatureInfo(keyID, signature string) {
 	fmt.Fprintln(os.Stdout, "\n  Signature Info:")
-	fmt.Fprintf(os.Stdout, "    Key ID:        %s\n", v1.Producer.KeyID)
-	fmt.Fprintf(os.Stdout, "    Signature:     %s\n", truncateHash(v1.Producer.Signature))
+	fmt.Fprintf(os.Stdout, "    Key ID:        %s\n", keyID)
+	fmt.Fprintf(os.Stdout, "    Signature:     %s\n", truncateHash(signature))
+}
+
+func printAgentV1Info(agent *models.AgentV1) {
+	fmt.Fprintln(os.Stdout, "\n  Agent Info:")
+	fmt.Fprintf(os.Stdout, "    Host:          %s\n", agent.Host)
+	fmt.Fprintf(os.Stdout, "    Version:       %s\n", agent.Version)
+	if agent.Name != nil {
+		fmt.Fprintf(os.Stdout, "    Name:          %s\n", *agent.Name)
+	}
+	if agent.ProviderID != nil {
+		fmt.Fprintf(os.Stdout, "    Provider ID:   %s\n", *agent.ProviderID)
+	}
+}
+
+func printV2Attestations(att *models.AttestationsV2) {
+	fmt.Fprintln(os.Stdout, "\n🔐 Attestations:")
+
+	if att.DomainValidation != "" {
+		fmt.Fprintf(os.Stdout, "  Domain Validation: %s\n", att.DomainValidation)
+	}
+	printAttestedCerts("Identity Certs", att.IdentityCerts)
+	printAttestedCerts("Server Certs", att.ServerCerts)
+
+	if len(att.DNSRecordsProvisioned) > 0 {
+		fmt.Fprintln(os.Stdout, "  DNS Records Provisioned:")
+		for _, rec := range att.DNSRecordsProvisioned {
+			fmt.Fprintf(os.Stdout, "    %s %s: %s\n", rec.Type, rec.Name, rec.Data)
+		}
+	}
+	printMetadataHashes(att.MetadataHashes)
+}
+
+func printAttestedCerts(label string, certs []models.AttestedCert) {
+	if len(certs) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stdout, "  %s: %d\n", label, len(certs))
+	for _, cert := range certs {
+		fmt.Fprintf(os.Stdout, "    %s (%s)\n", cert.Fingerprint, cert.Type)
+		if cert.NotAfter != nil {
+			fmt.Fprintf(os.Stdout, "      Not After: %s\n", cert.NotAfter.Format("2006-01-02 15:04:05 MST"))
+		}
+	}
+}
+
+func printMetadataHashes(hashes map[string]string) {
+	if len(hashes) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stdout, "  Metadata Hashes:")
+	keys := make([]string, 0, len(hashes))
+	for k := range hashes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if i >= maxMetadataHashesDisplay {
+			fmt.Fprintf(os.Stdout, "    ... and %d more\n", len(keys)-maxMetadataHashesDisplay)
+			break
+		}
+		fmt.Fprintf(os.Stdout, "    %s: %s\n", k, hashes[k])
+	}
 }
 
 func printV0Payload(v0 *models.TransparencyLogV0) {
@@ -352,21 +435,7 @@ func printV1Attestations(att *models.AttestationsV1) {
 		}
 	}
 
-	if len(att.MetadataHashes) > 0 {
-		fmt.Fprintln(os.Stdout, "  Metadata Hashes:")
-		keys := make([]string, 0, len(att.MetadataHashes))
-		for k := range att.MetadataHashes {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for i, k := range keys {
-			if i >= maxMetadataHashesDisplay {
-				fmt.Fprintf(os.Stdout, "    ... and %d more\n", len(keys)-maxMetadataHashesDisplay)
-				break
-			}
-			fmt.Fprintf(os.Stdout, "    %s: %s\n", k, att.MetadataHashes[k])
-		}
-	}
+	printMetadataHashes(att.MetadataHashes)
 
 	if len(att.ValidIdentityCerts) > 0 {
 		fmt.Fprintf(os.Stdout, "  Valid Identity Certs: %d\n", len(att.ValidIdentityCerts))
@@ -555,6 +624,11 @@ func printAuditEntry(index int, entry *models.TransparencyLog) {
 
 func printAuditEntryPayload(entry *models.TransparencyLog) {
 	switch {
+	case entry.IsV2() && entry.GetV2Payload() != nil:
+		v2 := entry.GetV2Payload()
+		eventType := string(v2.Producer.Event.EventType)
+		timestamp := v2.Producer.Event.Timestamp.Format("2006-01-02 15:04:05")
+		fmt.Fprintf(os.Stdout, "V2: %s - %s", eventType, timestamp)
 	case entry.IsV1() && entry.GetV1Payload() != nil:
 		v1 := entry.GetV1Payload()
 		eventType := string(v1.Producer.Event.EventType)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/agentnameservice/ans-sdk-go/models"
 	"github.com/agentnameservice/ans-sdk-go/verify/scitt"
@@ -255,10 +256,10 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare server certificate fingerprint against any valid cert in the badge.
-	candidates := badge.ServerCertFingerprints()
+	// Compare the server certificate fingerprint against every unexpired cert the badge attests.
+	candidates := currentFingerprints(badge.Payload.Producer.Event.Attestations.ServerCerts, time.Now())
 	if !matchesAny(cert.Fingerprint, candidates) {
-		return NewFingerprintMismatchOutcome(badge, firstOrEmpty(candidates), cert.Fingerprint.String())
+		return NewFingerprintMismatchOutcome(badge, strings.Join(candidates, ", "), cert.Fingerprint.String())
 	}
 
 	// Compare hostname
@@ -269,7 +270,7 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewHostnameMismatchOutcome(badge, fqdn.String(), badgeHost)
 	}
 
-	if certFqdn != nil && !wildcardHostMatch(*certFqdn, badgeHost) {
+	if certFqdn != nil && !strings.EqualFold(*certFqdn, badgeHost) {
 		return NewHostnameMismatchOutcome(badge, badgeHost, *certFqdn)
 	}
 
@@ -278,27 +279,6 @@ func (v *ServerVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		outcome.Warnings = append(outcome.Warnings, "badge status is DEPRECATED")
 	}
 	return outcome
-}
-
-// wildcardHostMatch reports whether certSAN covers host using RFC 6125 single-label
-// wildcard rules. An exact case-insensitive match always passes. A wildcard of the
-// form "*.suffix" matches any single-label subdomain of suffix (e.g.
-// "*.example.com" matches "foo.example.com" but not "foo.bar.example.com" or
-// "example.com").
-func wildcardHostMatch(certSAN, host string) bool {
-	if strings.EqualFold(certSAN, host) {
-		return true
-	}
-	if !strings.HasPrefix(certSAN, "*.") {
-		return false
-	}
-	suffix := strings.ToLower(certSAN[1:]) // ".example.com"
-	hostLower := strings.ToLower(host)
-	if !strings.HasSuffix(hostLower, suffix) {
-		return false
-	}
-	prefix := hostLower[:len(hostLower)-len(suffix)]
-	return len(prefix) > 0 && !strings.Contains(prefix, ".")
 }
 
 // ClientVerifier verifies mTLS client certificates against the ANS transparency log.
@@ -454,10 +434,10 @@ func (v *ClientVerifier) verifyWithBadge(badge *models.Badge, cert *CertIdentity
 		return NewInvalidStatusOutcome(badge, badge.Status)
 	}
 
-	// Compare identity certificate fingerprint against any valid cert in the badge.
-	candidates := badge.IdentityCertFingerprints()
+	// Compare the identity certificate fingerprint against every unexpired cert the badge attests.
+	candidates := currentFingerprints(badge.Payload.Producer.Event.Attestations.IdentityCerts, time.Now())
 	if !matchesAny(cert.Fingerprint, candidates) {
-		return NewFingerprintMismatchOutcome(badge, firstOrEmpty(candidates), cert.Fingerprint.String())
+		return NewFingerprintMismatchOutcome(badge, strings.Join(candidates, ", "), cert.Fingerprint.String())
 	}
 
 	// Compare hostname
@@ -535,9 +515,21 @@ func (v *AnsVerifier) Prefetch(ctx context.Context, fqdnStr string) (*models.Bad
 	return v.server.Prefetch(ctx, fqdn)
 }
 
+// currentFingerprints returns the fingerprints of the certs still valid at now.
+// A cert the log attests with a past notAfter is excluded even while the TL
+// still lists it, so a rotated-out key cannot pass the badge check.
+func currentFingerprints(certs []models.AttestedCert, now time.Time) []string {
+	out := make([]string, 0, len(certs))
+	for _, c := range certs {
+		if c.ValidAt(now) {
+			out = append(out, c.Fingerprint)
+		}
+	}
+	return out
+}
+
 // matchesAny reports whether fp equals any candidate. CertFingerprint.Matches
-// (rather than Badge.MatchesServerCert) is used so each candidate is hex-decoded
-// and length-checked instead of compared as text.
+// hex-decodes and length-checks each candidate instead of comparing text.
 func matchesAny(fp CertFingerprint, candidates []string) bool {
 	for _, candidate := range candidates {
 		if fp.Matches(candidate) {
@@ -545,15 +537,6 @@ func matchesAny(fp CertFingerprint, candidates []string) bool {
 		}
 	}
 	return false
-}
-
-// firstOrEmpty returns the first element of s, or "" if s is empty, so a
-// fingerprint-mismatch outcome's "expected" field names a badge fingerprint.
-func firstOrEmpty(s []string) string {
-	if len(s) == 0 {
-		return ""
-	}
-	return s[0]
 }
 
 // configLogger returns the configured logger or the default.

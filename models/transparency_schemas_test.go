@@ -74,9 +74,7 @@ func TestAttestationsV2ParsesArrayDnsRecords(t *testing.T) {
 
 func TestAttestationsV2RoundTrips(t *testing.T) {
 	in := AttestationsV2{
-		ServerCerts: []CertificateV1Extended{
-			{CertificateV1: CertificateV1{Fingerprint: "fp-a", Type: CertTypeX509DVServer}},
-		},
+		ServerCerts:           []AttestedCert{{Fingerprint: "fp-a", Type: string(CertTypeX509DVServer)}},
 		DNSRecordsProvisioned: []DNSRecordAttestation{{Name: "_ans.x", Data: "d", Type: "TXT"}},
 	}
 	data, err := json.Marshal(in)

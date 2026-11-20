@@ -32,14 +32,8 @@ func createTestBadge(host, version, serverFP, identityFP string) *models.Badge {
 					},
 					Attestations: models.Attestations{
 						DomainValidation: "ACME-DNS-01",
-						ServerCert: &models.CertAttestationV1{
-							Fingerprint: serverFP,
-							Type:        "X509-DV-SERVER",
-						},
-						IdentityCert: &models.CertAttestationV1{
-							Fingerprint: identityFP,
-							Type:        "X509-OV-CLIENT",
-						},
+						ServerCerts:      []models.AttestedCert{{Fingerprint: serverFP, Type: "X509-DV-SERVER"}},
+						IdentityCerts:    []models.AttestedCert{{Fingerprint: identityFP, Type: "X509-OV-CLIENT"}},
 					},
 					IssuedAt:  time.Now(),
 					Timestamp: time.Now(),
@@ -279,67 +273,6 @@ func TestServerVerifier_ExpiredStatus(t *testing.T) {
 	}
 	if outcome.Status != models.BadgeStatusExpired {
 		t.Errorf("Verify() Status = %v, want Expired", outcome.Status)
-	}
-}
-
-func TestServerVerifier_WildcardCertVerified(t *testing.T) {
-	tests := []struct {
-		name        string
-		wildcardSAN string
-		badgeHost   string
-		wantType    OutcomeType
-	}{
-		{
-			name:        "single-label wildcard covers badge host",
-			wildcardSAN: "*.example.com",
-			badgeHost:   "agent.example.com",
-			wantType:    OutcomeVerified,
-		},
-		{
-			// multi-level wildcard: *.example.com does NOT cover foo.bar.example.com
-			name:        "wildcard does not cover multi-level subdomain",
-			wildcardSAN: "*.example.com",
-			badgeHost:   "foo.bar.example.com",
-			wantType:    OutcomeHostnameMismatch,
-		},
-		{
-			// wildcard does not cover the bare domain itself
-			name:        "wildcard does not cover apex",
-			wildcardSAN: "*.example.com",
-			badgeHost:   "example.com",
-			wantType:    OutcomeHostnameMismatch,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fingerprint := "SHA256:e7b64d16f42055d6faf382a43dc35b98be76aba0db145a904b590a034b33b904"
-			badge := createTestBadge(tt.badgeHost, "v1.0.0", fingerprint, "SHA256:aaa")
-			badgeURL := "https://tlog.example.com/v1/agents/test-id"
-
-			dnsResolver := NewMockDNSResolver().
-				WithRecords(tt.badgeHost, []AnsBadgeRecord{{
-					FormatVersion: "ans-badge1",
-					Version:       ptr(models.NewVersion(1, 0, 0)),
-					URL:           badgeURL,
-				}})
-			tlogClient := NewMockTransparencyLogClient().WithBadge(badgeURL, badge)
-
-			verifier := NewServerVerifier(
-				WithDNSResolver(dnsResolver),
-				WithTlogClient(tlogClient),
-				WithoutURLValidation(),
-			)
-
-			fp, _ := ParseCertFingerprint(fingerprint)
-			cert := NewCertIdentity(nil, []string{tt.wildcardSAN}, nil, fp)
-			fqdn, _ := models.NewFqdn(tt.badgeHost)
-
-			outcome := verifier.Verify(context.Background(), fqdn, cert)
-			if outcome.Type != tt.wantType {
-				t.Errorf("Verify() type = %v, want %v", outcome.Type, tt.wantType)
-			}
-		})
 	}
 }
 
