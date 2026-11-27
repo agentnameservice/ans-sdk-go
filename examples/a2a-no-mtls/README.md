@@ -288,7 +288,7 @@ for another origin presented with a spoofed `Host`.
 | Path | Role |
 |------|------|
 | [`../../pop/`](../../pop/) | the library: DPoP sign/verify, the three-proof `VerifyCaller`, the HTTP `Middleware` |
-| [`demokit/`](demokit/) | mints the demo credentials an ANS RA/TL would normally provision |
+| [`../internal/demokit/`](../internal/demokit/) | mints the demo credentials an ANS RA/TL would normally provision |
 | [`server/`](server/) | the callee — an HTTP server fronted by `pop.Middleware` |
 | [`client/`](client/) | the caller — loads its bundle, attaches a proof, calls |
 | [`main.go`](main.go) | the single-process version of the same demo |

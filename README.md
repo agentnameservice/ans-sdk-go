@@ -5,6 +5,24 @@ A command-line tool and Go SDK for the Agent Name Service (ANS) Registry Authori
 - **`ans-cli`** ([cmd/ans-cli](cmd/ans-cli)) — the fastest way to register, verify, and manage agents from a terminal. Most users start here.
 - **Go SDK** (`github.com/agentnameservice/ans-sdk-go/ans`) — the library the CLI is built on. Embed it in Go services that need to register agents programmatically, verify agent badges, or query the Transparency Log.
 
+## Verify, then connect
+
+Two agents over ordinary HTTPS, no mutual TLS. Before the first real request, the caller checks the
+callee's SCITT receipt and status token against the transparency-log key and binds them to the TLS
+certificate it just shook hands with. A callee whose status token says REVOKED, or whose status token
+has expired, is refused before anything is sent. The callee authenticates every request with a DPoP
+proof plus the same two artifacts, and refuses a replayed proof, a forged identity certificate, and a
+revoked caller.
+
+![verify-then-connect demo](examples/verify-then-connect/demo.gif)
+
+```bash
+go run ./examples/verify-then-connect
+```
+
+The walkthrough is in [examples/verify-then-connect](examples/verify-then-connect). For the two-process
+version over a real socket, with OAuth 2.0 token binding, see [examples/a2a-no-mtls](examples/a2a-no-mtls).
+
 ## API Specification Reference
 
 Both the CLI and the SDK target the published REST API:
@@ -609,6 +627,9 @@ ans-sdk-go/
 ├── verify/                    # Certificate verification
 │   └── ...                   # Verification utilities
 ├── examples/                  # Usage examples
+│   ├── verify-then-connect/  # README demo: SCITT + DPoP verification, both directions
+│   ├── a2a-no-mtls/          # Agent-to-agent auth without mTLS, two processes
+│   ├── internal/demokit/     # Demo transparency log and credential minting
 │   └── byoc/                 # BYOC registration example
 └── cmd/
     └── ans-cli/              # CLI application
