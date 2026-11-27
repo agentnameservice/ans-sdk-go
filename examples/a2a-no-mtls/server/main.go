@@ -17,7 +17,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/agentnameservice/ans-sdk-go/examples/a2a-no-mtls/demokit"
+	"github.com/agentnameservice/ans-sdk-go/examples/internal/demokit"
 	"github.com/agentnameservice/ans-sdk-go/pop"
 )
 
